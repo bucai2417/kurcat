@@ -950,9 +950,9 @@ export class DaFeiYuRenderer {
         const cx = layout.mouseCenterX ?? layout.mouseBtnX;
         const cy = layout.mouseCenterY ?? layout.mouseBtnY;
         const buttonsBelow = layout.mouseBtnY > cy;
-        // Palm side for the cat-facing deck; a bit further out when the mouse is drawn
-        // above her hand, so the mitten still peeks out below the shell.
-        const handY = cy + (buttonsBelow ? -11 : 18) + pressOff;
+        // She has no separate overlay layer, so her hand must sit clearly ON the palm
+        // side of the shell (never below it) — the shell is drawn after her hands.
+        const handY = cy + (buttonsBelow ? -13 : 15) + pressOff;
         if (layout.mouseBtnX < g.charCenterX) {
           lTargetX = cx;
           lTargetY = handY;

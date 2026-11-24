@@ -417,9 +417,45 @@ fn get_game_active() -> bool {
     game_detect::is_game_active()
 }
 
+/// Extra width reserved to the LEFT of the pet while the menu is open, so the
+/// menu never overlaps the model.
+pub const MENU_RESERVE_W: f64 = 268.0;
+
+/// Grows the window to the left when the menu opens (and shrinks back on close).
+/// The pet stays anchored bottom-right, so only its left margin changes.
 #[tauri::command]
-fn set_menu_open(state: State<'_, AppState>, open: bool) {
+fn set_menu_open(app: AppHandle, state: State<'_, AppState>, open: bool) {
     state.menu_open.store(open, Ordering::Relaxed);
+
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let (layout, scale, kb_scale) = {
+        let s = state.settings.lock().unwrap();
+        (s.keyboard_layout.clone(), s.scale, s.active_keyboard_scale())
+    };
+    let (_bw, _bh) = base_dimensions(&layout, kb_scale);
+    let (base_w, base_h) = window_dimensions(&layout, scale, kb_scale);
+
+    let sf = win.scale_factor().unwrap_or(1.0);
+    let old_pos = win.outer_position().ok();
+    let old_size = win.outer_size().ok();
+
+    let target_w = if open {
+        (base_w + MENU_RESERVE_W).max(MIN_WINDOW_WIDTH)
+    } else {
+        base_w
+    };
+    let _ = win.set_size(Size::Logical(LogicalSize::new(target_w, base_h)));
+
+    // Keep the bottom-right corner pinned: shift left by the width we added.
+    if let (Some(pos), Some(sz)) = (old_pos, old_size) {
+        let new_pw = (target_w * sf).round() as i32;
+        let new_x = pos.x + sz.width as i32 - new_pw;
+        if new_x != pos.x {
+            let _ = win.set_position(PhysicalPosition::new(new_x, pos.y));
+        }
+    }
 }
 
 #[tauri::command]
@@ -1197,9 +1233,20 @@ fn start_hit_test_loop(
         let mut fg_above_attempts: u8 = 0;
         #[cfg(windows)]
         let mut last_topmost_reassert = Instant::now() - Duration::from_secs(5);
+        // Cached window rect: outer_position/outer_size are cross-process calls, so
+        // refresh them at most every ~200ms instead of on every 25ms tick.
+        let mut cached_rect: Option<(i32, i32, f64, f64)> = None;
+        let mut rect_at = Instant::now() - Duration::from_secs(5);
+        // Fast path: while the cursor is far from the window and nothing changed,
+        // we only need GetCursorPos, which is a cheap user-space call.
+        let mut tick: u64 = 0;
+        // Mirrors the settings we need each tick, refreshed on the slow cadence.
+        let mut cached_cfg: (bool, bool, bool, f64, f64, String) =
+            (false, true, false, 1.0, 1.0, "65".to_string());
 
         loop {
             std::thread::sleep(Duration::from_millis(25));
+            tick = tick.wrapping_add(1);
 
             if paused_guard.load(Ordering::Relaxed) {
                 continue;
@@ -1225,39 +1272,62 @@ fn start_hit_test_loop(
                 continue;
             };
 
-            let (win_x, win_y, w, h) = if is_win7_ulw {
-                #[cfg(windows)]
-                {
-                    let Some((ux, uy, uw, uh)) = win7_layered::get_rect() else {
-                        continue;
-                    };
-                    (ux, uy, uw.max(1) as f64, uh.max(1) as f64)
+            // Refresh the cached rect every ~200ms (or on demand) instead of every tick.
+            let need_rect = cached_rect.is_none()
+                || rect_at.elapsed() >= Duration::from_millis(200)
+                || dragging.load(Ordering::Relaxed)
+                || menu_open.load(Ordering::Relaxed);
+            if need_rect {
+                let refreshed = if is_win7_ulw {
+                    #[cfg(windows)]
+                    {
+                        win7_layered::get_rect()
+                            .map(|(ux, uy, uw, uh)| (ux, uy, uw.max(1) as f64, uh.max(1) as f64))
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        None
+                    }
+                } else {
+                    match (win.outer_position(), win.outer_size()) {
+                        (Ok(pos), Ok(size)) => Some((
+                            pos.x,
+                            pos.y,
+                            size.width.max(1) as f64,
+                            size.height.max(1) as f64,
+                        )),
+                        _ => None,
+                    }
+                };
+                match refreshed {
+                    Some(r) => {
+                        cached_rect = Some(r);
+                        rect_at = Instant::now();
+                    }
+                    None => continue,
                 }
-                #[cfg(not(windows))]
-                unreachable!()
-            } else {
-                let Ok(pos) = win.outer_position() else {
-                    continue;
-                };
-                let Ok(size) = win.outer_size() else {
-                    continue;
-                };
-                (pos.x, pos.y, size.width.max(1) as f64, size.height.max(1) as f64)
+            }
+            let Some((win_x, win_y, w, h)) = cached_rect else {
+                continue;
             };
             let rx = (cx - win_x) as f64 / w;
             let ry = (cy - win_y) as f64 / h;
             let inside = rx >= 0.0 && rx <= 1.0 && ry >= 0.0 && ry <= 1.0;
-            let (locked, always_on_top, is_108, cur_scale, cur_kb_scale, layout_str) = {
+            // Settings only change on user action; re-read them on the same 200ms
+            // cadence as the rect instead of locking the mutex on every tick.
+            let need_settings = need_rect || tick % 8 == 0;
+            if need_settings {
                 let s = settings.lock().unwrap();
-                (
+                cached_cfg = (
                     s.click_through_locked,
                     s.always_on_top,
                     s.keyboard_layout == "108",
                     s.scale.clamp(0.20, 1.50),
                     s.active_keyboard_scale(),
                     s.keyboard_layout.clone(),
-                )
-            };
+                );
+            }
+            let (locked, always_on_top, is_108, cur_scale, cur_kb_scale, layout_str) = cached_cfg.clone();
 
             let is_menu = menu_open.load(Ordering::Relaxed);
             let is_drag = dragging.load(Ordering::Relaxed);

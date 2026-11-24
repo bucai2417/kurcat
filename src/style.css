@@ -90,6 +90,92 @@ html.win7-ulw-mode .update-toast {
   z-index: 9999;
 }
 
+.context-menu.tabbed {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.menu-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 4px;
+}
+
+.menu-close-btn {
+  border: none;
+  background: transparent;
+  color: #9aa4b2;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.menu-close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.menu-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.menu-tab-btn {
+  border: none;
+  background: transparent;
+  color: #a9b2bf;
+  font-size: 11.5px;
+  font-family: inherit;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.menu-tab-btn:hover {
+  color: #e5e7eb;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.menu-tab-btn.active {
+  background: #d2f244;
+  color: #14161a;
+  font-weight: 700;
+}
+
+.tab-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 96px);
+  padding-right: 2px;
+}
+
+.tab-panel {
+  display: none;
+  flex-direction: column;
+}
+
+.tab-panel.active {
+  display: flex;
+}
+
+.menu-footer-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
 .context-menu::-webkit-scrollbar {
   width: 4px;
 }

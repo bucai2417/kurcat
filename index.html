@@ -16,8 +16,17 @@
       <button class="update-toast-close" id="btn-toast-close" type="button" title="稍后提醒">×</button>
     </div>
 
-    <div id="context-menu" class="context-menu hidden">
-      <div class="menu-header" id="menu-header">🐈‍⬛ KuroCat 小黑猫</div>
+    <div id="context-menu" class="context-menu hidden tabbed">
+      <div class="menu-header-row">
+        <div class="menu-header" id="menu-header">🐈‍⬛ KuroCat 小黑猫</div>
+        <button class="menu-close-btn" id="btn-close-menu" type="button" title="关闭 (Esc)">×</button>
+      </div>
+      <div class="menu-tabs" role="tablist">
+        <button class="menu-tab-btn active" data-tab="appearance" type="button" role="tab">🐱 外观与互动</button>
+        <button class="menu-tab-btn" data-tab="system" type="button" role="tab">⚙️ 键盘·系统</button>
+      </div>
+      <div class="tab-body">
+      <div class="tab-panel active" data-tab-panel="appearance">
       <div class="menu-scale-row">
         <span class="menu-scale-label">角色外观（支持 MCP 定制）</span>
         <div class="breed-pills" id="breed-pills">
@@ -98,6 +107,8 @@
           <span class="menu-hint" id="obs-url-hint">未开启</span>
         </button>
       </div>
+      </div><!-- /appearance -->
+      <div class="tab-panel" data-tab-panel="system">
       <div class="menu-scale-row">
         <span class="menu-scale-label">键盘配列与方向</span>
         <div class="kb-pills">
@@ -280,7 +291,10 @@
           </div>
         </div>
       </div>
+      </div><!-- /system -->
+      </div><!-- /tab-body -->
       <div class="menu-sep"></div>
+      <div class="menu-footer-bar">
       <button class="menu-item" data-action="desktop-shortcut" id="btn-desktop-shortcut">
         <span>创建桌面图标</span>
         <span class="menu-hint" id="shortcut-hint">KuroCat</span>
@@ -295,6 +309,7 @@
       <button class="menu-item danger" data-action="quit">
         <span>退出 KuroCat</span>
       </button>
+      </div><!-- /menu-footer-bar -->
     </div>
 
     <script type="module" src="/src/main.ts"></script>

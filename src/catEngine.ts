@@ -3784,9 +3784,9 @@ export class KuroCatEngine {
       (this.catBreed === 'ragdoll' ? 'rgba(93, 81, 72, 0.72)' : 'rgba(120, 124, 132, 0.34)');
 
     const press = Math.max(this.mouseLeftPress, this.mouseRightPress, this.mouseMiddlePress);
-    // Viewer-facing grips the palm at the bottom, so nudge the paw up so it rests
-    // ON the shell instead of hanging below it.
-    const upShift = this.mouseFacing === 'viewer' ? -4.5 : 0;
+    // The paw must sit ON the shell, not hang under it. Viewer-facing grips the palm
+    // at the bottom, so lift it clear over the shell's upper rim (same read as cat-facing).
+    const upShift = this.mouseFacing === 'viewer' ? -30 : 0;
     const px = paw.pos.x;
     const py = paw.pos.y + press * 1.8 + upShift;
     const r = 11.2;

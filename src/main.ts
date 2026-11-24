@@ -850,16 +850,72 @@ function closeContextMenu(): void {
   }
 }
 
+/**
+ * Places the menu beside the pet rather than on top of it.
+ *
+ * The pet is anchored to the bottom-right of the window, so there is usually room
+ * to its left; if not, we fall back to the right edge and finally above it. The
+ * clicked point is only used as a tie-breaker.
+ */
+function repositionMenu(): void {
+  if (menuEl.classList.contains('hidden')) return;
+  const rect = menuEl.getBoundingClientRect();
+  const pad = 8;
+  const gap = 10;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  // Pet occupies the bottom-right block of the window (see syncLayoutPositions).
+  const { w: logicalW, h: logicalH } = engine.getLogicalSize();
+  const scale = settings.scale ?? 1;
+  const petW = Math.min(vw, logicalW * scale);
+  const petH = Math.min(vh, logicalH * scale);
+  const petLeft = vw - petW;
+  const petTop = vh - petH;
+
+  const clampX = (x: number) => Math.max(pad, Math.min(x, Math.max(pad, vw - rect.width - pad)));
+  const clampY = (y: number) => Math.max(pad, Math.min(y, Math.max(pad, vh - rect.height - pad)));
+
+  let left: number;
+  const leftOfPet = petLeft - rect.width - gap;
+  const rightOfPet = petLeft + petW + gap;
+
+  // Rust widens the window to the left when the menu opens, so `leftOfPet` is
+  // normally positive and the menu lands in that reserved margin.
+  if (leftOfPet >= pad) {
+    left = leftOfPet;
+  } else if (rightOfPet + rect.width <= vw - pad) {
+    left = rightOfPet;
+  } else {
+    // No horizontal room: sit above the pet, clamped on-screen.
+    const above = petTop - rect.height - gap;
+    left = clampX(petLeft + petW - rect.width);
+    menuEl.style.left = `${left}px`;
+    menuEl.style.top = `${clampY(above >= pad ? above : vh - rect.height - pad)}px`;
+    return;
+  }
+
+  // Vertically align the menu's bottom with the pet's bottom so it reads as attached.
+  const top = clampY(vh - rect.height - pad);
+  menuEl.style.left = `${clampX(left)}px`;
+  menuEl.style.top = `${top}px`;
+}
+
 function openContextMenu(clientX: number, clientY: number): void {
   syncMenuUI();
   menuEl.classList.remove('hidden');
   void invoke('set_menu_open', { open: true });
 
+  // Measure after un-hiding, then place beside the pet.
   const rect = menuEl.getBoundingClientRect();
-  const maxX = Math.max(8, window.innerWidth - rect.width - 8);
-  const maxY = Math.max(8, window.innerHeight - rect.height - 8);
-  menuEl.style.left = `${Math.max(8, Math.min(clientX, maxX))}px`;
-  menuEl.style.top = `${Math.max(8, Math.min(clientY, maxY))}px`;
+  if (rect.width < 40) {
+    // Layout not settled yet (first open): place off the click, refine next frame.
+    menuEl.style.left = `${Math.max(8, clientX)}px`;
+    menuEl.style.top = `${Math.max(8, clientY)}px`;
+    requestAnimationFrame(repositionMenu);
+  } else {
+    repositionMenu();
+  }
   syncWin7OverlayFn?.(true);
 }
 
@@ -1287,6 +1343,28 @@ async function bootstrap(): Promise<void> {
   }
 
   // ---- Keycap designer ----
+  // Tab switching (menu stays a single scroll-free panel per tab).
+  document.querySelectorAll<HTMLButtonElement>('.menu-tab-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const tab = btn.dataset.tab ?? 'appearance';
+      document.querySelectorAll('.menu-tab-btn').forEach((b) => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+      });
+      document.querySelectorAll<HTMLElement>('[data-tab-panel]').forEach((p) => {
+        p.classList.toggle('active', p.dataset.tabPanel === tab);
+      });
+      // Re-anchor so the shorter panel never overhangs the pet.
+      repositionMenu();
+    });
+  });
+
+  document.getElementById('btn-close-menu')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeContextMenu();
+  });
+
   document.getElementById('btn-copy-obs-url')?.addEventListener('click', (e) => {
     e.stopPropagation();
     void copyObsUrl();
