@@ -371,8 +371,88 @@ pub struct AppSettings {
     pub mood_dizzy_request: f64,
     #[serde(default)]
     pub mood_seq: u64,
+    #[serde(default = "default_render_mode")]
+    pub render_mode: String,
+    #[serde(default = "default_collar_color")]
+    pub collar_color: String,
+    #[serde(default = "default_headphone_mode")]
+    pub headphone_mode: String,
+    #[serde(default = "default_tail_key_mode")]
+    pub tail_key_mode: String,
+    #[serde(default = "default_tail_key_ids")]
+    pub tail_key_ids: Vec<String>,
+    #[serde(default)]
+    pub obs_enabled: bool,
+    #[serde(default = "default_obs_port")]
+    pub obs_port: u16,
+    #[serde(default)]
+    pub obs_hide_pet: bool,
     #[serde(default = "default_privacy_password_guard")]
     pub privacy_password_guard: bool,
+}
+
+fn default_render_mode() -> String {
+    "2d".to_string()
+}
+
+pub fn normalize_render_mode(raw: &str) -> String {
+    if raw.trim() == "3d" {
+        "3d".to_string()
+    } else {
+        "2d".to_string()
+    }
+}
+
+fn default_collar_color() -> String {
+    "none".to_string()
+}
+
+pub fn normalize_collar_color(raw: &str) -> String {
+    match raw.trim() {
+        "red" => "red".to_string(),
+        "blue" => "blue".to_string(),
+        "pink" => "pink".to_string(),
+        "green" => "green".to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+fn default_headphone_mode() -> String {
+    "off".to_string()
+}
+
+pub fn normalize_headphone_mode(raw: &str) -> String {
+    match raw.trim() {
+        "auto" => "auto".to_string(),
+        "on" => "on".to_string(),
+        _ => "off".to_string(),
+    }
+}
+
+fn default_tail_key_mode() -> String {
+    "smart".to_string()
+}
+
+pub fn normalize_tail_key_mode(raw: &str) -> String {
+    match raw.trim() {
+        "custom" => "custom".to_string(),
+        "edge" => "edge".to_string(),
+        "off" => "off".to_string(),
+        _ => "smart".to_string(),
+    }
+}
+
+fn default_tail_key_ids() -> Vec<String> {
+    vec![
+        "enter".to_string(),
+        "space".to_string(),
+        "bs".to_string(),
+        "esc".to_string(),
+    ]
+}
+
+fn default_obs_port() -> u16 {
+    27421
 }
 
 impl AppSettings {
@@ -421,6 +501,14 @@ impl Default for AppSettings {
             mood_annoyance_request: default_mood_request(),
             mood_dizzy_request: default_mood_request(),
             mood_seq: 0,
+            render_mode: default_render_mode(),
+            collar_color: default_collar_color(),
+            headphone_mode: default_headphone_mode(),
+            tail_key_mode: default_tail_key_mode(),
+            tail_key_ids: default_tail_key_ids(),
+            obs_enabled: false,
+            obs_port: default_obs_port(),
+            obs_hide_pet: false,
             privacy_password_guard: default_privacy_password_guard(),
         }
     }

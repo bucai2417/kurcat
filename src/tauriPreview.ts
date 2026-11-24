@@ -67,6 +67,14 @@ const DEFAULT_SETTINGS = {
   moodAnnoyanceRequest: -1,
   moodDizzyRequest: -1,
   moodSeq: 0,
+  renderMode: '2d',
+  collarColor: 'none',
+  headphoneMode: 'off',
+  tailKeyMode: 'smart',
+  tailKeyIds: ['enter', 'space', 'bs', 'esc'],
+  obsEnabled: false,
+  obsPort: 27421,
+  obsHidePet: false,
   privacyPasswordGuard: true,
 };
 

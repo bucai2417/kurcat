@@ -22,9 +22,10 @@ const WIN7_OFFSCREEN_PARK_POS: i32 = -16000;
 use cats::{all_cats, cat_exists, cats_path, sanitize_cat_id, CatSkinConfig};
 use desk_skins::{load_custom_desk_skins, DeskSkinConfig};
 use config::{
-    config_path, load_settings, normalize_keyboard_layout, normalize_keyboard_orientation,
-    normalize_keyboard_scale, normalize_keycap_overrides, normalize_mouse_orientation,
-    save_settings, set_windows_autostart, AppSettings,
+    config_path, load_settings, normalize_collar_color, normalize_headphone_mode,
+    normalize_keyboard_layout, normalize_keyboard_orientation, normalize_keyboard_scale,
+    normalize_keycap_overrides, normalize_mouse_orientation, normalize_render_mode,
+    normalize_tail_key_mode, save_settings, set_windows_autostart, AppSettings,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -320,6 +321,13 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
     patch.keyboard_light = patch.keyboard_light.normalized();
     patch.keycap_overrides = normalize_keycap_overrides(std::mem::take(&mut patch.keycap_overrides));
     patch.desk_skin_id = desk_skins::sanitize_skin_id(&patch.desk_skin_id);
+    patch.render_mode = normalize_render_mode(&patch.render_mode);
+    patch.collar_color = normalize_collar_color(&patch.collar_color);
+    patch.headphone_mode = normalize_headphone_mode(&patch.headphone_mode);
+    patch.tail_key_mode = normalize_tail_key_mode(&patch.tail_key_mode);
+    if patch.obs_port == 0 {
+        patch.obs_port = 27421;
+    }
     patch.prop_config = patch.prop_config.normalized();
 
     let (prev_autostart, prev_scale, prev_layout, prev_kb_scale) = {

@@ -7,7 +7,8 @@ import './style.css';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { KuroCatEngine, type KeyboardOrientation } from './catEngine';
+import { KuroCatEngine, type KeyboardOrientation, type TailKeyMode, DEFAULT_TAIL_KEY_IDS } from './catEngine';
+import type { CollarColorId, KuroCatEngine3D } from './catEngine3d';
 import { catAudio } from './audio';
 import { DEFAULT_BUILTIN_CATS, type CatSkinConfig } from './catSkins';
 import type { KeyboardLayoutId } from './keyboardLayout';
@@ -75,6 +76,14 @@ interface AppSettings {
   moodAnnoyanceRequest: number;
   moodDizzyRequest: number;
   moodSeq: number;
+  renderMode: '2d' | '3d';
+  collarColor: string;
+  headphoneMode: 'auto' | 'on' | 'off';
+  tailKeyMode: TailKeyMode;
+  tailKeyIds: string[];
+  obsEnabled: boolean;
+  obsPort: number;
+  obsHidePet: boolean;
   privacyPasswordGuard: boolean;
 }
 
@@ -153,8 +162,26 @@ let settings: AppSettings = {
   moodAnnoyanceRequest: -1,
   moodDizzyRequest: -1,
   moodSeq: 0,
+  renderMode: '2d',
+  collarColor: 'none',
+  headphoneMode: 'off',
+  tailKeyMode: 'smart',
+  tailKeyIds: [...DEFAULT_TAIL_KEY_IDS],
+  obsEnabled: false,
+  obsPort: 27421,
+  obsHidePet: false,
   privacyPasswordGuard: true,
 };
+
+let gameActive = false;
+let privacyActive = false;
+
+/** Headphones are a 3D-only cosmetic; "auto" wears them while a game is running. */
+function shouldWearHeadphonesNow(): boolean {
+  if (settings.headphoneMode === 'on') return true;
+  if (settings.headphoneMode === 'off') return false;
+  return gameActive;
+}
 
 let catList: CatSkinConfig[] = [...DEFAULT_BUILTIN_CATS];
 
@@ -169,6 +196,104 @@ const btnToastInstallEl = document.getElementById('btn-toast-install') as HTMLBu
 const btnToastOpenEl = document.getElementById('btn-toast-open') as HTMLButtonElement;
 const btnToastCloseEl = document.getElementById('btn-toast-close') as HTMLButtonElement;
 const engine = new KuroCatEngine(canvas, { embedded: isPreview });
+
+// ---- 3D engine (lazy-loaded; the 2D engine above is never touched) ----
+const canvas3d = document.getElementById('pet-canvas-3d') as HTMLCanvasElement | null;
+let engine3d: KuroCatEngine3D | null = null;
+let loading3dPromise: Promise<void> | null = null;
+let webgl3dUnavailable = false;
+let active3d = false;
+
+/** True when the user picked 3D and the environment supports it. */
+function wants3DNow(): boolean {
+  if (settings.renderMode === '2d') return false;
+  if (settings.catBreed === 'dafeiyu') return false; // no 3D rig for her
+  if (!canvas3d) return false;
+  if (webgl3dUnavailable) return false;
+  return true;
+}
+
+/** Pushes the current settings into the 3D engine. */
+function syncEngine3DState(): void {
+  if (!engine3d) return;
+  const activeCat = catList.find((c) => c.id === settings.catBreed) ?? catList[0];
+  const kbLayout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
+  const kbOrient: KeyboardOrientation =
+    settings.keyboardOrientation === 'viewer' ? 'viewer' : 'cat';
+  const tailMode: TailKeyMode =
+    settings.tailKeyMode === 'custom' ||
+    settings.tailKeyMode === 'edge' ||
+    settings.tailKeyMode === 'off'
+      ? settings.tailKeyMode
+      : 'smart';
+  const tailIds = Array.isArray(settings.tailKeyIds)
+    ? settings.tailKeyIds
+    : [...DEFAULT_TAIL_KEY_IDS];
+  const collar: CollarColorId =
+    settings.collarColor === 'red' ||
+    settings.collarColor === 'blue' ||
+    settings.collarColor === 'pink' ||
+    settings.collarColor === 'green'
+      ? settings.collarColor
+      : 'none';
+
+  engine3d.showKeyBubbles = settings.showKeyBubbles;
+  engine3d.setRenderStyle('3d');
+  if (activeCat) engine3d.setCatSkin(activeCat);
+  engine3d.setCollar(collar);
+  engine3d.setHeadphones(shouldWearHeadphonesNow());
+  engine3d.setGameActive(gameActive);
+  engine3d.setKeyboardConfig(kbLayout, kbOrient);
+  engine3d.setTailKeyConfig(tailMode, tailIds);
+  engine3d.setPrivacyMode(privacyActive);
+  engine3d.resize();
+}
+
+/** Swaps which engine is rendering. The 2D path is left exactly as it was. */
+function activateRenderEngine(): void {
+  const want3d = wants3DNow();
+  if (!want3d) {
+    if (active3d) {
+      engine3d?.stop();
+      canvas3d?.classList.add('hidden');
+      canvas.classList.remove('hidden');
+      active3d = false;
+      engine.start();
+    }
+    return;
+  }
+
+  if (engine3d) {
+    syncEngine3DState();
+    if (!active3d) {
+      engine.stop();
+      canvas.classList.add('hidden');
+      canvas3d?.classList.remove('hidden');
+      engine3d.start();
+      active3d = true;
+    }
+    return;
+  }
+
+  if (!loading3dPromise) {
+    loading3dPromise = import('./catEngine3d')
+      .then(({ KuroCatEngine3D }) => {
+        if (!canvas3d) return;
+        engine3d = new KuroCatEngine3D(canvas3d, { embedded: isPreview });
+        window.addEventListener('resize', () => engine3d?.resize());
+        activateRenderEngine();
+      })
+      .catch((err) => {
+        console.warn('3D WebGL unavailable, keeping 2D mode:', err);
+        webgl3dUnavailable = true;
+        active3d = false;
+        canvas3d?.classList.add('hidden');
+        canvas.classList.remove('hidden');
+        engine.start();
+        loading3dPromise = null;
+      });
+  }
+}
 
 if (isPreview) {
   // Browser preview: the canvas fills the viewport, so re-fit on resize.
@@ -618,6 +743,15 @@ function syncMenuUI(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-mouseorient]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.mouseorient === settings.mouseOrientation);
   });
+  document.querySelectorAll<HTMLButtonElement>('[data-rendermode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.rendermode === (settings.renderMode ?? '2d'));
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-collar]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.collar === (settings.collarColor ?? 'none'));
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-headphone]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.headphone === (settings.headphoneMode ?? 'off'));
+  });
   updateKbScaleVisual(kbLayout, kbScale);
   renderDeskSkinPills();
   renderPropUI();
@@ -645,6 +779,9 @@ function syncMenuUI(): void {
   engine.setPropConfig(settings.propConfig);
   engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
   engine.setMoodTrackingEnabled(settings.moodTrackingEnabled !== false);
+  engine.setTailKeyConfig(settings.tailKeyMode ?? 'smart', settings.tailKeyIds ?? [...DEFAULT_TAIL_KEY_IDS]);
+  // Keep the 3D engine (if loaded) in step, and swap renderers when the mode changes.
+  activateRenderEngine();
   const idleAutoEl = document.getElementById('idle-auto') as HTMLInputElement | null;
   if (idleAutoEl) idleAutoEl.checked = settings.idleActionsEnabled !== false;
   if (!sliderDragging) {
@@ -1169,41 +1306,53 @@ async function bootstrap(): Promise<void> {
 
   await safeListen<InputEvent>('kuro-input', (ev) => {
     const p = ev.payload;
-    switch (p.kind) {
-      case 'keyDown':
-        engine.onKeyDown(p.vk, p.repeat);
-        break;
-      case 'keyUp':
-        engine.onKeyUp(p.vk);
-        break;
-      case 'mouseMove':
-        engine.onGlobalMouseMove(p.nx, p.ny);
-        break;
-      case 'mouseDown':
-        engine.onMouseDown(p.button);
-        break;
-      case 'mouseUp':
-        engine.onMouseUp(p.button);
-        break;
-      case 'mouseWheel':
-        engine.onMouseWheel();
-        break;
-      case 'privacyTyping':
-        engine.onPrivacyTyping();
-        break;
+    // Both engines stay in sync: the hidden one costs nothing and keeps its state
+    // warm, so switching render mode never replays a burst of stale input.
+    const targets = active3d && engine3d ? [engine3d] : [engine];
+    for (const eng of targets) {
+      switch (p.kind) {
+        case 'keyDown':
+          eng.onKeyDown(p.vk, p.repeat);
+          break;
+        case 'keyUp':
+          eng.onKeyUp(p.vk);
+          break;
+        case 'mouseMove':
+          eng.onGlobalMouseMove(p.nx, p.ny);
+          break;
+        case 'mouseDown':
+          eng.onMouseDown(p.button);
+          break;
+        case 'mouseUp':
+          eng.onMouseUp(p.button);
+          break;
+        case 'mouseWheel':
+          eng.onMouseWheel();
+          break;
+        case 'privacyTyping':
+          eng.onPrivacyTyping();
+          break;
+      }
     }
   });
 
   await safeListen<boolean>('kuro-privacy', (ev) => {
-    engine.setPrivacyMode(Boolean(ev.payload));
+    privacyActive = Boolean(ev.payload);
+    engine.setPrivacyMode(privacyActive);
+    engine3d?.setPrivacyMode(privacyActive);
   });
 
   await safeListen<WindowCursorInfo>('kuro-cursor', (ev) => {
     const c = ev.payload;
     altOverride = Boolean(c.altOverride);
-    engine.onWindowCursor(c.relX, c.relY, c.overCat);
+    if (active3d && engine3d) {
+      engine3d.onWindowCursor(c.relX, c.relY, c.overCat);
+    } else {
+      engine.onWindowCursor(c.relX, c.relY, c.overCat);
+    }
     const interactive = !settings.clickThroughLocked || altOverride;
     canvas.classList.toggle('pet-hover', c.overCat && interactive);
+    canvas3d?.classList.toggle('pet-hover', c.overCat && interactive);
   });
 
   // Left-click drag to reposition transparent window
@@ -1249,7 +1398,7 @@ async function bootstrap(): Promise<void> {
 
   menuEl.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
-      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
+      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-rendermode], [data-collar], [data-headphone], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
     );
     if (!target) return;
 
@@ -1356,6 +1505,25 @@ async function bootstrap(): Promise<void> {
     if (mouseOrientAttr === 'auto' || mouseOrientAttr === 'cat' || mouseOrientAttr === 'viewer') {
       void applySettingsPatch({ mouseOrientation: mouseOrientAttr });
       closeContextMenu();
+      return;
+    }
+
+    const renderModeAttr = target.dataset.rendermode;
+    if (renderModeAttr === '2d' || renderModeAttr === '3d') {
+      void applySettingsPatch({ renderMode: renderModeAttr });
+      closeContextMenu();
+      return;
+    }
+
+    const collarAttr = target.dataset.collar;
+    if (collarAttr) {
+      void applySettingsPatch({ collarColor: collarAttr });
+      return;
+    }
+
+    const headphoneAttr = target.dataset.headphone;
+    if (headphoneAttr === 'auto' || headphoneAttr === 'on' || headphoneAttr === 'off') {
+      void applySettingsPatch({ headphoneMode: headphoneAttr });
       return;
     }
 

@@ -7,6 +7,7 @@
   </head>
   <body>
     <canvas id="pet-canvas"></canvas>
+    <canvas id="pet-canvas-3d" class="hidden"></canvas>
 
     <div id="update-toast" class="update-toast hidden" role="status" aria-live="polite">
       <span class="update-toast-text" id="update-toast-text">✨ 发现新版本</span>
@@ -60,6 +61,24 @@
         <span class="menu-hint" id="mcp-copy-hint">AI 捏猫</span>
       </button>
       <div class="menu-sep"></div>
+      <div class="menu-scale-row" id="render-mode-row">
+        <span class="menu-scale-label">视觉模式</span>
+        <div class="kb-pills">
+          <button class="kb-pill active" data-rendermode="2d">2D 手绘</button>
+          <button class="kb-pill" data-rendermode="3d">3D 实时</button>
+        </div>
+        <div class="kb-pills" id="collar-row">
+          <button class="kb-pill active" data-collar="none">无项圈</button>
+          <button class="kb-pill" data-collar="red">红铃铛</button>
+          <button class="kb-pill" data-collar="blue">蓝铃铛</button>
+          <button class="kb-pill" data-collar="pink">粉铃铛</button>
+        </div>
+        <div class="kb-pills" id="headphone-row">
+          <button class="kb-pill active" data-headphone="off">无耳机</button>
+          <button class="kb-pill" data-headphone="auto">游戏时戴</button>
+          <button class="kb-pill" data-headphone="on">常戴</button>
+        </div>
+      </div>
       <div class="menu-scale-row">
         <span class="menu-scale-label">键盘配列与方向</span>
         <div class="kb-pills">

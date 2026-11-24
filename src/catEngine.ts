@@ -54,6 +54,30 @@ export const LOGICAL_H = 440;
 export type CatBreed = 'black' | 'ragdoll' | 'dafeiyu';
 export type KeyboardOrientation = 'cat' | 'viewer';
 
+// ---- Tail-key data shared with the 3D engine (no behaviour lives here) ----
+export type TailKeyMode = 'smart' | 'custom' | 'edge' | 'off';
+export const DEFAULT_TAIL_KEY_IDS: readonly string[] = ['enter', 'space', 'bs', 'esc'];
+
+export const TAIL_KEY_PRESETS = {
+  office: {
+    label: '回车空格',
+    ids: ['enter', 'space', 'bs', 'esc'] as readonly string[],
+  },
+  rightFn: {
+    label: '方向/小键盘',
+    ids: [
+      'up', 'down', 'left', 'right', 'enter', 'bs', 'rshift',
+      'ins', 'home', 'pgup', 'del', 'end', 'pgdn',
+      'numlk', 'np_div', 'np_mul', 'np_sub', 'np_add', 'np_ent', 'np_dot',
+      'np_0', 'np_1', 'np_2', 'np_3', 'np_4', 'np_5', 'np_6', 'np_7', 'np_8', 'np_9',
+    ] as readonly string[],
+  },
+  edgeMods: {
+    label: '外侧功能键',
+    ids: ['esc', 'tab', 'caps', 'lshift', 'lctrl', 'rshift', 'enter', 'bs'] as readonly string[],
+  },
+} as const;
+
 interface Vec2 {
   x: number;
   y: number;
@@ -758,9 +782,55 @@ export class KuroCatEngine {
     }
     this.wakeRendering();
   }
+
+  /**
+   * Which keys the plush tail pats instead of a paw.
+   *
+   * smart: the right-hand cluster (original behaviour).
+   * custom: an explicit key-id list.
+   * edge: the outermost column/modifier keys.
+   * off: never — every key is handled by a paw.
+   */
+  private shouldTailPat(spec: KeySpec, targetPoint: Vec2, smartThresholdX: number): boolean {
+    switch (this.tailKeyMode) {
+      case 'off':
+        return false;
+      case 'custom':
+        return this.tailKeyIdSet.has(spec.id);
+      case 'edge': {
+        const layout = getKeyboardLayout(this.keyboardLayout);
+        return spec.uStart + spec.uWidth >= layout.totalUnits - 1.01 || spec.uStart <= 0.01;
+      }
+      default:
+        return targetPoint.x >= smartThresholdX;
+    }
+  }
+
+  /** Lets the menu / MCP change which keys the tail pats. */
+  public setTailKeyConfig(mode: TailKeyMode, keyIds: readonly string[]): void {
+    this.tailKeyMode =
+      mode === 'custom' || mode === 'edge' || mode === 'off' ? mode : 'smart';
+    this.tailKeyIdSet = new Set(
+      (Array.isArray(keyIds) ? keyIds : [])
+        .map((id) => String(id).trim().toLowerCase())
+        .filter(Boolean),
+    );
+    if (this.tailKeyMode === 'off') {
+      this.catTail.active = false;
+      this.catTail.heldVks.clear();
+      this.catTailHeldAt.clear();
+    }
+    this.wakeRendering();
+  }
+
+  public get tailKeyConfig(): { mode: TailKeyMode; ids: string[] } {
+    return { mode: this.tailKeyMode, ids: [...this.tailKeyIdSet] };
+  }
   private angerSteam: Array<{ x: number; y: number; vy: number; life: number; max: number; r: number }> = [];
   private nextSteamAt = 0;
   private moodTrackingEnabled = true;
+  private tailKeyMode: TailKeyMode = 'smart';
+  private tailKeyIdSet = new Set<string>(DEFAULT_TAIL_KEY_IDS);
   private lastAnyKeyAt = -10000;
 
   // Paws & continuous held-key tracking (Fixes #3)
@@ -996,7 +1066,7 @@ export class KuroCatEngine {
       this.keyboardLayout === '108'
         ? this.kbCenterX + this.kbWidth * 0.155
         : this.kbCenterX + this.kbWidth * 0.29;
-    if (spec.id !== 'space' && targetPoint.x >= tailThresholdX) {
+    if (spec.id !== 'space' && this.shouldTailPat(spec, targetPoint, tailThresholdX)) {
       const clampedTailPt = this.clampToKeyboardSurface(targetPoint);
       if (!this.catTail.active && this.catTail.reach < 0.08) {
         const hipRight = this.spinePoint(0.84, 0);
