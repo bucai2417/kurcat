@@ -10,6 +10,44 @@ import {
 import { catAudio } from './audio';
 import { resolveCustomSkin, type CatSkinConfig, type ResolvedSkin } from './catSkins';
 import { DaFeiYuRenderer, type DaFeiYuLayout } from './dafeiyuRenderer';
+import {
+  buildHitRegions,
+  clampKeyboardScale,
+  defaultKeyboardScale,
+  resolveDeskMetrics,
+  resolveMouseFacing,
+  type DeskMetrics,
+  type HitRegions,
+  type MouseOrientation,
+} from './deskMetrics';
+import {
+  DEFAULT_LIGHT,
+  KeyboardLightEngine,
+  keyInZone,
+  normalizeLightConfig,
+  rgba,
+  type KeyboardLightConfig,
+} from './keyboardLight';
+import {
+  BUILTIN_DESK_SKINS,
+  keycapGeometry,
+  normalizeDeskSkin,
+  normalizeKeycaps,
+  type DeskSkinConfig,
+  type KeycapOverride,
+} from './deskSkin';
+import { paintMaterialSheen, paintPattern, roundRectPath } from './deskTexture';
+import {
+  DEFAULT_PROP,
+  PropDrinker,
+  moodForKind,
+  normalizePropConfig,
+  type PropConfig,
+  type PropKind,
+} from './prop';
+import { drawProp, propLook } from './propRenderer';
+
+const propLookHeight = (kind: PropKind): number => propLook(kind).height;
 
 export const LOGICAL_W = 420;
 export const LOGICAL_H = 440;
@@ -29,7 +67,7 @@ interface SmearFrame {
   alpha: number;
 }
 
-type PawMode = 'idle' | 'curled' | 'poke' | 'mouse';
+type PawMode = 'idle' | 'curled' | 'poke' | 'mouse' | 'pose';
 
 interface PawState {
   side: 'left' | 'right';
@@ -66,6 +104,40 @@ interface KeyAnim {
   lastHitAt: number;
 }
 
+type ParticleShape = 'bubble' | 'steam' | 'heart' | 'spark' | 'pearl';
+
+/** Post-drink reaction variants, picked at random each time. */
+type ReactionKind = 'satisfied' | 'lick' | 'shake' | 'happy' | 'burp';
+
+/** Idle behaviours the pet picks from when the user is away. */
+export type IdleActionKind = 'drink' | 'stretch' | 'groom' | 'nap' | 'cuddle' | 'wave';
+
+/** Old names kept working for menu / MCP payloads already in the wild. */
+const IDLE_ALIASES: Record<string, IdleActionKind> = {
+  roll: 'cuddle',
+  sleep: 'nap',
+};
+
+interface IdleActionState {
+  kind: IdleActionKind;
+  t: number;
+  duration: number;
+}
+
+interface DrinkParticle {
+  shape: ParticleShape;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  color: string;
+  rotation: number;
+  spin: number;
+}
+
 // Exact measured pixel silhouette half-width profile from original video 0.3s (compact chubby sitting cat!)
 // t = 0.0 (ear tips) -> t = 1.0 (bottom base flush on keyboard)
 const BODY_SLICES: Array<{ t: number; hw: number }> = [
@@ -84,6 +156,7 @@ const BODY_SLICES: Array<{ t: number; hw: number }> = [
 
 const IDLE_RENDER_AFTER_MS = 3000;
 const IDLE_RENDER_PAUSE_MS = 40;
+const LIGHT_IDLE_FRAME_MS = 66;
 
 export class KuroCatEngine {
   private canvas: HTMLCanvasElement;
@@ -101,6 +174,65 @@ export class KuroCatEngine {
   public customSkin: ResolvedSkin | null = null;
   public keyboardLayout: KeyboardLayoutId = '65';
   public keyboardOrientation: KeyboardOrientation = 'cat';
+  public keyboardScale = defaultKeyboardScale('65');
+  public mouseOrientation: MouseOrientation = 'auto';
+  public propEnabled = false;
+  public metrics: DeskMetrics = resolveDeskMetrics('65', 'black', 1, false);
+  public readonly lightEngine = new KeyboardLightEngine();
+  public deskSkin: DeskSkinConfig = BUILTIN_DESK_SKINS[0];
+  /** Global DIY keycap overrides, applied on top of whichever skin is active. */
+  public keycapOverrides: Record<string, KeycapOverride> = {};
+  public propConfig: PropConfig = { ...DEFAULT_PROP };
+  private drinker = new PropDrinker();
+  private propFizz = 0;
+  private particles: DrinkParticle[] = [];
+  private propReach = 0;
+  private eyeGlow = 0;
+  /** 1 -> 0 pulse used for the cola burp hop. */
+  private burpKick = 0;
+  /** Short speech bubble shown right after a sip. */
+  private drinkFeedback: { emoji: string; text: string; t: number; max: number } | null = null;
+  /** Randomised post-drink reaction currently playing. */
+  private reaction: { kind: ReactionKind; t: number; max: number } | null = null;
+  /** Current idle behaviour (sleep / roll), or null. */
+  private idleAction: IdleActionState | null = null;
+  private idleAutoEnabled = true;
+  private nextIdleActionAt = 0;
+  /** Additive pose offsets layered on top of the typing / mouse pose while idling. */
+  private idlePose = { lean: 0, hunch: 0, headTilt: 0, squint: 0 };
+  /** Paw target for the current 'pose' idle action (null = none posed). */
+  private idlePaw: { side: 'left' | 'right'; x: number; y: number } | null = null;
+  /** Which way the cuddle leans. */
+  private cuddleSide: 'left' | 'right' = 'right';
+  /** Pose channels for the whale girl's own rig (hands / body shift). */
+  private fishPose = {
+    lean: 0,
+    lift: 0,
+    leftX: 0,
+    leftY: 0,
+    leftOn: false,
+    rightX: 0,
+    rightY: 0,
+    rightOn: false,
+  };
+  private fishTarget = {
+    lean: 0,
+    lift: 0,
+    leftX: 0,
+    leftY: 0,
+    leftOn: false,
+    rightX: 0,
+    rightY: 0,
+    rightOn: false,
+  };
+  /** Animated cup transform while the pet reaches for, lifts, and sips. */
+  private propPose = { x: 0, y: 0, rot: 0, active: false, lift: 0, handX: 0, handY: 0 };
+  /** Fade weight for the drinking arm (independent of the cup height). */
+  private propArmAlpha = 0;
+  /** Smoothed hand position so the reach snaps like the mouse-clicking paw. */
+  private propHand = { x: 0, y: 0 };
+  private glowSprite: HTMLCanvasElement | null = null;
+  private glowSpriteKey = '';
   private renderScale = 1.0;
   private embedded = false;
   private dafeiyu = new DaFeiYuRenderer();
@@ -156,35 +288,245 @@ export class KuroCatEngine {
     return { w: this.logicalW, h: this.logicalH };
   }
 
-  private syncLayoutPositions(): void {
-    const isBigFish = this.catBreed === 'dafeiyu';
-    if (this.keyboardLayout === '108') {
-      this.logicalW = 540;
-      this.logicalH = 456;
-      this.catCenterX = 278;
-      this.catTopY = 66;
-      this.catBaseY = 292;
-      this.kbCenterX = 290;
-      this.kbCenterY = 356;
-      this.kbWidth = 398;
-      this.kbHeight = 96;
-      this.kbTiltRad = (2.4 * Math.PI) / 180;
-      this.mouseBaseX = isBigFish ? 54 : 46;
-      this.mouseBaseY = isBigFish ? 332 : 342;
+  /**
+   * Maps a client-space point (event.clientX/Y) into logical canvas coordinates,
+   * inverting whatever fit/offset transform `render()` applied. Without this,
+   * clicks drift as soon as the canvas is letterboxed or the window scale != 100%.
+   */
+  public clientToLogical(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const cssW = Math.max(1, rect.width);
+    const cssH = Math.max(1, rect.height);
+    const px = (clientX - rect.left) * (cw / cssW);
+    const py = (clientY - rect.top) * (ch / cssH);
+
+    let uniformScale: number;
+    let offsetX: number;
+    let offsetY: number;
+    if (this.embedded) {
+      const baseFit = Math.min((cw * 0.86) / this.logicalW, (ch * 0.86) / this.logicalH);
+      const effectiveMul =
+        this.renderScale <= 1.0 ? this.renderScale : 1.0 + (this.renderScale - 1.0) * 0.3;
+      uniformScale = baseFit * effectiveMul;
+      offsetX = (cw - this.logicalW * uniformScale) * 0.5;
+      offsetY = (ch - this.logicalH * uniformScale) * 0.52;
     } else {
-      this.logicalW = 420;
-      this.logicalH = 440;
-      this.catCenterX = 196;
-      this.catTopY = 82;
-      this.catBaseY = 308;
-      this.kbCenterX = isBigFish ? 234 : 214;
-      this.kbCenterY = 353;
-      this.kbWidth = 266;
-      this.kbHeight = 74;
-      this.kbTiltRad = (3.4 * Math.PI) / 180;
-      this.mouseBaseX = isBigFish ? 72 : 46;
-      this.mouseBaseY = isBigFish ? 322 : 338;
+      const dpr = cw / cssW;
+      const fitScale = Math.min(cw / this.logicalW, ch / this.logicalH);
+      uniformScale = Math.min(fitScale, this.renderScale * dpr);
+      offsetX = cw - this.logicalW * uniformScale;
+      offsetY = ch - this.logicalH * uniformScale;
     }
+    if (uniformScale <= 0.001) return { x: 0, y: 0 };
+    return {
+      x: (px - offsetX) / uniformScale,
+      y: (py - offsetY) / uniformScale,
+    };
+  }
+
+  private syncLayoutPositions(): void {
+    const m = resolveDeskMetrics(
+      this.keyboardLayout,
+      this.catBreed,
+      this.keyboardScale,
+      this.propConfig.enabled,
+      this.propConfig.side === 'left' ? 'left' : 'right',
+    );
+    this.metrics = m;
+    this.logicalW = m.logicalW;
+    this.logicalH = m.logicalH;
+    this.catCenterX = m.catCenterX;
+    this.catTopY = m.catTopY;
+    this.catBaseY = m.catBaseY;
+    this.kbCenterX = m.kbCenterX;
+    this.kbCenterY = m.kbCenterY;
+    this.kbWidth = m.kbWidth;
+    this.kbHeight = m.kbHeight;
+    this.kbTiltRad = m.kbTiltRad;
+    this.mouseBaseX = m.mouseBaseX;
+    this.mouseBaseY = m.mouseBaseY;
+  }
+
+  /** Resolved facing of the dedicated mouse, independent from the keyboard deck. */
+  public get mouseFacing(): 'cat' | 'viewer' {
+    return resolveMouseFacing(this.mouseOrientation, this.keyboardOrientation);
+  }
+
+  public setKeyboardScale(scale: number): void {
+    const next = clampKeyboardScale(scale, this.keyboardLayout);
+    if (Math.abs(next - this.keyboardScale) < 0.001) return;
+    this.keyboardScale = next;
+    this.syncLayoutPositions();
+    this.wakeRendering();
+  }
+
+  public setMouseOrientation(mode: MouseOrientation): void {
+    const next: MouseOrientation =
+      mode === 'cat' || mode === 'viewer' ? mode : 'auto';
+    if (next === this.mouseOrientation) return;
+    this.mouseOrientation = next;
+    this.wakeRendering();
+  }
+
+  public setPropEnabled(enabled: boolean): void {
+    if (enabled === this.propEnabled) return;
+    this.propEnabled = enabled;
+    this.syncLayoutPositions();
+    this.wakeRendering();
+  }
+
+  public getHitRegions(): HitRegions {
+    return buildHitRegions(
+      this.metrics,
+      this.mouseFacing,
+      this.propConfig.enabled,
+      this.propConfig.side === 'left' ? 'left' : 'right',
+    );
+  }
+
+  public setLightConfig(raw: unknown): void {
+    this.lightEngine.setConfig(normalizeLightConfig(raw));
+    this.wakeRendering();
+  }
+
+  public getLightConfig(): KeyboardLightConfig {
+    return this.lightEngine.getConfig();
+  }
+
+  public setDeskSkin(raw: unknown): void {
+    this.deskSkin = normalizeDeskSkin(raw);
+    this.wakeRendering();
+  }
+
+  /** Replaces the global DIY keycap overrides (per-key colour / legend). */
+  public setKeycapOverrides(raw: unknown): void {
+    this.keycapOverrides = normalizeKeycaps(raw) ?? {};
+    this.wakeRendering();
+  }
+
+  public getKeycapOverrides(): Record<string, KeycapOverride> {
+    return this.keycapOverrides;
+  }
+
+  public getDeskSkin(): DeskSkinConfig {
+    return this.deskSkin;
+  }
+
+  public setPropConfig(raw: unknown): void {
+    const cfg = normalizePropConfig(raw);
+    const prev = this.propConfig;
+    const kindChanged = cfg.kind !== prev.kind;
+    const sideChanged = cfg.side !== prev.side;
+    this.propConfig = cfg;
+    this.propEnabled = cfg.enabled;
+    if (kindChanged || (!prev.enabled && cfg.enabled)) {
+      this.drinker.refill();
+      this.drinker.reset(cfg);
+      this.propFizz = 0;
+    }
+    // Turning the prop off mid-sip should drop the arm instead of freezing it in the air.
+    if (prev.enabled && !cfg.enabled) {
+      this.drinker.reset(cfg);
+      this.propFizz = 0;
+    }
+    if (cfg.enabled !== prev.enabled || sideChanged) {
+      this.syncLayoutPositions();
+    }
+    this.wakeRendering();
+  }
+
+  public getPropConfig(): PropConfig {
+    return this.propConfig;
+  }
+
+  /** Current idle behaviour, or null when none is playing. */
+  public get idleActionKind(): IdleActionKind | null {
+    return this.idleAction?.kind ?? null;
+  }
+
+  public setIdleAutoEnabled(enabled: boolean): void {
+    this.idleAutoEnabled = enabled;
+    if (!enabled) this.endIdleAction();
+    this.wakeRendering();
+  }
+
+  /** Plays one of the idle behaviours right now (also used by MCP / the menu). */
+  public triggerIdleAction(rawKind: string): boolean {
+    const kind: IdleActionKind = (IDLE_ALIASES[rawKind] ?? rawKind) as IdleActionKind;
+    if (kind === 'drink') {
+      if (!this.propConfig.enabled) return false;
+      return this.triggerSip() || this.clickProp() !== 'ignored';
+    }
+    if (!['stretch', 'groom', 'nap', 'cuddle', 'wave'].includes(kind)) return false;
+    if (this.idleAction) return false;
+
+    // The whale girl has her own rig: she waves and stretches with her hands.
+    if (this.catBreed === 'dafeiyu') {
+      if (kind !== 'wave' && kind !== 'stretch') return false;
+      const fishDuration = kind === 'wave' ? 2.6 : 2.4;
+      this.idleAction = { kind, t: 0, duration: fishDuration };
+      this.wakeRendering();
+      return true;
+    }
+
+    const duration =
+      kind === 'nap'
+        ? 8 + Math.random() * 4
+        : kind === 'groom'
+          ? 2.8 + Math.random() * 0.8
+          : kind === 'stretch'
+            ? 2.4 + Math.random() * 0.5
+            : kind === 'wave'
+              ? 2.4 + Math.random() * 0.6
+              : 3.4 + Math.random() * 0.8;
+    this.idleAction = { kind, t: 0, duration };
+    if (kind === 'cuddle') {
+      this.cuddleSide = Math.random() < 0.5 ? 'left' : 'right';
+      this.spawnHeartParticle(true);
+    }
+    this.wakeRendering();
+    return true;
+  }
+
+  public get propLevel(): number {
+    return this.drinker.level;
+  }
+
+  /** Restores a full drink (clicking an empty cup). */
+  public refillProp(): void {
+    this.drinker.refill();
+    this.propFizz = 0;
+    this.wakeRendering();
+  }
+
+  /** Manual "drink now" trigger; returns false when the cup is empty or busy. */
+  public triggerSip(): boolean {
+    if (!this.propConfig.enabled) return false;
+    const started = this.drinker.startSip();
+    if (started) this.wakeRendering();
+    return started;
+  }
+
+  /** Where the prop sits in logical canvas coordinates. */
+  public getPropAnchor(): { x: number; y: number; side: 'left' | 'right' } {
+    const side: 'left' | 'right' =
+      this.propConfig.side === 'auto' ? 'right' : this.propConfig.side;
+    return { x: this.metrics.propX, y: this.metrics.propY, side };
+  }
+
+  /** True when lighting needs continuous frames, so the idle throttle must not park. */
+  public get wantsContinuousFrames(): boolean {
+    return (
+      (this.lightEngine.isAnimating && !this.privacyMode) ||
+      this.particles.length > 0 ||
+      this.propPose.active ||
+      this.propArmAlpha > 0.02 ||
+      this.reaction !== null ||
+      this.idleAction !== null ||
+      this.drinkFeedback !== null
+    );
   }
 
   public setCatAppearance(breedId: string, skin?: CatSkinConfig | null): void {
@@ -206,12 +548,27 @@ export class KuroCatEngine {
     this.wakeRendering();
   }
 
-  public setKeyboardConfig(layout: KeyboardLayoutId, orientation: KeyboardOrientation): void {
+  public setKeyboardConfig(
+    layout: KeyboardLayoutId,
+    orientation: KeyboardOrientation,
+    options?: { scale?: number; mouseOrientation?: MouseOrientation; propEnabled?: boolean },
+  ): void {
     const nextLayout: KeyboardLayoutId = layout === '108' ? '108' : '65';
     const nextOrientation: KeyboardOrientation = orientation === 'viewer' ? 'viewer' : 'cat';
     const layoutChanged = this.keyboardLayout !== nextLayout;
     this.keyboardLayout = nextLayout;
     this.keyboardOrientation = nextOrientation;
+    if (options?.scale !== undefined) {
+      this.keyboardScale = clampKeyboardScale(options.scale, nextLayout);
+    } else if (layoutChanged) {
+      this.keyboardScale = defaultKeyboardScale(nextLayout);
+    }
+    if (options?.mouseOrientation !== undefined) {
+      this.mouseOrientation = options.mouseOrientation;
+    }
+    if (options?.propEnabled !== undefined) {
+      this.propEnabled = options.propEnabled;
+    }
 
     this.syncLayoutPositions();
 
@@ -230,7 +587,7 @@ export class KuroCatEngine {
   private buildDaFeiYuLayout(): DaFeiYuLayout {
     const mx = this.mouseBaseX + this.mouseOffsetX;
     const my = this.mouseBaseY + this.mouseOffsetY;
-    const isCatFacing = this.keyboardOrientation === 'cat';
+    const isCatFacing = this.mouseFacing === 'cat';
     const localBtnX = this.mouseLeftDown ? -6.5 : this.mouseRightDown ? 6.5 : 0;
     const localBtnY = -10.5;
     const ang = this.kbTiltRad + (isCatFacing ? Math.PI : 0);
@@ -245,6 +602,8 @@ export class KuroCatEngine {
       kbTiltRad: this.kbTiltRad,
       mouseBtnX: mx + localBtnX * c - localBtnY * s,
       mouseBtnY: my + localBtnX * s + localBtnY * c,
+      mouseCenterX: mx,
+      mouseCenterY: my,
       mouseNX: this.lastMouseNX,
       mouseLeft: this.mouseLeftDown,
       mouseRight: this.mouseRightDown,
@@ -254,6 +613,21 @@ export class KuroCatEngine {
       privacyMode: this.privacyMode,
       privacyTypingAt: this.privacyTypingAt,
       is108: this.keyboardLayout === '108',
+      drinkActive: this.propPose.active && this.propArmAlpha > 0.05,
+      drinkSide: this.getPropAnchor().side,
+      drinkHandX: this.propPose.handX,
+      drinkHandY: this.propPose.handY,
+      drinkSip: this.drinker.phase === 'sip' ? 1 : this.drinker.phase === 'lift' ? 0.5 : 0,
+      poseHands: [
+        ...(this.fishPose.leftOn
+          ? [{ side: 'left' as const, x: this.fishPose.leftX, y: this.fishPose.leftY }]
+          : []),
+        ...(this.fishPose.rightOn
+          ? [{ side: 'right' as const, x: this.fishPose.rightX, y: this.fishPose.rightY }]
+          : []),
+      ],
+      poseLean: this.fishPose.lean,
+      poseLift: this.fishPose.lift,
     };
   }
 
@@ -343,6 +717,11 @@ export class KuroCatEngine {
   private squintAmount = 0;
   private earTwitchLeft = 0;
   private earTwitchRight = 0;
+  /** Slow per-ear "listening" turn (radians, outward) and relaxed ear droop. */
+  private earTurnLeft = 0;
+  private earTurnRight = 0;
+  private earBack = 0;
+  private nextEarFlickAt = 3;
   private recentKeyTimes: number[] = [];
   private typingEnergy = 0;
   private lastAnyKeyAt = -10000;
@@ -451,11 +830,13 @@ export class KuroCatEngine {
     }
 
     // Pause after drawing so even a slow frame leaves CPU headroom on older hardware (Fixes #9).
+    // Animated keyboard lighting keeps painting, but at a throttled rate instead of 60fps.
+    const idleDelay = this.wantsContinuousFrames ? LIGHT_IDLE_FRAME_MS : IDLE_RENDER_PAUSE_MS;
     this.rafId = null;
     this.idleFrameTimer = window.setTimeout(() => {
       this.idleFrameTimer = null;
       this.rafId = requestAnimationFrame(this.renderFrame);
-    }, IDLE_RENDER_PAUSE_MS);
+    }, idleDelay);
   };
 
   private wakeRendering(now = performance.now()): void {
@@ -511,6 +892,7 @@ export class KuroCatEngine {
       if (!repeat) this.onPrivacyTyping();
       return;
     }
+    if (!repeat) this.interruptIdleAction();
     const now = performance.now();
     const spec = resolveKeyByVk(vk, this.keyboardLayout);
     if (!spec) return;
@@ -536,6 +918,7 @@ export class KuroCatEngine {
     this.lastAnyKeyAt = now;
     this.recentKeyTimes.push(now);
     if (this.recentKeyTimes.length > 26) this.recentKeyTimes.shift();
+    if (anim) this.spawnKeyRipple(spec.id);
 
     this.bodyBob = Math.min(1.15, this.bodyBob + 0.65);
     this.kbBounce = Math.min(1, this.kbBounce + 0.45);
@@ -716,16 +1099,41 @@ export class KuroCatEngine {
     }
   }
 
+  /** Which paw works the mouse — follows the side the mouse sits on. */
+  public get mousePawSide(): 'left' | 'right' {
+    return this.mouseBaseX > this.logicalW / 2 ? 'right' : 'left';
+  }
+
+  /** Paw currently assigned to the mouse. */
+  private get mousePaw(): PawState {
+    return this.mousePawSide === 'right' ? this.rightPaw : this.leftPaw;
+  }
+
+  /** The paw not on the mouse (kept free for poking keys / a support leg). */
+  private get freePaw(): PawState {
+    return this.mousePawSide === 'right' ? this.leftPaw : this.rightPaw;
+  }
+
+  /** Marks the correct paw as the mouse hand and releases the other one. */
+  private activateMousePaw(now: number, squash = 0): void {
+    const paw = this.mousePaw;
+    const other = paw === this.leftPaw ? this.rightPaw : this.leftPaw;
+    if (other.mode === 'mouse') other.mode = 'idle';
+    paw.mode = 'mouse';
+    if (squash > 0) paw.impactSquash = squash;
+    paw.lastActiveAt = now;
+  }
+
   public onGlobalMouseMove(nx: number, ny: number): void {
     const now = performance.now();
     this.wakeRendering(now);
+    this.interruptIdleAction();
     this.lastMouseNX = nx;
     this.mouseTargetOffsetX = (nx - 0.5) * (this.catBreed === 'dafeiyu' ? 14 : 28);
     this.mouseTargetOffsetY = (ny - 0.5) * (this.catBreed === 'dafeiyu' ? 11 : 20);
     this.lastMouseMoveAt = now;
 
-    this.leftPaw.mode = 'mouse';
-    this.leftPaw.lastActiveAt = now;
+    this.activateMousePaw(now);
   }
 
   private getMouseButtonColors(): { left: string; right: string; middle: string } {
@@ -786,6 +1194,7 @@ export class KuroCatEngine {
   public onMouseDown(button: string): void {
     const now = performance.now();
     this.wakeRendering(now);
+    this.interruptIdleAction();
     if (button === 'left') {
       this.mouseLeftDown = true;
       this.mouseDownAt.left = now;
@@ -807,9 +1216,7 @@ export class KuroCatEngine {
     this.lastMouseClickAt = now;
     this.dafeiyu.resetLeftHandForMouse();
     this.dafeiyu.onMouseAction(now);
-    this.leftPaw.mode = 'mouse';
-    this.leftPaw.impactSquash = 0.72;
-    this.leftPaw.lastActiveAt = now;
+    this.activateMousePaw(now, 0.72);
   }
 
   public onMouseUp(button: string): void {
@@ -829,13 +1236,13 @@ export class KuroCatEngine {
   public onMouseWheel(): void {
     const now = performance.now();
     this.wakeRendering(now);
+    this.interruptIdleAction();
     this.mouseScrollFlash = 1;
     this.lastMouseMoveAt = now;
     this.lastMouseClickAt = now;
     this.dafeiyu.resetLeftHandForMouse();
     this.dafeiyu.onMouseAction(now);
-    this.leftPaw.mode = 'mouse';
-    this.leftPaw.lastActiveAt = now;
+    this.activateMousePaw(now);
   }
 
   private resetPetStrokes(): void {
@@ -952,8 +1359,7 @@ export class KuroCatEngine {
     };
   }
 
-  private getKeyWorldCenter(spec: KeySpec): Vec2 {
-    const layout = getKeyboardLayout(this.keyboardLayout);
+  private getKeyWorldCenter(spec: KeySpec): Vec2 {    const layout = getKeyboardLayout(this.keyboardLayout);
     const isCatFacing = this.keyboardOrientation === 'cat';
     const uClamped = Math.max(0.65, Math.min(layout.totalUnits - 0.65, spec.uStart + spec.uWidth * 0.5));
     const rY = spec.rowY ?? spec.row;
@@ -967,8 +1373,754 @@ export class KuroCatEngine {
     return this.projectKeyboardPoint(uClamped, rowPos);
   }
 
-  private clampToKeyboardSurface(pt: Vec2): Vec2 {
-    // Transform into keyboard-local space and clamp so the plump paw pad NEVER extends past the keyboard bezel!
+  /** Lightens (amount > 0) or darkens (amount < 0) a #rrggbb colour. */
+  private shade(hexColor: string, amount: number): string {
+    const h = hexColor.replace('#', '');
+    const full = h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h;
+    const n = parseInt(full, 16);
+    if (!Number.isFinite(n)) return hexColor;
+    const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const out = ch.map((c) => {
+      const v = amount >= 0 ? c + (255 - c) * amount : c * (1 + amount);
+      return Math.max(0, Math.min(255, Math.round(v)))
+        .toString(16)
+        .padStart(2, '0');
+    });
+    return `#${out.join('')}`;
+  }
+
+  /** Picks near-white or near-black ink so legends stay legible on any keycap. */
+  private readableInk(background: string): string {
+    const h = background.replace('#', '');
+    const full = h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h;
+    const n = parseInt(full, 16);
+    if (!Number.isFinite(n)) return '#e8edf4';
+    const r = (n >> 16) & 255;
+    const g = (n >> 8) & 255;
+    const b = n & 255;
+    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.55 ? '#1a1d23' : '#e8edf4';
+  }
+
+  /** Emits a ripple at the struck key so 'ripple' lighting spreads from real keystrokes. */  private spawnKeyRipple(keyId: string): void {
+    const cfg = this.lightEngine.getConfig();
+    if (!cfg.enabled || cfg.effect !== 'ripple' || !cfg.reactive) return;
+    const layout = getKeyboardLayout(this.keyboardLayout);
+    const spec = layout.keys.find((k) => k.id === keyId);
+    if (!spec) return;
+    const isCatFacing = this.keyboardOrientation === 'cat';
+    const innerW = this.kbWidth - 14;
+    const innerH = this.kbHeight - 12;
+    const rY = spec.rowY ?? spec.row;
+    const rSpan = spec.rowSpan ?? 1;
+    const screenRowTop = isCatFacing ? layout.totalRows - (rY + rSpan) : rY;
+    const screenUStart = isCatFacing
+      ? layout.totalUnits - (spec.uStart + spec.uWidth)
+      : spec.uStart;
+    const x = -innerW / 2 + (screenUStart + spec.uWidth * 0.5) * (innerW / layout.totalUnits);
+    const y = -innerH / 2 + (screenRowTop + rSpan * 0.5) * (innerH / layout.totalRows);
+    this.lightEngine.spawnRipple(x, y);
+  }
+
+  /** Drink prop sitting beside the deck; the cat reaches over when it sips. */
+  private drawProp(ctx: CanvasRenderingContext2D): void {
+    if (!this.propConfig.enabled) return;
+    const anchor = this.getPropAnchor();
+    const drinker = this.drinker;
+    const pose = this.propPose;
+    const tiltForPhase =
+      drinker.phase === 'sip'
+        ? Math.sin(drinker.phaseProgress * Math.PI) * 0.5
+        : 0;
+
+    ctx.save();
+    if (pose.active) {
+      ctx.translate(pose.x, pose.y);
+      ctx.rotate(pose.rot);
+    } else {
+      ctx.translate(anchor.x, anchor.y);
+    }
+    drawProp(ctx, {
+      kind: this.propConfig.kind,
+      level: drinker.level,
+      tilt: tiltForPhase,
+      side: anchor.side,
+      fizz: this.propFizz,
+      time: this.elapsed,
+    });
+
+    // "Refill" hint when the cup runs dry (only while it sits on the desk)
+    if (drinker.level <= 0.02 && !pose.active) {
+      ctx.font = '700 7.5px "Segoe UI", "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255, 214, 120, 0.92)';
+      ctx.fillText('点我续杯', 0, -propLookHeight(this.propConfig.kind) - 7);
+    }
+    ctx.restore();
+  }
+
+  /** Hit-tests the prop in logical canvas coordinates; true when the click lands on it. */
+  public hitTestProp(x: number, y: number): boolean {
+    if (!this.propConfig.enabled) return false;
+    const a = this.getPropAnchor();
+    const look = propLook(this.propConfig.kind);
+    const halfW = look.width * 0.75;
+    const dx = x - a.x;
+    const dy = y - (a.y - look.height * 0.5);
+    return Math.abs(dx) <= halfW && Math.abs(dy) <= look.height * 0.8;
+  }
+
+  /** Clicking the prop refills an empty cup, otherwise nudges a sip. */
+  public clickProp(): 'refilled' | 'sipped' | 'ignored' {
+    if (!this.propConfig.enabled) return 'ignored';
+    if (this.drinker.level <= 0.02) {
+      this.refillProp();
+      this.spawnDrinkParticles(this.propConfig.kind, 10);
+      this.wakeRendering();
+      return 'refilled';
+    }
+    if (this.triggerSip()) {
+      // Immediate feedback on click; the rest of the burst lands when the sip completes.
+      this.spawnDrinkParticles(this.propConfig.kind, 8);
+      this.wakeRendering();
+      return 'sipped';
+    }
+    return 'ignored';
+  }
+
+  /** True while the drink mood is still playing, so the face can react. */
+  public get propMood(): PropKind | null {
+    return this.drinker.moodActive ? this.drinker.lastMood : null;
+  }
+
+  /** Bursts the drink-specific effect when the pet takes a sip. */
+  private spawnDrinkParticles(kind: PropKind, count: number): void {
+    const anchor = this.getPropAnchor();
+    const look = propLook(kind);
+    // Emit where the cup actually is right now: at the mouth while it is held,
+    // otherwise from the cup sitting on the desk.
+    const px = this.propPose.active ? this.propPose.x : anchor.x;
+    const py = this.propPose.active ? this.propPose.y - look.height : anchor.y - 16;
+    const cfg: Record<PropKind, { shape: ParticleShape; colors: string[]; rise: number; spread: number }> = {
+      cola: { shape: 'bubble', colors: ['#ffffff', '#ffe9c7', '#ffb3a0'], rise: -34, spread: 12 },
+      coffee: { shape: 'steam', colors: ['#f2f4f8', '#dfe4ea', '#cfd6df'], rise: -48, spread: 10 },
+      boba: { shape: 'pearl', colors: ['#3b2418', '#5a3a26', '#c9a887'], rise: -22, spread: 14 },
+      energy: { shape: 'spark', colors: ['#c9ff4d', '#00e5ff', '#ffffff'], rise: -46, spread: 16 },
+      pudding: { shape: 'heart', colors: ['#ff6b9d', '#ff9ec4', '#ffd166'], rise: -42, spread: 12 },
+    };
+    const spec = cfg[kind];
+    for (let i = 0; i < count; i++) {
+      const life = 0.9 + Math.random() * 1.1;
+      this.particles.push({
+        shape: spec.shape,
+        x: px + (Math.random() - 0.5) * 14,
+        y: py - Math.random() * 12,
+        vx: (Math.random() - 0.5) * spec.spread * 2,
+        vy: spec.rise * (0.5 + Math.random() * 0.8),
+        life,
+        maxLife: life,
+        size: spec.shape === 'steam' ? 5 + Math.random() * 5 : 1.6 + Math.random() * 2.6,
+        color: spec.colors[Math.floor(Math.random() * spec.colors.length)],
+        rotation: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 2.4,
+      });
+    }
+    if (this.particles.length > 160) this.particles.splice(0, this.particles.length - 160);
+  }
+
+  private updateParticles(dt: number): void {
+    if (this.particles.length === 0) return;
+    for (const p of this.particles) {
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += dt * (p.shape === 'pearl' ? -6 : p.shape === 'steam' ? -10 : 18);
+      p.rotation += p.spin * dt;
+    }
+    this.particles = this.particles.filter((p) => p.life > 0);
+  }
+
+  private drawParticles(ctx: CanvasRenderingContext2D): void {
+    if (this.particles.length === 0) return;
+    ctx.save();
+    for (const p of this.particles) {
+      const t = Math.max(0, Math.min(1, p.life / p.maxLife));
+      const alpha = p.shape === 'steam' ? t * 0.42 : Math.min(1, t * 1.5);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.globalAlpha = alpha;
+      switch (p.shape) {
+        case 'steam': {
+          const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, p.size);
+          grad.addColorStop(0, 'rgba(255,255,255,0.55)');
+          grad.addColorStop(1, 'rgba(255,255,255,0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case 'bubble':
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(255,255,255,0.30)';
+          ctx.fill();
+          break;
+        case 'spark': {
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(-p.size, 0);
+          ctx.lineTo(p.size, 0);
+          ctx.moveTo(0, -p.size);
+          ctx.lineTo(0, p.size);
+          ctx.stroke();
+          break;
+        }
+        case 'heart': {
+          ctx.rotate(p.rotation);
+          ctx.fillStyle = p.color;
+          const s = p.size;
+          ctx.beginPath();
+          ctx.moveTo(0, s * 0.7);
+          ctx.bezierCurveTo(-s * 1.6, -s * 0.5, -s * 0.5, -s * 1.6, 0, -s * 0.5);
+          ctx.bezierCurveTo(s * 0.5, -s * 1.6, s * 1.6, -s * 0.5, 0, s * 0.7);
+          ctx.fill();
+          break;
+        }
+        case 'pearl':
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        default:
+          break;
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /** Positions the cup for the current drink phase (reach / lift / sip / return). */
+  /** Shoulder the drinking arm pivots from (same side as the cup). */
+  private getDrinkShoulder(side: 'left' | 'right'): Vec2 {
+    const dir = side === 'right' ? 1 : -1;
+    return { x: this.catCenterX + dir * 32, y: this.catBaseY - 76 };
+  }
+
+  /**
+   * World-space mouth position. Mirrors the head transform inside drawCatBody
+   * (spine lean + head tilt + purr shake), so held drinks track the face when the
+   * cat leans sideways to work the mouse.
+   */
+  private getMouthPoint(): Vec2 {
+    const breath = Math.sin(this.elapsed * 2.1) * 1.0;
+    const purrShift =
+      this.squintAmount > 0.4 ? Math.sin(this.elapsed * 22) * 0.45 * this.squintAmount : 0;
+    const head = this.spinePoint(0.24, breath);
+    const hcx = head.x + purrShift;
+    const hcy = head.y;
+    // Mouth sits a little below the head centre in head-local space (whisker line).
+    const ly = 20;
+    const c = Math.cos(this.headTilt);
+    const s = Math.sin(this.headTilt);
+    return { x: hcx - ly * s, y: hcy + ly * c };
+  }
+
+  private updatePropPose(dt: number): void {
+    const a = this.getPropAnchor();
+    const dir = a.side === 'right' ? 1 : -1;
+    const look = propLook(this.propConfig.kind);
+    const cupH = look.height;
+    const isEat = this.propConfig.kind === 'pudding';
+    const shoulder = this.getDrinkShoulder(a.side);
+    const ph = this.drinker.phase;
+    const p = this.drinker.phaseProgress;
+    const ease = (t: number) => t * t * (3 - 2 * t);
+
+    // Where the CUP LIP should touch the face — tracked live so it follows the lean.
+    // The whale girl has her own rig, so ask her renderer where her mouth is.
+    const mouth =
+      this.catBreed === 'dafeiyu'
+        ? this.dafeiyu.getMouthWorld(performance.now(), this.buildDaFeiYuLayout())
+        : this.getMouthPoint();
+    const lipX = mouth.x + dir * 10;
+    const lipY = mouth.y + 2;
+    const tiltMax = isEat ? 0.34 : 0.62;
+    // Rotation for a given lift factor (negative when the cup leans in toward the cat).
+    const tiltAt = (t: number) => -dir * tiltMax * t;
+    // Origin that puts the rotated lip exactly on (lipX, lipY).
+    const originFor = (rot: number) => ({
+      x: lipX - Math.sin(rot) * cupH,
+      y: lipY + Math.cos(rot) * cupH,
+    });
+
+    let x = a.x;
+    let y = a.y;
+    let rot = 0;
+    if (ph === 'lift') {
+      const t = ease(p);
+      rot = tiltAt(t);
+      const o = originFor(rot);
+      x = a.x + (o.x - a.x) * t;
+      y = a.y + (o.y - a.y) * t;
+      // Bulge outward mid-flight so the cup arcs instead of sliding in a straight line.
+      x += Math.sin(Math.PI * t) * 7 * dir;
+    } else if (ph === 'sip') {
+      // Small wobble around the resting tilt; origin is recomputed so the lip stays on the mouth.
+      rot = tiltAt(1) + Math.sin(p * Math.PI * 2) * (isEat ? 0.05 : 0.07);
+      const o = originFor(rot);
+      x = o.x;
+      y = o.y + Math.sin(p * Math.PI * 2) * 0.6;
+      if (isEat) {
+        // Pudding is nibbled in quick little bites instead of one steady tilt.
+        const bite = Math.abs(Math.sin(p * Math.PI * 6));
+        y += bite * 1.8;
+        x += dir * bite * 0.8;
+      }
+    } else if (ph === 'return') {
+      const t = ease(1 - p);
+      rot = tiltAt(t);
+      const o = originFor(rot);
+      x = a.x + (o.x - a.x) * t;
+      y = a.y + (o.y - a.y) * t;
+      x += Math.sin(Math.PI * t) * 6 * dir;
+    }
+
+    // Hand grips the cup body a little below the lip, and follows the rotation.
+    const gripLocalY = -cupH * 0.45;
+    const gripX = x - Math.sin(rot) * gripLocalY;
+    const gripY = y + Math.cos(rot) * gripLocalY;
+    const active = ph !== 'rest';
+
+    // Fast exponential follow (~same responsiveness as the mouse paw) instead of a slow lerp.
+    let targetX = gripX;
+    let targetY = gripY;
+    if (ph === 'return' && p > 0.55) {
+      // Release the cup, then pull the paw back to the shoulder.
+      const t = (p - 0.55) / 0.45;
+      targetX = gripX + (shoulder.x - gripX) * t;
+      targetY = gripY + (shoulder.y - gripY) * t;
+    }
+    if (!active) {
+      this.propHand.x = shoulder.x;
+      this.propHand.y = shoulder.y;
+    } else {
+      const k = 1 - Math.exp(-36 * dt);
+      this.propHand.x += (targetX - this.propHand.x) * k;
+      this.propHand.y += (targetY - this.propHand.y) * k;
+    }
+    const handX = this.propHand.x;
+    const handY = this.propHand.y;
+
+    const rise = Math.abs(y - a.y);
+    const fullRise = Math.abs(originFor(tiltAt(1)).y - a.y) || 1;
+    this.propPose = {
+      x,
+      y,
+      rot,
+      active,
+      handX,
+      handY,
+      lift: active ? Math.min(1, rise / fullRise) : 0,
+    };
+
+    // Arm fades in the moment the reach starts, and out after the cup is placed back.
+    const wantArm = active ? 1 : 0;
+    this.propArmAlpha += (wantArm - this.propArmAlpha) * (1 - Math.exp(-18 * dt));
+  }
+
+  /** Arm + paw reaching out to hold the cup while the pet drinks. */
+  private drawDrinkArm(ctx: CanvasRenderingContext2D): void {
+    if (!this.propPose.active || this.propArmAlpha < 0.02) return;
+    // The whale girl has her own limb rig; skip the cat arm for her.
+    if (this.catBreed === 'dafeiyu') return;
+    const a = this.getPropAnchor();
+    const shoulder = this.getDrinkShoulder(a.side);
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, this.propArmAlpha);
+    this.drawPlumpCatArm(
+      ctx,
+      a.side,
+      shoulder.x,
+      shoulder.y,
+      this.propPose.handX,
+      this.propPose.handY,
+      0.06,
+      false,
+    );
+    ctx.restore();
+  }
+
+  /** Reaction bubble that pops above the head once the drink is down. */
+  private showDrinkFeedback(kind: PropKind): void {
+    const table: Record<PropKind, Array<{ emoji: string; text: string }>> = {
+      cola: [
+        { emoji: '🥤', text: '嗝～' },
+        { emoji: '🥤', text: '气真足' },
+        { emoji: '🥤', text: '爽！' },
+      ],
+      coffee: [
+        { emoji: '☕', text: '提神！' },
+        { emoji: '☕', text: '精神了' },
+        { emoji: '☕', text: '唔…香' },
+      ],
+      boba: [
+        { emoji: '🧋', text: '好喝～' },
+        { emoji: '🧋', text: '还想喝' },
+        { emoji: '🧋', text: '甜甜的' },
+      ],
+      energy: [
+        { emoji: '⚡', text: '满电！' },
+        { emoji: '⚡', text: '燃烧吧' },
+        { emoji: '⚡', text: '起飞！' },
+      ],
+      pudding: [
+        { emoji: '🍮', text: '甜甜的' },
+        { emoji: '🍮', text: '再来一口' },
+        { emoji: '🍮', text: '软乎乎' },
+      ],
+    };
+    const list = table[kind] ?? table.coffee;
+    const pick = list[Math.floor(Math.random() * list.length)];
+    const max = 1.9;
+    this.drinkFeedback = { emoji: pick.emoji, text: pick.text, t: max, max };
+  }
+
+  /** Picks one of several post-drink reactions so repeated sips never look identical. */
+  private startReaction(kind: PropKind): void {
+    const pools: Record<PropKind, ReactionKind[]> = {
+      // Weighted pools: repeated entries raise that reaction's odds.
+      cola: ['burp', 'burp', 'satisfied', 'shake'],
+      coffee: ['happy', 'happy', 'satisfied', 'shake'],
+      boba: ['satisfied', 'satisfied', 'lick', 'happy'],
+      energy: ['happy', 'happy', 'shake', 'satisfied'],
+      pudding: ['lick', 'lick', 'satisfied', 'happy'],
+    };
+    const pool = pools[kind] ?? ['satisfied'];
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    this.reaction = { kind: pick, t: 2.2, max: 2.2 };
+    if (pick === 'burp') {
+      this.burpKick = 1;
+      this.spawnMouthBubbles();
+    }
+  }
+
+  private drawDrinkFeedback(ctx: CanvasRenderingContext2D): void {
+    const f = this.drinkFeedback;
+    if (!f) return;
+    const prog = 1 - f.t / f.max;
+    // Fade in fast, hold, fade out at the tail.
+    const alpha = f.t < 0.45 ? f.t / 0.45 : Math.min(1, prog / 0.12);
+    const rise = Math.min(14, prog * 26);
+    const cx = this.catCenterX;
+    const cy = this.catTopY - 4 - rise;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.font = '600 9px "Segoe UI Emoji", "Segoe UI", "PingFang SC", sans-serif';
+    const label = `${f.emoji} ${f.text}`;
+    const w = ctx.measureText(label).width + 14;
+    const h = 17;
+    const x = cx - w / 2;
+    const y = cy - h;
+
+    ctx.fillStyle = 'rgba(18, 22, 30, 0.88)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 1;
+    roundRectPath(ctx, x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.stroke();
+    // Little tail pointing at the cat.
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, y + h - 0.5);
+    ctx.lineTo(cx, y + h + 4.5);
+    ctx.lineTo(cx + 4, y + h - 0.5);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(18, 22, 30, 0.88)';
+    ctx.fill();
+
+    ctx.fillStyle = '#e8edf4';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, cx, y + h / 2 + 0.5);
+    ctx.restore();
+  }
+
+  /** Few small bubbles escaping the mouth after a fizzy drink. */
+  private spawnMouthBubbles(): void {
+    const a = this.getPropAnchor();
+    const dir = a.side === 'right' ? 1 : -1;
+    const mx = this.catCenterX + dir * 10;
+    const my = this.catTopY + 100;
+    for (let i = 0; i < 7; i++) {
+      const life = 0.8 + Math.random() * 0.8;
+      this.particles.push({
+        shape: 'bubble',
+        x: mx + (Math.random() - 0.5) * 10,
+        y: my + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 20,
+        vy: -16 - Math.random() * 18,
+        life,
+        maxLife: life,
+        size: 1.4 + Math.random() * 2.2,
+        color: 'rgba(255,255,255,0.9)',
+        rotation: 0,
+        spin: 0,
+      });
+    }
+  }
+
+  /** Any real input (typing / mouse) ends the current idle action immediately. */
+  private interruptIdleAction(): void {
+    if (!this.idleAction) return;
+    this.endIdleAction();
+    this.nextIdleActionAt = this.elapsed + 45 + Math.random() * 70;
+  }
+
+  /** Drops the action, releases any posed paw and parks the tail again. */
+  private endIdleAction(): void {
+    this.idleAction = null;
+    this.idlePaw = null;
+    for (const paw of [this.leftPaw, this.rightPaw]) {
+      if (paw.mode === 'pose') paw.mode = 'idle';
+    }
+    if (this.catTail.active) this.catTail.active = false;
+    this.wakeRendering();
+  }
+
+  /** Points a paw at an arbitrary spot without the key-press semantics of 'poke'. */
+  private posePaw(side: 'left' | 'right', x: number, y: number): void {
+    const paw = side === 'right' ? this.rightPaw : this.leftPaw;
+    if (paw.mode === 'mouse') return; // never yank the paw off the mouse
+    paw.mode = 'pose';
+    paw.target = { x, y };
+    this.idlePaw = { side, x, y };
+  }
+
+  /** Runs / advances the idle behaviours (stretch, groom, nap, cuddle, drink). */
+  private updateIdleAction(dt: number, now: number): void {
+    const idleSec = (now - Math.max(this.lastAnyKeyAt, this.lastMouseMoveAt)) / 1000;
+    let leanTarget = 0;
+    let hunchTarget = 0;
+    let headTiltTarget = 0;
+    let squintTarget = 0;
+    this.idlePaw = null;
+    this.fishTarget = {
+      lean: 0,
+      lift: 0,
+      leftX: 0,
+      leftY: 0,
+      leftOn: false,
+      rightX: 0,
+      rightY: 0,
+      rightOn: false,
+    };
+
+    if (this.idleAction) {
+      this.idleAction.t += dt;
+      const t = Math.min(1, this.idleAction.t / this.idleAction.duration);
+      // Envelope so every pose eases in and out instead of popping.
+      const envelope = Math.max(0, Math.min(1, Math.min(t / 0.16, (1 - t) / 0.16)));
+
+      if (this.catBreed === 'dafeiyu') {
+        this.updateFishPose(t, envelope);
+      } else {
+        switch (this.idleAction.kind) {
+        case 'stretch': {
+          // Both front paws reach up and out to the sides, like a big yawn-stretch.
+          const s = Math.sin(t * Math.PI);
+          hunchTarget = -0.12 * s; // head tips back a touch
+          squintTarget = 0.55 * s;
+          this.posePaw('left', this.catCenterX - 92, this.catTopY + 84 - 10 * s);
+          this.posePaw('right', this.catCenterX + 92, this.catTopY + 84 - 10 * s);
+          break;
+        }
+        case 'wave': {
+          // Raise one paw beside the head and wave it side to side.
+          const waveSign = 1;
+          const wobble = Math.sin(this.elapsed * 9) * 8 * envelope;
+          this.posePaw('right', this.catCenterX + 54 + wobble, this.catTopY + 74);
+          headTiltTarget = waveSign * 0.12 * envelope;
+          leanTarget = waveSign * 0.08 * envelope;
+          squintTarget = 0.3 * envelope;
+          if (Math.random() < dt * 1.8) this.earTwitchRight = 1;
+          break;
+        }
+        case 'groom': {
+          // A paw wipes the muzzle in a small circle, head tips toward it.
+          const side: 'left' | 'right' = Math.floor(t * 2) % 2 === 0 ? 'right' : 'left';
+          const sign = side === 'right' ? 1 : -1;
+          const mouth = this.getMouthPoint();
+          const ang = this.elapsed * 7;
+          this.posePaw(
+            side,
+            mouth.x + sign * 10 + Math.cos(ang) * 4.5,
+            mouth.y + 5 + Math.sin(ang) * 4.5,
+          );
+          headTiltTarget = sign * 0.13 * envelope;
+          squintTarget = 0.6 * envelope;
+          if (Math.random() < dt * 2.2) {
+            if (side === 'left') this.earTwitchLeft = 1;
+            else this.earTwitchRight = 1;
+          }
+          break;
+        }
+        case 'nap': {
+          // Sitting loaf: head down, eyes shut, slow breathing, Zzz.
+          hunchTarget = 0.9 * envelope;
+          headTiltTarget = 0.1 * envelope;
+          squintTarget = 1;
+          break;
+        }
+        case 'cuddle': {
+          // Leans over, lifts one paw and swishes the tail — "摸鱼撒娇".
+          const sway = Math.sin(t * Math.PI);
+          const dir = this.cuddleSide === 'left' ? -1 : 1;
+          leanTarget = dir * 0.5 * sway;
+          headTiltTarget = -dir * 0.2 * sway;
+          squintTarget = 0.7 * envelope;
+          this.posePaw(
+            dir === 1 ? 'left' : 'right',
+            this.catCenterX - dir * 20,
+            this.catBaseY - 96,
+          );
+          this.catTail.active = true;
+          this.catTail.targetX = this.catCenterX + dir * (118 + Math.sin(this.elapsed * 6) * 26);
+          this.catTail.targetY = this.kbCenterY - 22;
+          if (Math.random() < dt * 2.2) this.spawnHeartParticle(false);
+          break;
+        }
+        default:
+            break;
+        }
+      }
+
+      if (this.idleAction.t >= this.idleAction.duration) {
+        this.endIdleAction();
+        this.nextIdleActionAt = this.elapsed + 45 + Math.random() * 70;
+      }
+      this.wakeRendering(now);
+    } else if (this.idleAutoEnabled && idleSec > 18 && this.elapsed >= this.nextIdleActionAt) {
+      this.pickIdleAction();
+      this.nextIdleActionAt = this.elapsed + 45 + Math.random() * 70;
+    }
+
+    const k = 1 - Math.exp(-8 * dt);
+    this.idlePose.lean += (leanTarget - this.idlePose.lean) * k;
+    this.idlePose.hunch += (hunchTarget - this.idlePose.hunch) * k;
+    this.idlePose.headTilt += (headTiltTarget - this.idlePose.headTilt) * k;
+    this.idlePose.squint += (squintTarget - this.idlePose.squint) * (1 - Math.exp(-6 * dt));
+
+    // Whale-girl pose channels.
+    const fk = 1 - Math.exp(-9 * dt);
+    this.fishPose.lean += (this.fishTarget.lean - this.fishPose.lean) * fk;
+    this.fishPose.lift += (this.fishTarget.lift - this.fishPose.lift) * fk;
+    const hk = 1 - Math.exp(-16 * dt);
+    this.fishPose.leftOn = this.fishTarget.leftOn;
+    if (this.fishPose.leftOn) {
+      this.fishPose.leftX += (this.fishTarget.leftX - this.fishPose.leftX) * hk;
+      this.fishPose.leftY += (this.fishTarget.leftY - this.fishPose.leftY) * hk;
+    }
+    this.fishPose.rightOn = this.fishTarget.rightOn;
+    if (this.fishPose.rightOn) {
+      this.fishPose.rightX += (this.fishTarget.rightX - this.fishPose.rightX) * hk;
+      this.fishPose.rightY += (this.fishTarget.rightY - this.fishPose.rightY) * hk;
+    }
+  }
+
+  /** Wave / stretch poses for the whale girl, expressed in her layout channels. */
+  private updateFishPose(t: number, envelope: number): void {
+    const layout = this.buildDaFeiYuLayout();
+    const mouth = this.dafeiyu.getMouthWorld(performance.now(), layout);
+    if (this.idleAction?.kind === 'wave') {
+      this.fishTarget.lean = 0.12 * Math.sin(t * Math.PI);
+      this.fishTarget.rightOn = true;
+      this.fishTarget.rightX = mouth.x + 44 + Math.sin(this.elapsed * 8) * 7 * envelope;
+      this.fishTarget.rightY = mouth.y - 30;
+    } else if (this.idleAction?.kind === 'stretch') {
+      const s = Math.sin(t * Math.PI);
+      this.fishTarget.lean = 0;
+      this.fishTarget.lift = s;
+      // Both arms reach up and out, like the cat's stretch.
+      this.fishTarget.leftOn = true;
+      this.fishTarget.leftX = mouth.x - 62;
+      this.fishTarget.leftY = mouth.y - 16 - 66 * s;
+      this.fishTarget.rightOn = true;
+      this.fishTarget.rightX = mouth.x + 62;
+      this.fishTarget.rightY = mouth.y - 16 - 66 * s;
+    }
+  }
+
+  private pickIdleAction(): void {
+    if (this.catBreed === 'dafeiyu') {
+      const fishPool: IdleActionKind[] = ['wave', 'stretch'];
+      if (this.propConfig.enabled && this.drinker.level > 0.05) fishPool.push('drink');
+      const fishKind = fishPool[Math.floor(Math.random() * fishPool.length)];
+      if (fishKind === 'drink') this.triggerSip();
+      else this.triggerIdleAction(fishKind);
+      return;
+    }
+    const pool: IdleActionKind[] = ['cuddle', 'stretch', 'groom', 'wave', 'nap', 'nap'];
+    if (this.propConfig.enabled && this.drinker.level > 0.05) pool.push('drink');
+    const kind = pool[Math.floor(Math.random() * pool.length)];
+    if (kind === 'drink') {
+      if (!this.triggerSip()) this.triggerIdleAction('nap');
+    } else {
+      this.triggerIdleAction(kind);
+    }
+  }
+
+  /** Heart puff for the "roll over" idle behaviour. */
+  private spawnHeartParticle(big: boolean): void {
+    const count = big ? 7 : 1;
+    for (let i = 0; i < count; i++) {
+      const life = 1.0 + Math.random() * 0.9;
+      this.particles.push({
+        shape: 'heart',
+        x: this.catCenterX + (Math.random() - 0.5) * 60,
+        y: this.catTopY + 30 + (Math.random() - 0.5) * 30,
+        vx: (Math.random() - 0.5) * 22,
+        vy: -16 - Math.random() * 18,
+        life,
+        maxLife: life,
+        size: 3 + Math.random() * 3,
+        color: ['#ff6b9d', '#ff9ec4', '#ffd166'][Math.floor(Math.random() * 3)],
+        rotation: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 2,
+      });
+    }
+    if (this.particles.length > 160) this.particles.splice(0, this.particles.length - 160);
+  }
+
+  /** Drifting "Z z z" above the head while asleep. */
+  private drawSleepZzz(ctx: CanvasRenderingContext2D): void {
+    if (this.idleAction?.kind !== 'nap') return;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const baseX = this.catCenterX + 26;
+    const baseY = this.catTopY + 26;
+    for (let i = 0; i < 3; i++) {
+      const phase = (this.elapsed * 0.55 + i * 0.33) % 1;
+      const alpha = Math.sin(phase * Math.PI) * 0.85;
+      const size = 7 + i * 2.4;
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.font = `700 ${size}px "Segoe UI", system-ui, sans-serif`;
+      ctx.fillStyle = '#5b6472';
+      ctx.fillText('z', baseX + i * 6 + phase * 8, baseY - phase * 26);
+    }
+    ctx.restore();
+  }
+
+
+  private clampToKeyboardSurface(pt: Vec2): Vec2 {    // Transform into keyboard-local space and clamp so the plump paw pad NEVER extends past the keyboard bezel!
     const dx = pt.x - this.kbCenterX;
     const dy = pt.y - this.kbCenterY;
     const cos = Math.cos(-this.kbTiltRad);
@@ -1036,6 +2188,56 @@ export class KuroCatEngine {
 
   private update(dt: number, now: number): void {
     this.elapsed += dt;
+    this.lightEngine.advance(dt);
+
+    // Prop drinking cycle: only runs while the user is away, so it never fights for attention.
+    if (this.propConfig.enabled && !this.idleAction) {
+      const idleSec = (now - Math.max(this.lastAnyKeyAt, this.lastMouseMoveAt)) / 1000;
+      const drank = this.drinker.update(dt, idleSec, this.propConfig);
+      if (drank) {
+        this.wakeRendering(now);
+        if (this.propConfig.kind === 'cola') this.propFizz = 1;
+        if (this.propConfig.kind === 'boba' || this.propConfig.kind === 'pudding') {
+          catAudio.setPurrIntensity(0.5);
+        }
+        this.spawnDrinkParticles(this.propConfig.kind, 18);
+        this.showDrinkFeedback(this.propConfig.kind);
+        this.startReaction(this.propConfig.kind);
+        if (this.catBreed === 'dafeiyu') {
+          this.dafeiyu.onDrinkFinished();
+          // Her "happy" sprite is gated on petEnergy, so a finished drink lights her up.
+          this.petEnergy = 1;
+        }
+      }
+      if (this.propFizz > 0) this.propFizz = Math.max(0, this.propFizz - dt * 0.42);
+      if (this.drinker.drinking) this.wakeRendering(now);
+    }
+
+    // Reach weight drives the little "lean toward the cup" pose.
+    const wantReach =
+      this.drinker.phase === 'reach' || this.drinker.phase === 'lift' || this.drinker.phase === 'sip'
+        ? 1
+        : this.drinker.phase === 'return'
+          ? 1 - this.drinker.phaseProgress
+          : 0;
+    this.propReach += (wantReach - this.propReach) * (1 - Math.exp(-9 * dt));
+    if (this.propReach > 0.01) this.wakeRendering(now);
+
+    if (this.burpKick > 0) {
+      this.burpKick = Math.max(0, this.burpKick - dt * 1.9);
+      this.wakeRendering(now);
+    }
+
+    this.updatePropPose(dt);
+    this.updateIdleAction(dt, now);
+
+    if (this.drinkFeedback) {
+      this.drinkFeedback.t -= dt;
+      if (this.drinkFeedback.t <= 0) this.drinkFeedback = null;
+      else this.wakeRendering(now);
+    }
+
+    this.updateParticles(dt);
 
     // Cross-platform lost-MouseUp safety fallback (Fixes #4 on macOS/Linux/web; Windows also reconciles via GetAsyncKeyState)
     const MOUSE_STUCK_FALLBACK_MS = 10_000;
@@ -1110,7 +2312,10 @@ export class KuroCatEngine {
       now - this.lastAnyKeyAt < 650 ||
       this.heldKeys.size > 0 ||
       this.catTail.heldVks.size > 0;
-    const targetHunch = isTypingRecently ? 0.45 + this.typingEnergy * 0.55 : 0;
+    const targetHunch = Math.min(
+      1,
+      (isTypingRecently ? 0.45 + this.typingEnergy * 0.55 : 0) + this.idlePose.hunch,
+    );
     this.typingHunch += (targetHunch - this.typingHunch) * (1 - Math.exp(-10 * dt));
 
     const rockAcc = -this.strikeRock * 140 - this.strikeRockVel * 14;
@@ -1121,14 +2326,14 @@ export class KuroCatEngine {
     this.kbBounce = Math.max(0, this.kbBounce - dt * 15);
 
     // Playful left-right body & head groove sway during pure typing (matches original video first half!)
-    const pureTypingActive = isTypingRecently && this.leftPaw.mode !== 'mouse';
+    const pureTypingActive = isTypingRecently && this.mousePaw.mode !== 'mouse';
     if (pureTypingActive) {
       this.typingGroovePhase += dt * (4.8 + this.typingEnergy * 5.2);
     }
     const grooveWave = Math.sin(this.typingGroovePhase) * (0.58 + this.typingEnergy * 0.44);
     const targetTypingSway = pureTypingActive
       ? Math.max(-1.1, Math.min(1.1, grooveWave * 0.72 + this.lastKeyBias * 0.55))
-      : this.leftPaw.mode === 'mouse' && isTypingRecently
+      : this.mousePaw.mode === 'mouse' && isTypingRecently
         ? Math.sin(this.typingGroovePhase) * 0.16
         : 0;
     const swayAcc = (targetTypingSway - this.typingSway) * 118 - this.typingSwayVel * 12.5;
@@ -1137,24 +2342,72 @@ export class KuroCatEngine {
 
     // Measured spine-shear lean: shifts head & chest cleanly forward-left toward mouse while hips stay anchored!
     let targetLean = 0;
-    if (this.leftPaw.mode === 'mouse') {
-      const mouseSweepBias = (this.mouseOffsetX / 18) * 0.22;
-      targetLean = this.rightPaw.mode === 'poke'
-        ? -0.52 + mouseSweepBias
-        : -0.96 + mouseSweepBias;
+    if (this.mousePaw.mode === 'mouse') {
+      // Lean toward whichever side the mouse sits on (mirrored when the prop swaps sides).
+      const leanSign = this.mousePawSide === 'right' ? 1 : -1;
+      const mouseSweepBias = (this.mouseOffsetX / 18) * 0.22 * leanSign;
+      targetLean = (this.freePaw.mode === 'poke' ? 0.52 : 0.96) * leanSign + mouseSweepBias;
     }
+    // Leaning toward the drink while reaching for it.
+    if (this.propReach > 0.01) {
+      const dir = this.getPropAnchor().side === 'right' ? 1 : -1;
+      targetLean += dir * 0.34 * this.propReach;
+    }
+    // Idle poses (cuddle sway) layer on top of the typing / mouse lean.
+    targetLean += this.idlePose.lean;
     this.spineLean += (targetLean - this.spineLean) * (1 - Math.exp(-10 * dt));
 
     const desiredHeadTilt =
       this.typingSway * 0.18 +
       this.typingHunch * (this.strikeRock * 0.065 - 0.02) +
-      this.spineLean * 0.085;
+      this.spineLean * 0.085 +
+      this.idlePose.headTilt;
     this.headTilt += (desiredHeadTilt - this.headTilt) * (1 - Math.exp(-12 * dt));
 
     this.petEnergy = Math.max(0, this.petEnergy - dt * (this.cursorOverCat ? 0.22 : 1.15));
     this.lastDt = dt;
-    const wantSquint = this.petEnergy > 0.3 ? 1 : 0;
+    // A satisfied drink leaves the cat squinting happily for a few seconds.
+    const mood = moodForKind(this.propMood);
+    const sipping = this.drinker.phase === 'sip';
+    if (this.reaction) {
+      this.reaction.t -= dt;
+      if (this.reaction.t <= 0) this.reaction = null;
+      else this.wakeRendering(now);
+    }
+    const rx = this.reaction?.kind;
+    // Every drink gets its own face, and the random reaction layers on top.
+    let moodSquint = 0;
+    if (mood === 'content' || mood === 'bliss') moodSquint = 1;
+    else if (mood === 'burp') moodSquint = 0.28;
+    else moodSquint = 0;
+    let reactionSquint = 0;
+    if (rx === 'satisfied') reactionSquint = 1;
+    else if (rx === 'lick') reactionSquint = 0.6;
+    else if (rx === 'shake') reactionSquint = 0.15;
+    else if (rx === 'happy') reactionSquint = 0.25;
+    else if (rx === 'burp') reactionSquint = 0.3;
+    const wantSquint = Math.max(
+      this.petEnergy > 0.3
+        ? 1
+        : sipping || this.idleAction?.kind === 'nap'
+          ? 1
+          : Math.max(moodSquint, reactionSquint),
+      this.idlePose.squint,
+    );
     this.squintAmount += (wantSquint - this.squintAmount) * (1 - Math.exp(-12 * dt));
+    const wantEyeGlow = mood === 'hyper' || rx === 'happy' ? 1 : 0;
+    this.eyeGlow += (wantEyeGlow - this.eyeGlow) * (1 - Math.exp(-8 * dt));
+    // Coffee: ears flick nervously. Energy: whole head buzzes a little.
+    if (mood === 'jittery' && Math.random() < dt * 7) {
+      if (Math.random() < 0.5) this.earTwitchLeft = 1;
+      else this.earTwitchRight = 1;
+    }
+    if (mood === 'hyper') {
+      this.headTilt += Math.sin(this.elapsed * 36) * 0.008;
+    }
+    // Reaction-specific head gestures.
+    if (rx === 'shake') this.headTilt += Math.sin(this.elapsed * 24) * 0.05;
+    else if (rx === 'lick') this.headTilt += Math.sin(this.elapsed * 8) * 0.025;
     const wantPrivacy = this.privacyMode ? 1 : 0;
     this.privacyClose += (wantPrivacy - this.privacyClose) * (1 - Math.exp(-14 * dt));
     catAudio.setPurrIntensity(
@@ -1206,6 +2459,28 @@ export class KuroCatEngine {
 
     this.earTwitchLeft = Math.max(0, this.earTwitchLeft - dt * 8);
     this.earTwitchRight = Math.max(0, this.earTwitchRight - dt * 8);
+
+    // Real cats keep flicking an ear at random to track sounds.
+    if (this.elapsed >= this.nextEarFlickAt) {
+      this.nextEarFlickAt = this.elapsed + 2.4 + Math.random() * 4.6;
+      const roll = Math.random();
+      if (roll < 0.42) {
+        this.earTurnLeft = 0.22;
+        this.earTwitchLeft = 1;
+      } else if (roll < 0.84) {
+        this.earTurnRight = 0.22;
+        this.earTwitchRight = 1;
+      } else {
+        this.earTurnLeft = this.earTurnRight = 0.26;
+        this.earTwitchLeft = this.earTwitchRight = 1;
+      }
+    }
+    // Slow release so the "listening" tilt is actually visible.
+    this.earTurnLeft *= Math.exp(-1.6 * dt);
+    this.earTurnRight *= Math.exp(-1.6 * dt);
+    // Ears droop back while dozing.
+    const wantEarBack = this.idleAction?.kind === 'nap' ? 0.5 : 0;
+    this.earBack += (wantEarBack - this.earBack) * (1 - Math.exp(-5 * dt));
 
     if (!this.isBlinking && this.elapsed >= this.nextBlinkAt) {
       this.isBlinking = true;
@@ -1291,15 +2566,16 @@ export class KuroCatEngine {
       const anyClickPress = Math.max(this.mouseLeftPress, this.mouseRightPress, this.mouseMiddlePress);
       if (isCatFacing) {
         // 180° cat-facing: palm heel at TOP, LMB = inner/+X, RMB = outer/-X
+        // Sit further back on the palm heel so the L/R button plates stay visible.
         paw.target = {
           x: liveMouseX + 1.2 + lrBias * 6.4,
-          y: liveMouseY - 11.5 + anyClickPress * 3.6,
+          y: liveMouseY - 17.6 + anyClickPress * 2.2,
         };
       } else {
         // 0° viewer-facing: palm heel at BOTTOM, LMB = left/-X, RMB = right/+X
         paw.target = {
           x: liveMouseX + 0.5 - lrBias * 6.4,
-          y: liveMouseY + 10.0 - anyClickPress * 3.4,
+          y: liveMouseY + 16.0 - anyClickPress * 2.2,
         };
       }
       const stillHolding =
@@ -1410,43 +2686,75 @@ export class KuroCatEngine {
       const now = performance.now();
       const layout = this.buildDaFeiYuLayout();
       this.dafeiyu.renderBody(ctx, now, layout);
-      this.drawMiniMouse(ctx);
+      // Facing the viewer puts the L/R plates on top, exactly where her arm comes from,
+      // so there the mouse is drawn last; otherwise her hand stays on top of the shell.
+      const fishMouseOnTop = this.mouseFacing === 'viewer';
+      if (!fishMouseOnTop) this.drawMiniMouse(ctx);
       this.drawKeyboard(ctx);
+      this.drawProp(ctx);
       this.dafeiyu.renderForeground(ctx, this.lastDt, now, layout);
+      if (fishMouseOnTop) this.drawMiniMouse(ctx);
+      this.drawParticles(ctx);
       if (this.showKeyBubbles && !this.privacyMode) {
         this.drawKeyBubbles(ctx);
         this.drawMouseBadges(ctx);
       }
+      this.drawDrinkFeedback(ctx);
       ctx.restore();
       return;
     }
 
-    // Layer 1: Mini mouse & mechanical keyboard
-    this.drawMiniMouse(ctx);
+    // Layer 1: Mini mouse & mechanical keyboard.
+    // Viewer-facing puts the button plates on top, exactly where the cat's arm comes from,
+    // so the mouse is drawn last in that orientation to keep L/R visible.
+    const mouseOnTop = this.mouseFacing === 'viewer';
+    if (!mouseOnTop) this.drawMiniMouse(ctx);
     this.drawKeyboard(ctx);
 
     // Layer 2: Plush cat tail (above keyboard so near-tail key pats land cleanly on keycaps, yet seamlessly tucked behind hip!)
     this.drawTail(ctx);
 
+    // The cat (and whatever it holds) hops a few pixels when it burps.
+    const hop = -Math.sin(Math.min(1, this.burpKick) * Math.PI) * 3.6;
+    ctx.save();
+    ctx.translate(0, hop);
+
     // Layer 3: Exact measured spine-deformable cat silhouette (ears, cheeks, neck, pear belly, grounded hind feet, eyes & tiny whiskers)
     this.drawCatBody(ctx, breath, purrShift);
+
+    // Layer 3.5: The drink sits on TOP of the body so it is never hidden, then the arm grips over it.
+    this.drawProp(ctx);
+    this.drawDrinkArm(ctx);
 
     // Layer 4: True-scale velvety cat paws (tapered idle legs / planted diagonal mouse support leg / bent curled chest paw / plump round poking paw!)
     this.drawPaw(ctx, this.leftPaw, breath);
     this.drawPaw(ctx, this.rightPaw, breath);
 
-    // Layer 5: Organic bouncing 3D keycap bubbles & crisp mouse click badges
+    if (mouseOnTop) this.drawMiniMouse(ctx);
+
+    ctx.restore();
+
+    // Layer 5: Drink particles, bouncing keycap bubbles & crisp mouse click badges
+    this.drawParticles(ctx);
     if (this.showKeyBubbles && !this.privacyMode) {
       this.drawKeyBubbles(ctx);
       this.drawMouseBadges(ctx);
     }
+
+    this.drawDrinkFeedback(ctx);
+    this.drawSleepZzz(ctx);
 
     ctx.restore();
   }
 
   private drawTail(ctx: CanvasRenderingContext2D): void {
     // Exact ORIG 0.3s resting tail S-hook, smoothly morphing into a playful arched swan-neck pat onto near-tail keys!
-    const gentleDrift = Math.sin(this.elapsed * 0.9) * 1.4;
+    // Caffeine rush: faster tail and livelier head sway for a few seconds.
+    const tailMood = moodForKind(this.propMood);
+    const jittery = tailMood === 'jittery' || tailMood === 'hyper';
+    const gentleDrift = jittery
+      ? Math.sin(this.elapsed * 6.5) * 3.4
+      : Math.sin(this.elapsed * 0.9) * 1.4;
     const hipRight = this.spinePoint(0.84, 0);
 
     const startX = hipRight.x + 56;
@@ -1678,6 +2986,7 @@ export class KuroCatEngine {
   private drawCatBody(ctx: CanvasRenderingContext2D, breath: number, purrShift: number): void {
     if (this.customSkin) {
       this.drawCustomCatBody(ctx, this.customSkin, breath, purrShift);
+      this.drawDrinkArm(ctx);
       return;
     }
     const isRagdoll = this.catBreed === 'ragdoll';
@@ -1913,8 +3222,14 @@ export class KuroCatEngine {
 
     const drawOneEar = (sideSign: -1 | 1, twitch: number) => {
       ctx.save();
-      ctx.translate(sideSign * 33 + this.faceTurnX * 0.18, -28);
-      ctx.rotate(sideSign * (0.08 + twitch));
+      // Per-ear listening turn + relaxed droop (airplane ears when dozing).
+      const earTurn = sideSign < 0 ? this.earTurnLeft : this.earTurnRight;
+      const back = this.earBack;
+      ctx.translate(
+        sideSign * (33 + back * 2.5) + this.faceTurnX * 0.18,
+        -28 + back * 7,
+      );
+      ctx.rotate(sideSign * (0.08 + twitch + earTurn + back * 0.5));
 
       const earPath = () => {
         ctx.beginPath();
@@ -2057,6 +3372,20 @@ export class KuroCatEngine {
       ctx.save();
       ctx.translate(ex, eyeY);
 
+      // Energy-drink rush: additive glow ring around each eye for a few seconds.
+      if (this.eyeGlow > 0.02 && this.privacyClose < 0.45) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(0, 0, rx * 0.4, 0, 0, rx * 1.7);
+        g.addColorStop(0, `rgba(120, 240, 255, ${(0.55 * this.eyeGlow).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(120, 240, 255, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, rx * 1.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
       if (this.privacyClose > 0.45) {
         ctx.strokeStyle = isRagdoll ? '#212533' : '#d4f044';
         ctx.lineWidth = 2.9;
@@ -2166,8 +3495,10 @@ export class KuroCatEngine {
   private drawMiniMouse(ctx: CanvasRenderingContext2D): void {
     const mx = this.mouseBaseX + this.mouseOffsetX;
     const my = this.mouseBaseY + this.mouseOffsetY;
-    const rx = 18.5;
-    const ry = 23.0;
+    const ms = this.deskSkin.mouse;
+    const shape = ms.silhouette;
+    const rx = shape === 'gaming' ? 19.5 : shape === 'ergonomic' ? 19 : 18.5;
+    const ry = shape === 'gaming' ? 24.5 : 23.0;
     const lPress = this.mouseLeftPress;
     const rPress = this.mouseRightPress;
     const mPress = Math.max(this.mouseMiddlePress, this.mouseScrollFlash);
@@ -2182,26 +3513,54 @@ export class KuroCatEngine {
     ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
     ctx.shadowBlur = 7;
     ctx.shadowOffsetY = 3.5;
-    ctx.fillStyle = '#c8cac4';
-    ctx.beginPath();
-    ctx.ellipse(0, 1.8, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = ms.shellEdge;
+    this.mouseBodyPath(ctx, shape, rx, ry, 1.8);
     ctx.fill();
     ctx.restore();
 
+    // Side glow strip for gaming silhouettes
+    if (ms.glow && shape !== 'oval') {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.shadowColor = rgba(ms.glow, 0.85);
+      ctx.shadowBlur = 9;
+      ctx.strokeStyle = rgba(ms.glow, 0.75);
+      ctx.lineWidth = 1.6;
+      this.mouseBodyPath(ctx, shape, rx, ry, 0);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Main mouse palm shell (rear/palm at TOP closest to cat; split L/R buttons at BOTTOM pointing away from cat)
     const palmGrad = ctx.createLinearGradient(0, -ry, 0, 2);
-    palmGrad.addColorStop(0.0, '#ecece7');
-    palmGrad.addColorStop(1.0, '#f4f4f0');
+    palmGrad.addColorStop(0.0, this.shade(ms.shell, 0.1));
+    palmGrad.addColorStop(1.0, ms.shell);
     ctx.fillStyle = palmGrad;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    this.mouseBodyPath(ctx, shape, rx, ry, 0);
     ctx.fill();
 
+    if (ms.pattern !== 'solid') {
+      ctx.save();
+      this.mouseBodyPath(ctx, shape, rx - 0.5, ry - 0.5, 0);
+      ctx.clip();
+      paintPattern(ctx, ms.pattern, {
+        x: -rx,
+        y: -ry,
+        w: rx * 2,
+        h: ry * 2,
+        color: this.shade(ms.shellEdge, -0.15),
+        scale: 1,
+        alpha: 0.4,
+      });
+      ctx.restore();
+    }
+
+    paintMaterialSheen(ctx, ms.material, { x: -rx, y: -ry, w: rx * 2, h: ry * 2, radius: rx });
+
     // Clip inside mouse silhouette to render strictly separated Left / Right front button plates!
-    const isCatFacing = this.keyboardOrientation === 'cat';
+    const isCatFacing = this.mouseFacing === 'cat';
     ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx - 0.5, ry - 0.5, 0, 0, Math.PI * 2);
+    this.mouseBodyPath(ctx, shape, rx - 0.5, ry - 0.5, 0);
     ctx.clip();
 
     // Orientation-aware button/wheel geometry:
@@ -2224,7 +3583,7 @@ export class KuroCatEngine {
     ctx.lineTo(rx + 2, ry + 2);
     ctx.lineTo(0, ry + 2);
     ctx.closePath();
-    ctx.fillStyle = lPress > 0.08 ? colors.left : '#fafaf7';
+    ctx.fillStyle = lPress > 0.08 ? colors.left : ms.button;
     ctx.fill();
     if (lPress > 0.08) {
       ctx.fillStyle = `rgba(18, 22, 28, ${(0.18 * lPress).toFixed(3)})`;
@@ -2239,7 +3598,7 @@ export class KuroCatEngine {
     ctx.lineTo(0, ry + 2);
     ctx.lineTo(-rx - 2, ry + 2);
     ctx.closePath();
-    ctx.fillStyle = rPress > 0.08 ? colors.right : '#fafaf7';
+    ctx.fillStyle = rPress > 0.08 ? colors.right : ms.button;
     ctx.fill();
     if (rPress > 0.08) {
       ctx.fillStyle = `rgba(18, 22, 28, ${(0.18 * rPress).toFixed(3)})`;
@@ -2262,11 +3621,11 @@ export class KuroCatEngine {
     ctx.stroke();
 
     // Recessed scroll wheel housing + interactive wheel (middle click & scroll glow)
-    ctx.fillStyle = '#2d2f36';
+    ctx.fillStyle = this.shade(ms.outline, 0.05);
     this.roundRect(ctx, -2.5, 4.2, 5.0, 9.4, 2.5);
     ctx.fill();
 
-    ctx.fillStyle = mPress > 0.12 ? colors.middle : '#6b6f78';
+    ctx.fillStyle = mPress > 0.12 ? colors.middle : ms.wheel;
     this.roundRect(ctx, -1.7, 5.0 + this.mouseMiddlePress * 0.8, 3.4, 7.6, 1.7);
     ctx.fill();
 
@@ -2295,13 +3654,51 @@ export class KuroCatEngine {
     ctx.restore(); // end mouse clip
 
     // Crisp outer silhouette stroke
-    ctx.strokeStyle = '#2b2d34';
+    ctx.strokeStyle = ms.outline;
     ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    this.mouseBodyPath(ctx, shape, rx, ry, 0);
     ctx.stroke();
 
     ctx.restore();
+  }
+
+  /** Mouse silhouette in local space; `grow` expands it for the rim/shadow pass. */
+  private mouseBodyPath(
+    ctx: CanvasRenderingContext2D,
+    shape: 'oval' | 'ergonomic' | 'gaming',
+    rx: number,
+    ry: number,
+    grow: number,
+  ): void {
+    const g = grow;
+    if (shape === 'oval') {
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx + g, ry + g, 0, 0, Math.PI * 2);
+      return;
+    }
+    if (shape === 'gaming') {
+      // Sharp shoulder at the palm, flared skirt toward the buttons.
+      ctx.beginPath();
+      ctx.moveTo(0, -ry - g);
+      ctx.quadraticCurveTo(rx * 0.95 + g, -ry * 0.72, rx * 0.86 + g, -ry * 0.06);
+      ctx.lineTo(rx * 1.02 + g, ry * 0.52);
+      ctx.quadraticCurveTo(rx * 1.05 + g, ry * 0.92, rx * 0.52 + g, ry + g);
+      ctx.lineTo(-rx * 0.52 - g, ry + g);
+      ctx.quadraticCurveTo(-rx * 1.05 - g, ry * 0.92, -rx * 1.02 - g, ry * 0.52);
+      ctx.lineTo(-rx * 0.86 - g, -ry * 0.06);
+      ctx.quadraticCurveTo(-rx * 0.95 - g, -ry * 0.72, 0, -ry - g);
+      ctx.closePath();
+      return;
+    }
+    // ergonomic: asymmetric waist, wider on the thumb side
+    ctx.beginPath();
+    ctx.moveTo(0, -ry - g);
+    ctx.quadraticCurveTo(rx * 0.88 + g, -ry * 0.78, rx * 0.74 + g, -ry * 0.1);
+    ctx.quadraticCurveTo(rx * 0.66 + g, ry * 0.42, rx * 0.82 + g, ry * 0.82);
+    ctx.quadraticCurveTo(rx * 0.8 + g, ry + g, 0, ry + g);
+    ctx.quadraticCurveTo(-rx * 0.9 - g, ry + g, -rx * 0.92 - g, ry * 0.5);
+    ctx.quadraticCurveTo(-rx * 0.94 - g, -ry * 0.5, 0, -ry - g);
+    ctx.closePath();
   }
 
   private drawKeyboard(ctx: CanvasRenderingContext2D): void {
@@ -2323,24 +3720,81 @@ export class KuroCatEngine {
     const botHalfW = (this.kbWidth * 1.035) / 2;
     const halfH = this.kbHeight / 2;
 
+    const lightCfg = this.lightEngine.getConfig();
+    const nowMs = performance.now();
+    // Backlit decks need dark keycaps for additive light to register at all; a
+    // near-white deck simply swallows the glow.
+    const backlit = !this.privacyMode && lightCfg.enabled && lightCfg.effect !== 'off';
+    const skin = this.deskSkin;
+    const kbs = skin.keyboard;
+
+    // Ambient bloom spilling out from under the deck (cheap: 2 blurred fills, no per-key shadowBlur)
+    const glow = this.privacyMode ? null : this.lightEngine.underglow();
+    if (glow) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.shadowColor = rgba(glow.color, Math.min(0.85, glow.intensity));
+      ctx.shadowBlur = 26;
+      ctx.fillStyle = rgba(glow.color, Math.min(0.5, glow.intensity * 0.5));
+      this.trapezoidPath(ctx, topHalfW + 3, botHalfW + 3, -halfH - 1, halfH + 1, 9);
+      ctx.fill();
+      ctx.restore();
+    }
+
     ctx.save();
     ctx.shadowColor = 'rgba(0, 0, 0, 0.34)';
     ctx.shadowBlur = 11;
     ctx.shadowOffsetY = 5;
-    ctx.fillStyle = '#191a1e';
+    ctx.fillStyle = kbs.deckSide;
     this.trapezoidPath(ctx, topHalfW, botHalfW, -halfH + 3.5, halfH + 5.5, 6.5);
     ctx.fill();
     ctx.restore();
 
-    ctx.fillStyle = '#24262c';
-    ctx.strokeStyle = '#363840';
+    ctx.fillStyle = backlit && kbs.pattern === 'solid' ? this.shade(kbs.deckTop, -0.06) : kbs.deckTop;
+    ctx.strokeStyle = kbs.deckEdge;
     ctx.lineWidth = 1.1;
     this.trapezoidPath(ctx, topHalfW, botHalfW, -halfH, halfH, 6.5);
     ctx.fill();
     ctx.stroke();
 
+    // Chassis rim light: the RGB band real keyboards have along the case edge.
+    const edge = this.privacyMode ? null : this.lightEngine.edgeGlow();
+    if (edge) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(edge.color, Math.min(0.95, edge.intensity));
+      ctx.lineWidth = 2.6;
+      ctx.shadowColor = rgba(edge.color, Math.min(0.9, edge.intensity));
+      ctx.shadowBlur = 13;
+      this.trapezoidPath(ctx, topHalfW, botHalfW, -halfH, halfH, 6.5);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 1.0;
+      ctx.strokeStyle = rgba(edge.color, Math.min(0.55, edge.intensity * 0.75));
+      this.trapezoidPath(ctx, topHalfW - 3.4, botHalfW - 3.4, -halfH + 2.6, halfH - 2.6, 5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Deck surface pattern (carbon / wood / marble / grid / hologram)
+    if (kbs.pattern !== 'solid') {
+      ctx.save();
+      this.trapezoidPath(ctx, topHalfW, botHalfW, -halfH, halfH, 6.5);
+      ctx.clip();
+      paintPattern(ctx, kbs.pattern, {
+        x: -botHalfW,
+        y: -halfH,
+        w: botHalfW * 2,
+        h: halfH * 2,
+        color: kbs.patternColor,
+        scale: kbs.patternScale,
+        alpha: 0.5,
+      });
+      ctx.restore();
+    }
+
     // Bright clean light-grey inner keybed matching ORIG 0.3s bright airy white keyboard!
-    ctx.fillStyle = '#d4d6d1';
+    ctx.fillStyle = backlit && kbs.pattern === 'solid' ? this.shade(kbs.bedFill, -0.02) : kbs.bedFill;
     this.trapezoidPath(ctx, topHalfW - 5, botHalfW - 5, -halfH + 4, halfH - 4, 3.5);
     ctx.fill();
 
@@ -2369,8 +3823,9 @@ export class KuroCatEngine {
       const y = -innerH / 2 + screenRowTop * rowH + gap * 0.5 + press * 2.0;
       const h = rSpan * rowH - gap - 0.8;
 
-      let topColor = '#f8f8f5';
-      let sideColor = '#d0d2cc';
+      let topColor = kbs.keyTop;
+      let sideColor = kbs.keySide;
+      let textColor = kbs.keyText;
       if (press > 0.14) {
         topColor = this.customSkin
           ? this.customSkin.accentColor
@@ -2387,47 +3842,103 @@ export class KuroCatEngine {
               ? '#4690d8'
               : '#8cb014';
       } else if (key.accent === 'orange') {
-        topColor = '#f4a524';
-        sideColor = '#c27a10';
+        topColor = kbs.accentKeyTop;
+        sideColor = kbs.accentKeySide;
       } else if (key.accent === 'mod') {
-        topColor = '#efefeb';
-        sideColor = '#c7c9c3';
+        topColor = kbs.modKeyTop;
+        sideColor = kbs.modKeySide;
       }
 
+      // DIY keycap overrides win over the skin palette but lose to the pressed state.
+      const diy = this.keycapOverrides[key.id] ?? kbs.keycaps?.[key.id];
+      if (diy && press <= 0.14) {
+        if (diy.top) topColor = diy.top;
+        if (diy.side) sideColor = diy.side;
+        if (diy.text) textColor = diy.text;
+      }
+
+      // Backlit mode: mute every cap to a dark translucent shell so the LED reads through.
+      if (backlit && press <= 0.14 && !diy) {
+        topColor = key.accent === 'orange' ? this.shade(kbs.accentKeyTop, -0.62) : this.shade(topColor, -0.78);
+        sideColor = key.accent === 'orange' ? this.shade(kbs.accentKeySide, -0.62) : this.shade(sideColor, -0.78);
+      }
+
+      const geo = keycapGeometry(kbs.shape, w, h);
       ctx.fillStyle = sideColor;
-      this.roundRect(ctx, x, y + 1.4, w, h, 1.8);
+      roundRectPath(ctx, x, y + geo.lift, w, h, geo.radius);
       ctx.fill();
 
       ctx.fillStyle = topColor;
-      this.roundRect(ctx, x, y, w, h - 0.9, 1.8);
+      roundRectPath(ctx, x, y, w, h - 0.9, geo.radius);
       ctx.fill();
 
+      // Per-key RGB: tint the keycap plus a soft additive bloom under it.
+      if (!this.privacyMode && keyInZone(key, lightCfg.zone)) {
+        const anim = this.keyAnims.get(key.id);
+        const lit = this.lightEngine.keyLight({
+          x,
+          y,
+          w,
+          h,
+          press,
+          nx: (screenUStart + key.uWidth * 0.5) / layout.totalUnits,
+          ny: (screenRowTop + rSpan * 0.5) / layout.totalRows,
+          hitAgeSec: anim ? (nowMs - anim.lastHitAt) / 1000 : Infinity,
+        });
+        if (lit) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.shadowColor = rgba(lit.color, Math.min(0.9, lit.intensity));
+          ctx.shadowBlur = 6 + lit.intensity * 8;
+          ctx.fillStyle = rgba(lit.color, Math.min(0.85, lit.intensity * 0.7));
+          roundRectPath(ctx, x, y, w, h - 0.9, geo.radius);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
       // Keycap legends: rotated 180° in cat-facing mode, upright 0° in viewer-facing mode!
-      const legend = key.id === 'space' ? '' : key.id === 'esc' ? 'Esc' : key.label;
+      const diyLegend = diy?.emoji || diy?.label;
+      const legend = diyLegend !== undefined
+        ? diyLegend
+        : key.id === 'space'
+          ? ''
+          : key.id === 'esc'
+            ? 'Esc'
+            : key.label;
       if (legend) {
-        const isWideWord = legend.length >= 3;
-        const fontSize = is108
-          ? isWideWord
-            ? 5.0
-            : legend.length === 2
-              ? 5.8
-              : 7.2
-          : isWideWord
-            ? 5.6
-            : legend.length === 2
-              ? 6.4
-              : 7.8;
+        const isEmoji = Boolean(diy?.emoji);
+        const isWideWord = !isEmoji && legend.length >= 3;
+        const fontSize = isEmoji
+          ? (is108 ? 8.5 : 9.5)
+          : is108
+            ? isWideWord
+              ? 5.0
+              : legend.length === 2
+                ? 5.8
+                : 7.2
+            : isWideWord
+              ? 5.6
+              : legend.length === 2
+                ? 6.4
+                : 7.8;
         ctx.save();
         ctx.translate(x + w * 0.5, y + (h - 0.9) * 0.50);
         if (isCatFacing) {
           ctx.rotate(Math.PI);
         }
-        ctx.font = `700 ${fontSize}px "Segoe UI", system-ui, sans-serif`;
+        ctx.font = isEmoji
+          ? `${fontSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`
+          : `700 ${fontSize}px "Segoe UI", system-ui, sans-serif`;
         ctx.fillStyle = press > 0.14
           ? '#111214'
-          : key.accent === 'orange'
-            ? '#ffffff'
-            : '#2c2f36';
+          : textColor !== kbs.keyText
+            ? textColor
+            : backlit
+              ? rgba(this.readableInk(topColor), 0.78)
+              : key.accent === 'orange'
+                ? '#ffffff'
+                : kbs.keyText;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(legend, 0, 0);
@@ -2469,6 +3980,7 @@ export class KuroCatEngine {
     py: number,
     squash: number,
     withCrease: boolean,
+    pawScale = 1,
   ): void {
     const dx = px - sx;
     const dy = py - sy;
@@ -2485,8 +3997,8 @@ export class KuroCatEngine {
     // True-scale plush proportions for 248px tall cat!
     const rShoulder = 14.2;
     const rWrist = 9.4;
-    const pawRx = 14.5 * (1 + squash * 0.14);
-    const pawRy = 11.8 * (1 - squash * 0.12);
+    const pawRx = 14.5 * (1 + squash * 0.14) * pawScale;
+    const pawRy = 11.8 * (1 - squash * 0.12) * pawScale;
 
     if (this.customSkin) {
       this.drawCustomPlumpArm(ctx, this.customSkin, side, sx, sy, px, py, squash, withCrease);
@@ -2734,15 +4246,34 @@ export class KuroCatEngine {
   }
 
   private drawPaw(ctx: CanvasRenderingContext2D, paw: PawState, breath: number): void {
+    // While drinking, the arm holding the cup replaces that side's idle paw.
+    if (
+      this.propPose.active &&
+      this.propArmAlpha > 0.5 &&
+      this.catBreed !== 'dafeiyu' &&
+      paw.side === this.getPropAnchor().side
+    ) {
+      return;
+    }
     // 1) Seated idle vertical front legs (EXACT 4 clean lines of ORIG 0.3s!) OR planted diagonal supporting leg (ORIG 2.2s!)
     if (paw.idleWeight > 0.05) {
       ctx.save();
       ctx.globalAlpha = paw.idleWeight;
 
-      if (paw.side === 'right' && this.leftPaw.mode === 'mouse') {
+      if (paw.side !== this.mousePawSide && this.mousePaw.mode === 'mouse') {
+        const sign = paw.side === 'right' ? 1 : -1;
         const sh = this.getLiveShoulder(paw, breath);
         const baseSp = this.spinePoint(1.0, breath);
-        this.drawPlumpCatArm(ctx, 'right', sh.x - 4, sh.y + 8, baseSp.x + 28, baseSp.y - 2, 0, true);
+        this.drawPlumpCatArm(
+          ctx,
+          paw.side,
+          sh.x + sign * -4,
+          sh.y + 8,
+          baseSp.x + sign * 28,
+          baseSp.y - 2,
+          0,
+          true,
+        );
       } else {
         // Exact 4-line seated leg silhouette from ORIG 0.3s (outer curved leg line + crisp inner center-gap line!)
         const topSp = this.spinePoint(0.66, breath);
@@ -2834,7 +4365,18 @@ export class KuroCatEngine {
       }
 
       // Keep mouse-reaching arm pure velvet black in open air (ORIG 2.2s); show subtle separation lines when poking across black torso!
-      this.drawPlumpCatArm(ctx, paw.side, sh.x, sh.y, px, py, paw.impactSquash, paw.mode !== 'mouse');
+      // The gripping paw is drawn slightly smaller so the L/R button plates stay visible.
+      this.drawPlumpCatArm(
+        ctx,
+        paw.side,
+        sh.x,
+        sh.y,
+        px,
+        py,
+        paw.impactSquash,
+        paw.mode !== 'mouse',
+        paw.mode === 'mouse' ? 0.78 : 1,
+      );
       ctx.restore();
     }
   }
@@ -3274,8 +4816,13 @@ export class KuroCatEngine {
 
     const drawCustomEar = (sideSign: -1 | 1, twitch: number) => {
       ctx.save();
-      ctx.translate(sideSign * 33 + this.faceTurnX * 0.18, -28);
-      ctx.rotate(sideSign * (0.08 + twitch));
+      const earTurn = sideSign < 0 ? this.earTurnLeft : this.earTurnRight;
+      const back = this.earBack;
+      ctx.translate(
+        sideSign * (33 + back * 2.5) + this.faceTurnX * 0.18,
+        -28 + back * 7,
+      );
+      ctx.rotate(sideSign * (0.08 + twitch + earTurn + back * 0.5));
 
       const earPath = () => {
         ctx.beginPath();
@@ -3410,6 +4957,19 @@ export class KuroCatEngine {
     for (let idx = 0; idx < 2; idx++) {
       ctx.save();
       ctx.translate(eyeXs[idx], eyeY);
+
+      if (this.eyeGlow > 0.02 && this.privacyClose < 0.45) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(0, 0, rx * 0.4, 0, 0, rx * 1.7);
+        g.addColorStop(0, `rgba(120, 240, 255, ${(0.55 * this.eyeGlow).toFixed(3)})`);
+        g.addColorStop(1, 'rgba(120, 240, 255, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(0, 0, rx * 1.7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
 
       if (this.privacyClose > 0.45) {
         ctx.strokeStyle = s.squintColor;

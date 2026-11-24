@@ -46,6 +46,267 @@ pub fn normalize_keyboard_orientation(raw: &str) -> String {
     }
 }
 
+fn default_keyboard_scale_65() -> f64 {
+    1.0
+}
+
+fn default_keyboard_scale_108() -> f64 {
+    0.85
+}
+
+pub fn normalize_keyboard_scale(raw: f64) -> f64 {
+    if raw.is_finite() {
+        raw.clamp(0.60, 1.20)
+    } else {
+        1.0
+    }
+}
+
+fn default_mouse_orientation() -> String {
+    "auto".to_string()
+}
+
+pub fn normalize_mouse_orientation(raw: &str) -> String {
+    match raw.trim() {
+        "cat" => "cat".to_string(),
+        "viewer" => "viewer".to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
+/// Drops malformed DIY keycaps so a hostile or buggy MCP payload cannot break rendering.
+pub fn normalize_keycap_overrides(
+    raw: std::collections::HashMap<String, KeycapOverride>,
+) -> std::collections::HashMap<String, KeycapOverride> {
+    let mut out = std::collections::HashMap::new();
+    for (key, mut v) in raw {
+        if out.len() >= 200 {
+            break;
+        }
+        let id = key.trim().to_lowercase();
+        if id.is_empty()
+            || id.len() > 20
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            continue;
+        }
+        let hex_or_none = |o: Option<String>| -> Option<String> {
+            let s = o?;
+            let c = normalize_hex_color(&s, "");
+            if c.len() > 1 {
+                Some(c)
+            } else {
+                None
+            }
+        };
+        v.top = hex_or_none(v.top);
+        v.side = hex_or_none(v.side);
+        v.text = hex_or_none(v.text);
+        v.label = v
+            .label
+            .map(|s| s.chars().take(4).collect::<String>())
+            .filter(|s: &String| !s.is_empty());
+        v.emoji = v
+            .emoji
+            .map(|s| s.chars().take(4).collect::<String>())
+            .filter(|s: &String| !s.is_empty());
+        if v.top.is_some()
+            || v.side.is_some()
+            || v.text.is_some()
+            || v.label.is_some()
+            || v.emoji.is_some()
+        {
+            out.insert(id, v);
+        }
+    }
+    out
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyboardLightConfig {
+    pub enabled: bool,
+    pub effect: String,
+    pub color: String,
+    pub color2: String,
+    #[serde(default)]
+    pub palette: Vec<String>,
+    #[serde(default = "default_light_color_mode")]
+    pub color_mode: String,
+    #[serde(default)]
+    pub edge_light: bool,
+    pub speed: f64,
+    pub brightness: f64,
+    pub reactive: bool,
+    pub underglow: bool,
+    pub zone: String,
+}
+
+impl Default for KeyboardLightConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            effect: "breath".to_string(),
+            color: "#d2f244".to_string(),
+            color2: "#8cb014".to_string(),
+            palette: DEFAULT_LIGHT_PALETTE.iter().map(|s| s.to_string()).collect(),
+            color_mode: default_light_color_mode(),
+            edge_light: false,
+            speed: 1.0,
+            brightness: 0.75,
+            reactive: true,
+            underglow: true,
+            zone: "all".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeycapOverride {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub side: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<String>,
+}
+
+const LIGHT_EFFECTS: [&str; 9] = [
+    "off", "static", "breath", "rainbow", "random", "wave", "ripple", "typing", "aurora",
+];
+const LIGHT_ZONES: [&str; 4] = ["all", "alnum", "wasd", "numpad"];
+const LIGHT_COLOR_MODES: [&str; 3] = ["solid", "palette", "random"];
+
+fn default_light_color_mode() -> String {
+    "solid".to_string()
+}
+
+pub const DEFAULT_LIGHT_PALETTE: [&str; 8] = [
+    "#ff3b6b", "#ff9a3c", "#ffe14d", "#7ee8a6", "#00e5ff", "#6b8bff", "#c56bff", "#ff6bd6",
+];
+
+fn normalize_hex_color(raw: &str, fallback: &str) -> String {
+    let t = raw.trim().trim_start_matches('#').to_ascii_lowercase();
+    let ok = (t.len() == 6 || t.len() == 3) && t.chars().all(|c| c.is_ascii_hexdigit());
+    if ok {
+        format!("#{}", t)
+    } else {
+        fallback.to_string()
+    }
+}
+
+impl KeyboardLightConfig {
+    pub fn normalized(mut self) -> Self {
+        let def = Self::default();
+        if !LIGHT_EFFECTS.contains(&self.effect.as_str()) {
+            self.effect = def.effect;
+        }
+        if !LIGHT_ZONES.contains(&self.zone.as_str()) {
+            self.zone = def.zone;
+        }
+        self.color = normalize_hex_color(&self.color, &def.color);
+        self.color2 = normalize_hex_color(&self.color2, &def.color2);
+        self.palette = self
+            .palette
+            .iter()
+            .map(|c| normalize_hex_color(c, ""))
+            .filter(|c| c.len() > 1)
+            .take(16)
+            .collect::<Vec<_>>();
+        {
+            let mut seen = std::collections::HashSet::new();
+            self.palette.retain(|c| seen.insert(c.clone()));
+        }
+        if self.palette.len() < 2 {
+            self.palette = def.palette;
+        }
+        if !LIGHT_COLOR_MODES.contains(&self.color_mode.as_str()) {
+            self.color_mode = def.color_mode;
+        }
+        self.speed = if self.speed.is_finite() {
+            self.speed.clamp(0.2, 3.0)
+        } else {
+            def.speed
+        };
+        self.brightness = if self.brightness.is_finite() {
+            self.brightness.clamp(0.0, 1.0)
+        } else {
+            def.brightness
+        };
+        self
+    }
+}
+
+fn default_desk_skin_id() -> String {
+    "classic-cream".to_string()
+}
+
+fn default_idle_actions_enabled() -> bool {
+    true
+}
+
+/// "" = no pending request; otherwise "drink" | "roll" | "sleep".
+fn default_idle_action_request() -> String {
+    String::new()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropConfig {
+    pub enabled: bool,
+    pub kind: String,
+    pub side: String,
+    pub auto_sip: bool,
+    pub sip_interval_min: f64,
+    pub sip_interval_max: f64,
+}
+
+impl Default for PropConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            kind: "coffee".to_string(),
+            side: "right".to_string(),
+            auto_sip: true,
+            sip_interval_min: 45.0,
+            sip_interval_max: 110.0,
+        }
+    }
+}
+
+const PROP_KINDS: [&str; 5] = ["cola", "coffee", "boba", "energy", "pudding"];
+const PROP_SIDES: [&str; 3] = ["left", "right", "auto"];
+
+impl PropConfig {
+    pub fn normalized(mut self) -> Self {
+        let def = Self::default();
+        if !PROP_KINDS.contains(&self.kind.as_str()) {
+            self.kind = def.kind;
+        }
+        if !PROP_SIDES.contains(&self.side.as_str()) {
+            self.side = def.side;
+        }
+        let lo = if self.sip_interval_min.is_finite() {
+            self.sip_interval_min.clamp(10.0, 600.0)
+        } else {
+            def.sip_interval_min
+        };
+        let hi = if self.sip_interval_max.is_finite() {
+            self.sip_interval_max.clamp(lo, 900.0)
+        } else {
+            def.sip_interval_max
+        };
+        self.sip_interval_min = lo;
+        self.sip_interval_max = hi;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -73,8 +334,40 @@ pub struct AppSettings {
     pub keyboard_layout: String,
     #[serde(default = "default_keyboard_orientation")]
     pub keyboard_orientation: String,
+    #[serde(default = "default_keyboard_scale_65")]
+    pub keyboard_scale_65: f64,
+    #[serde(default = "default_keyboard_scale_108")]
+    pub keyboard_scale_108: f64,
+    #[serde(default = "default_mouse_orientation")]
+    pub mouse_orientation: String,
+    #[serde(default)]
+    pub keyboard_light: KeyboardLightConfig,
+    #[serde(default = "default_desk_skin_id")]
+    pub desk_skin_id: String,
+    #[serde(default)]
+    pub prop_config: PropConfig,
+    #[serde(default)]
+    pub keycap_overrides: std::collections::HashMap<String, KeycapOverride>,
+    #[serde(default = "default_idle_actions_enabled")]
+    pub idle_actions_enabled: bool,
+    #[serde(default = "default_idle_action_request")]
+    pub idle_action_request: String,
+    #[serde(default)]
+    pub idle_action_seq: u64,
     #[serde(default = "default_privacy_password_guard")]
     pub privacy_password_guard: bool,
+}
+
+impl AppSettings {
+    /// Scale used by the currently active keyboard layout.
+    pub fn active_keyboard_scale(&self) -> f64 {
+        let raw = if self.keyboard_layout == "108" {
+            self.keyboard_scale_108
+        } else {
+            self.keyboard_scale_65
+        };
+        normalize_keyboard_scale(raw)
+    }
 }
 
 impl Default for AppSettings {
@@ -97,6 +390,16 @@ impl Default for AppSettings {
             mcp_port: default_mcp_port(),
             keyboard_layout: default_keyboard_layout(),
             keyboard_orientation: default_keyboard_orientation(),
+            keyboard_scale_65: default_keyboard_scale_65(),
+            keyboard_scale_108: default_keyboard_scale_108(),
+            mouse_orientation: default_mouse_orientation(),
+            keyboard_light: KeyboardLightConfig::default(),
+            desk_skin_id: default_desk_skin_id(),
+            prop_config: PropConfig::default(),
+            keycap_overrides: std::collections::HashMap::new(),
+            idle_actions_enabled: default_idle_actions_enabled(),
+            idle_action_request: default_idle_action_request(),
+            idle_action_seq: 0,
             privacy_password_guard: default_privacy_password_guard(),
         }
     }

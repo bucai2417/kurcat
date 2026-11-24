@@ -12,6 +12,9 @@ export interface DaFeiYuLayout {
   kbTiltRad: number;
   mouseBtnX: number;
   mouseBtnY: number;
+  /** Mouse shell centre — the hand grips here instead of on the button plates. */
+  mouseCenterX?: number;
+  mouseCenterY?: number;
   mouseNX: number;
   mouseLeft: boolean;
   mouseRight: boolean;
@@ -21,6 +24,18 @@ export interface DaFeiYuLayout {
   privacyMode: boolean;
   privacyTypingAt: number;
   is108: boolean;
+  /** Drink prop interaction: lean toward the cup and put a hand on it. */
+  drinkActive?: boolean;
+  drinkSide?: 'left' | 'right';
+  drinkHandX?: number;
+  drinkHandY?: number;
+  /** 0..1 — how far into the sip (drives lean + head dip). */
+  drinkSip?: number;
+  /** Idle pose (wave / stretch): hands to move and where they go. */
+  poseHands?: Array<{ side: 'left' | 'right'; x: number; y: number }>;
+  /** −1..1 body lean, 0..1 body lift for the stretch. */
+  poseLean?: number;
+  poseLift?: number;
 }
 
 interface HandState {
@@ -150,8 +165,22 @@ export class DaFeiYuRenderer {
     this.bodyBob = Math.min(0.65, this.bodyBob + 0.42);
   }
 
-  public resetLeftHandForMouse(): void {
-    this.leftHand.lastAt = -10000;
+  /** World-space mouth point, so held drinks can line up with her face. */
+  public getMouthWorld(now: number, layout: DaFeiYuLayout): { x: number; y: number } {
+    const g = this.computeGeom(now, layout);
+    return g.spritePointToWorld(0.5, 0.575);
+  }
+
+  /** Tail slap + blush once a drink is finished. */
+  public onDrinkFinished(): void {
+    const now = performance.now();
+    this.tail.slapAt = now;
+    this.tail.releaseAt = now + 240;
+    this.tail.squash = 1;
+    this.blushLevel = Math.min(1, this.blushLevel + 0.3);
+  }
+
+  public resetLeftHandForMouse(): void {    this.leftHand.lastAt = -10000;
   }
 
   public onMouseAction(now: number = performance.now()): void {
@@ -345,6 +374,24 @@ export class DaFeiYuRenderer {
       this.bodyDiveY *= Math.exp(-9 * dt);
     } else {
       this.bodyDiveY *= Math.exp(-9 * dt);
+    }
+
+    // Drinking: lean the whole body toward the cup and add a small head dip.
+    if (layout.drinkActive) {
+      const leanSign = (layout.drinkSide ?? 'right') === 'right' ? 1 : -1;
+      const sip = layout.drinkSip ?? 0;
+      this.bodyShiftTarget += leanSign * (9 + sip * 7);
+      this.bodyTiltTarget += leanSign * (0.045 + sip * 0.03);
+      this.bodyDiveY += (sip * 4 - this.bodyDiveY) * (1 - Math.exp(-8 * dt));
+    }
+
+    // Idle wave / stretch: lean and lift her a little, like reaching up.
+    if (layout.poseLean) {
+      this.bodyShiftTarget += layout.poseLean * 26;
+      this.bodyTiltTarget += layout.poseLean * 0.05;
+    }
+    if (layout.poseLift) {
+      this.bodyDiveY -= layout.poseLift * 9;
     }
 
     const shiftAcc = (this.bodyShiftTarget - this.bodyShiftX) * 160 - this.bodyShiftVel * 18;
@@ -881,11 +928,8 @@ export class DaFeiYuRenderer {
       rTargetX = shR.x + 14;
       rTargetY = shR.y + 4 - cheer;
     } else {
-      if (mouseMode) {
-        const pressOff = layout.mouseLeft || layout.mouseRight ? 2.5 : 0;
-        lTargetX = layout.mouseBtnX;
-        lTargetY = layout.mouseBtnY + pressOff;
-      } else if (leftTyping) {
+      // Resting hands first, then override with typing / mouse targets.
+      if (leftTyping) {
         lTargetX = this.leftHand.tx;
         lTargetY = this.leftHand.ty;
       } else {
@@ -898,6 +942,48 @@ export class DaFeiYuRenderer {
       } else {
         rTargetX = shR.x + 15;
         rTargetY = shR.y + 34;
+      }
+      if (mouseMode) {
+        // Grip the palm side of the shell instead of the button plates, so the
+        // L/R buttons stay visible (the mouse is also drawn above her hand).
+        const pressOff = layout.mouseLeft || layout.mouseRight ? 2.5 : 0;
+        const cx = layout.mouseCenterX ?? layout.mouseBtnX;
+        const cy = layout.mouseCenterY ?? layout.mouseBtnY;
+        const buttonsBelow = layout.mouseBtnY > cy;
+        // Palm side for the cat-facing deck; a bit further out when the mouse is drawn
+        // above her hand, so the mitten still peeks out below the shell.
+        const handY = cy + (buttonsBelow ? -11 : 18) + pressOff;
+        if (layout.mouseBtnX < g.charCenterX) {
+          lTargetX = cx;
+          lTargetY = handY;
+        } else {
+          rTargetX = cx;
+          rTargetY = handY;
+        }
+      }
+    }
+
+    // Drink prop: the hand on the cup's side reaches for it.
+    if (layout.drinkActive) {
+      const hx = layout.drinkHandX ?? 0;
+      const hy = layout.drinkHandY ?? 0;
+      if ((layout.drinkSide ?? 'right') === 'left') {
+        lTargetX = hx;
+        lTargetY = hy;
+      } else {
+        rTargetX = hx;
+        rTargetY = hy;
+      }
+    } else if (layout.poseHands && layout.poseHands.length > 0) {
+      // Idle wave / stretch: one or both hands reach their pose targets.
+      for (const hand of layout.poseHands) {
+        if (hand.side === 'left') {
+          lTargetX = hand.x;
+          lTargetY = hand.y;
+        } else {
+          rTargetX = hand.x;
+          rTargetY = hand.y;
+        }
       }
     }
 

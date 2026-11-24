@@ -1,3 +1,8 @@
+import { installTauriPreviewShim } from './tauriPreview';
+
+// Must run before any @tauri-apps/api call is issued.
+const isPreview = installTauriPreviewShim();
+
 import './style.css';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -6,7 +11,41 @@ import { KuroCatEngine, type KeyboardOrientation } from './catEngine';
 import { catAudio } from './audio';
 import { DEFAULT_BUILTIN_CATS, type CatSkinConfig } from './catSkins';
 import type { KeyboardLayoutId } from './keyboardLayout';
+import { getKeyboardLayout } from './keyboardLayout';
+import {
+  clampKeyboardScale,
+  defaultKeyboardScale,
+  DEFAULT_KB_SCALE_108,
+  DEFAULT_KB_SCALE_65,
+  type MouseOrientation,
+} from './deskMetrics';
+import {
+  DEFAULT_LIGHT,
+  LIGHT_COLOR_MODES,
+  LIGHT_EFFECTS,
+  LIGHT_PRESETS,
+  normalizeLightConfig,
+  type KeyboardLightConfig,
+  type LightColorMode,
+  type LightEffect,
+} from './keyboardLight';
 
+import {
+  BUILTIN_DESK_SKINS,
+  normalizeDeskSkin,
+  type DeskSkinConfig,
+  type KeycapOverride,
+} from './deskSkin';
+
+import {
+  DEFAULT_PROP,
+  PROP_KINDS,
+  PROP_SIDES,
+  normalizePropConfig,
+  type PropConfig,
+  type PropKind,
+  type PropSide,
+} from './prop';
 interface AppSettings {
   x: number | null;
   y: number | null;
@@ -21,6 +60,17 @@ interface AppSettings {
   mcpPort: number;
   keyboardLayout: KeyboardLayoutId;
   keyboardOrientation: KeyboardOrientation;
+  keyboardScale65: number;
+  keyboardScale108: number;
+  mouseOrientation: MouseOrientation;
+  keyboardLight: KeyboardLightConfig;
+  deskSkinId: string;
+  deskSkins: DeskSkinConfig[];
+  propConfig: PropConfig;
+  keycapOverrides: Record<string, KeycapOverride>;
+  idleActionsEnabled: boolean;
+  idleActionRequest: string;
+  idleActionSeq: number;
   privacyPasswordGuard: boolean;
 }
 
@@ -84,6 +134,17 @@ let settings: AppSettings = {
   mcpPort: 27420,
   keyboardLayout: '65',
   keyboardOrientation: 'cat',
+  keyboardScale65: DEFAULT_KB_SCALE_65,
+  keyboardScale108: DEFAULT_KB_SCALE_108,
+  mouseOrientation: 'auto',
+  keyboardLight: { ...DEFAULT_LIGHT },
+  deskSkinId: 'classic-cream',
+  deskSkins: [...BUILTIN_DESK_SKINS],
+  propConfig: { ...DEFAULT_PROP },
+  keycapOverrides: {},
+  idleActionsEnabled: true,
+  idleActionRequest: '',
+  idleActionSeq: 0,
   privacyPasswordGuard: true,
 };
 
@@ -99,7 +160,29 @@ const updateToastTextEl = document.getElementById('update-toast-text') as HTMLSp
 const btnToastInstallEl = document.getElementById('btn-toast-install') as HTMLButtonElement;
 const btnToastOpenEl = document.getElementById('btn-toast-open') as HTMLButtonElement;
 const btnToastCloseEl = document.getElementById('btn-toast-close') as HTMLButtonElement;
-const engine = new KuroCatEngine(canvas);
+const engine = new KuroCatEngine(canvas, { embedded: isPreview });
+
+if (isPreview) {
+  // Browser preview: the canvas fills the viewport, so re-fit on resize.
+  window.addEventListener('resize', () => engine.resize());
+  // Handy hook for manual testing in DevTools.
+  (window as unknown as Record<string, unknown>).__kurocatEngine = engine;
+}
+
+/**
+ * `listen()` throws synchronously when the Tauri event bridge is absent (plain
+ * browser preview). Swallow that so the rest of the UI still initialises.
+ */
+async function safeListen<T>(event: string, cb: (ev: { payload: T }) => void): Promise<void> {
+  try {
+    await (listen as unknown as (
+      name: string,
+      handler: (ev: { payload: T }) => void,
+    ) => Promise<unknown>)(event, cb);
+  } catch {
+    // No Tauri IPC (browser preview); events simply never fire.
+  }
+}
 
 function renderBreedPills(): void {
   if (!breedPillsEl) return;
@@ -129,6 +212,372 @@ function updateScaleSliderVisual(scaleVal: number): void {
   }
 }
 
+const kbScaleSliderEl = document.getElementById('kb-scale-slider') as HTMLInputElement | null;
+const kbScaleValueEl = document.getElementById('kb-scale-value') as HTMLButtonElement | null;
+
+function kbScaleRange(layout: KeyboardLayoutId): { min: number; max: number } {
+  return layout === '108' ? { min: 70, max: 100 } : { min: 70, max: 115 };
+}
+
+function updateKbScaleVisual(layout: KeyboardLayoutId, scale: number): void {
+  if (!kbScaleSliderEl) return;
+  const { min, max } = kbScaleRange(layout);
+  const pct = Math.round(scale * 100);
+  kbScaleSliderEl.min = String(min);
+  kbScaleSliderEl.max = String(max);
+  if (document.activeElement !== kbScaleSliderEl) kbScaleSliderEl.value = String(pct);
+  const fillPct = ((pct - min) / (max - min)) * 100;
+  kbScaleSliderEl.style.setProperty('--pct', `${Math.max(0, Math.min(100, fillPct)).toFixed(1)}%`);
+  if (kbScaleValueEl) kbScaleValueEl.textContent = `${pct}%`;
+}
+
+const lightToggleBtnEl = document.getElementById('light-toggle-btn') as HTMLButtonElement | null;
+const lightSwatchesEl = document.getElementById('light-swatches') as HTMLDivElement | null;
+const lightColorModePillsEl = document.getElementById('light-color-mode-pills') as HTMLDivElement | null;
+const lightPaletteSwatchesEl = document.getElementById('light-palette-swatches') as HTMLDivElement | null;
+const lightBrightnessEl = document.getElementById('light-brightness') as HTMLInputElement | null;
+const lightBrightnessValueEl = document.getElementById(
+  'light-brightness-value',
+) as HTMLSpanElement | null;
+const lightSpeedEl = document.getElementById('light-speed') as HTMLInputElement | null;
+const lightSpeedValueEl = document.getElementById('light-speed-value') as HTMLSpanElement | null;
+
+const LIGHT_COLOR_PRESETS = [
+  '#d2f244',
+  '#00e5ff',
+  '#ff00a8',
+  '#ff9a3c',
+  '#7ee8a6',
+  '#a78bfa',
+  '#ffffff',
+];
+
+function currentLight(): KeyboardLightConfig {
+  return normalizeLightConfig(settings.keyboardLight);
+}
+
+function patchLight(patch: Partial<KeyboardLightConfig>): void {
+  const next = normalizeLightConfig({ ...currentLight(), ...patch });
+  void applySettingsPatch({ keyboardLight: next });
+}
+
+function renderLightSwatches(): void {
+  if (!lightSwatchesEl) return;
+  const cfg = currentLight();
+  lightSwatchesEl.innerHTML = '';
+  for (const color of LIGHT_COLOR_PRESETS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'light-swatch';
+    btn.style.background = color;
+    btn.title = color;
+    btn.dataset.lightcolor = color;
+    btn.classList.toggle('active', cfg.color.toLowerCase() === color.toLowerCase());
+    lightSwatchesEl.appendChild(btn);
+  }
+  const custom = document.createElement('label');
+  custom.className = 'light-swatch';
+  custom.title = '自定义颜色';
+  custom.style.background =
+    'conic-gradient(#ff4d4d, #ffd93d, #6bff6b, #4dd2ff, #a78bfa, #ff4d4d)';
+  const input = document.createElement('input');
+  input.type = 'color';
+  input.value = cfg.color;
+  input.addEventListener('input', () => patchLight({ color: input.value }));
+  custom.appendChild(input);
+  lightSwatchesEl.appendChild(custom);
+}
+
+const deskSkinPillsEl = document.getElementById('desk-skin-pills') as HTMLDivElement | null;
+
+/** Ready-made DIY keycap palettes so users can try the feature in one click. */
+const KEYCAP_DIY_PRESETS: Record<string, Record<string, KeycapOverride>> = {
+  wasd: {
+    w: { top: '#ff3b6b', side: '#b3224a', text: '#ffffff' },
+    a: { top: '#ff3b6b', side: '#b3224a', text: '#ffffff' },
+    s: { top: '#ff3b6b', side: '#b3224a', text: '#ffffff' },
+    d: { top: '#ff3b6b', side: '#b3224a', text: '#ffffff' },
+  },
+  numpad: {
+    '1': { top: '#6b8bff', side: '#3f59c9', text: '#ffffff' },
+    '2': { top: '#7ee8a6', side: '#3aa666', text: '#14201a' },
+    '3': { top: '#ffe14d', side: '#c9a900', text: '#241f00' },
+    '4': { top: '#c56bff', side: '#8a3fc0', text: '#ffffff' },
+    '5': { top: '#00e5ff', side: '#008fa8', text: '#002027' },
+    '6': { top: '#ff9a3c', side: '#c96a12', text: '#241400' },
+    '7': { top: '#ff6bd6', side: '#c02a9b', text: '#ffffff' },
+    '8': { top: '#7ee8a6', side: '#3aa666', text: '#14201a' },
+    '9': { top: '#6b8bff', side: '#3f59c9', text: '#ffffff' },
+    '0': { top: '#ffe14d', side: '#c9a900', text: '#241f00' },
+    np_7: { top: '#6b8bff', side: '#3f59c9', text: '#ffffff' },
+    np_8: { top: '#7ee8a6', side: '#3aa666', text: '#14201a' },
+    np_9: { top: '#ffe14d', side: '#c9a900', text: '#241f00' },
+    np_4: { top: '#c56bff', side: '#8a3fc0', text: '#ffffff' },
+    np_5: { top: '#00e5ff', side: '#008fa8', text: '#002027' },
+    np_6: { top: '#ff9a3c', side: '#c96a12', text: '#241400' },
+    np_1: { top: '#ff6bd6', side: '#c02a9b', text: '#ffffff' },
+    np_2: { top: '#7ee8a6', side: '#3aa666', text: '#14201a' },
+    np_3: { top: '#6b8bff', side: '#3f59c9', text: '#ffffff' },
+    np_0: { top: '#ffe14d', side: '#c9a900', text: '#241f00' },
+  },
+  esc: {
+    esc: { top: '#ff3b6b', side: '#b3224a', emoji: '🚨' },
+  },
+  arrows: {
+    up: { top: '#ff9a3c', side: '#c96a12', text: '#241400' },
+    down: { top: '#ff9a3c', side: '#c96a12', text: '#241400' },
+    left: { top: '#ff9a3c', side: '#c96a12', text: '#241400' },
+    right: { top: '#ff9a3c', side: '#c96a12', text: '#241400' },
+  },
+  emoji: {
+    esc: { emoji: '🔥' },
+    tab: { emoji: '🎵' },
+    caps: { emoji: '🎮' },
+    space: { emoji: '🐾' },
+    enter: { emoji: '⏎' },
+  },
+};
+
+function allDeskSkins(): DeskSkinConfig[] {
+  const custom = Array.isArray(settings.deskSkins) ? settings.deskSkins : [];
+  const merged = [...BUILTIN_DESK_SKINS];
+  for (const c of custom) {
+    const norm = normalizeDeskSkin(c);
+    const idx = merged.findIndex((s) => s.id === norm.id);
+    if (idx >= 0) merged[idx] = { ...norm, builtin: merged[idx].builtin };
+    else merged.push(norm);
+  }
+  return merged;
+}
+
+function activeDeskSkin(): DeskSkinConfig {
+  const list = allDeskSkins();
+  return list.find((s) => s.id === settings.deskSkinId) ?? list[0];
+}
+
+function renderDeskSkinPills(): void {
+  if (!deskSkinPillsEl) return;
+  deskSkinPillsEl.innerHTML = '';
+  for (const skin of allDeskSkins()) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'kb-pill';
+    btn.dataset.deskskin = skin.id;
+    btn.textContent = skin.name;
+    btn.style.borderLeft = `3px solid ${skin.keyboard.accentKeyTop}`;
+    btn.classList.toggle('active', skin.id === settings.deskSkinId);
+    deskSkinPillsEl.appendChild(btn);
+  }
+}
+
+const propKindPillsEl = document.getElementById('prop-kind-pills') as HTMLDivElement | null;
+const propSidePillsEl = document.getElementById('prop-side-pills') as HTMLDivElement | null;
+const propAutoSipEl = document.getElementById('prop-auto-sip') as HTMLInputElement | null;
+
+function currentProp(): PropConfig {
+  return normalizePropConfig(settings.propConfig);
+}
+
+function patchProp(patch: Partial<PropConfig>): void {
+  const next = normalizePropConfig({ ...currentProp(), ...patch });
+  void applySettingsPatch({ propConfig: next });
+}
+
+function renderPropUI(): void {
+  const cfg = currentProp();
+  if (propKindPillsEl) {
+    propKindPillsEl.innerHTML = '';
+    for (const kind of PROP_KINDS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'kb-pill';
+      btn.dataset.propkind = kind.id;
+      btn.title = `喝完后：${kind.moodLabel}`;
+      btn.textContent = `${kind.emoji} ${kind.label}`;
+      btn.classList.toggle('active', cfg.kind === kind.id);
+      propKindPillsEl.appendChild(btn);
+    }
+  }
+  if (propSidePillsEl) {
+    propSidePillsEl.innerHTML = '';
+    for (const side of PROP_SIDES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'kb-pill';
+      btn.dataset.propside = side.id;
+      btn.textContent = side.label;
+      btn.classList.toggle('active', cfg.side === side.id);
+      propSidePillsEl.appendChild(btn);
+    }
+  }
+  if (propAutoSipEl) propAutoSipEl.checked = cfg.autoSip;
+  const toggleBtn = document.getElementById('prop-toggle-btn');
+  if (toggleBtn) {
+    toggleBtn.textContent = cfg.enabled ? '已开启' : '关闭';
+    toggleBtn.classList.toggle('on', cfg.enabled);
+  }
+}
+
+const PALETTE_CANDIDATES = [
+  '#ff3b6b',
+  '#ff9a3c',
+  '#ffe14d',
+  '#7ee8a6',
+  '#00e5ff',
+  '#6b8bff',
+  '#c56bff',
+  '#ff6bd6',
+  '#ffffff',
+  '#111214',
+];
+
+function renderLightColorControls(): void {
+  const cfg = currentLight();
+  if (lightColorModePillsEl) {
+    lightColorModePillsEl.innerHTML = LIGHT_COLOR_MODES.map(
+      (m) =>
+        `<button class="kb-pill ${cfg.colorMode === m.id ? 'active' : ''}" data-lightmode="${m.id}">${m.label}</button>`,
+    ).join('');
+  }
+  if (lightPaletteSwatchesEl) {
+    lightPaletteSwatchesEl.innerHTML = PALETTE_CANDIDATES.map((c) => {
+      const on = cfg.palette.some((p) => p.toLowerCase() === c.toLowerCase());
+      return `<button class="light-swatch ${on ? 'active' : ''}" data-palettecolor="${c}" style="background:${c}" title="${c}"></button>`;
+    }).join('');
+  }
+  document.querySelectorAll<HTMLButtonElement>('[data-edgelight]').forEach((b) => {
+    b.classList.toggle('active', (b.dataset.edgelight === 'on') === cfg.edgeLight);
+  });
+}
+
+const KEYCAP_EMOJI_OPTIONS = [
+  '🔥', '🎮', '🐾', '🎵', '⚡', '💧', '🌟', '❤️', '🍀', '🎯', '🚀', '🌸', '☕', '🍮', '',
+];
+
+let kcSelectedKeyId: string | null = null;
+
+const kceEl = document.getElementById('keycap-designer') as HTMLDivElement | null;
+const kceGridEl = document.getElementById('kce-grid') as HTMLDivElement | null;
+const kceSelectedEl = document.getElementById('kce-selected') as HTMLDivElement | null;
+const kceColorsEl = document.getElementById('kce-colors') as HTMLDivElement | null;
+const kceEmojisEl = document.getElementById('kce-emojis') as HTMLDivElement | null;
+const kceLabelInput = document.getElementById('kce-label-input') as HTMLInputElement | null;
+
+function activeLayoutId(): KeyboardLayoutId {
+  return settings.keyboardLayout === '108' ? '108' : '65';
+}
+
+function currentKeycap(id: string): KeycapOverride {
+  return settings.keycapOverrides?.[id] ?? {};
+}
+
+function setKeycap(id: string, patch: KeycapOverride | null): void {
+  const next = { ...(settings.keycapOverrides ?? {}) };
+  if (patch === null) {
+    delete next[id];
+  } else {
+    next[id] = { ...next[id], ...patch };
+  }
+  engine.setKeycapOverrides(next);
+  void applySettingsPatch({ keycapOverrides: next });
+  renderKeycapGrid();
+}
+
+function renderKeycapGrid(): void {
+  if (!kceGridEl) return;
+  const layout = getKeyboardLayout(activeLayoutId());
+  const overrides = settings.keycapOverrides ?? {};
+  const parts: string[] = [];
+  for (const key of layout.keys) {
+    const rY = key.rowY ?? key.row;
+    const rSpan = key.rowSpan ?? 1;
+    const left = (key.uStart / layout.totalUnits) * 100;
+    const width = (key.uWidth / layout.totalUnits) * 100;
+    const top = (rY / layout.totalRows) * 100;
+    const height = (rSpan / layout.totalRows) * 100;
+    const ov = overrides[key.id];
+    const bg = ov?.top ?? '#e8e9e4';
+    const fg = ov?.text ?? '#2c2f36';
+    const glyph = ov?.emoji || ov?.label || key.label;
+    const sel = kcSelectedKeyId === key.id ? ' selected' : '';
+    parts.push(
+      `<button class="kce-key${sel}" data-kcekey="${key.id}" style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${width.toFixed(2)}%;height:${height.toFixed(2)}%;background:${bg};color:${fg}" title="${key.id}">${glyph}</button>`,
+    );
+  }
+  kceGridEl.innerHTML = parts.join('');
+
+  if (kceSelectedEl) {
+    if (kcSelectedKeyId) {
+      const key = layout.keys.find((k) => k.id === kcSelectedKeyId);
+      const ov = currentKeycap(kcSelectedKeyId);
+      const bits = [key?.label || kcSelectedKeyId];
+      if (ov.top) bits.push(ov.top);
+      if (ov.emoji) bits.push(ov.emoji);
+      if (ov.label) bits.push(`“${ov.label}”`);
+      kceSelectedEl.textContent = `已选中：${bits.join(' · ')}`;
+    } else {
+      kceSelectedEl.textContent = '未选择按键（点上方键盘）';
+    }
+  }
+
+  if (kceColorsEl) {
+    const cur = kcSelectedKeyId ? currentKeycap(kcSelectedKeyId).top : undefined;
+    kceColorsEl.innerHTML = PALETTE_CANDIDATES.concat(['#e8e9e4', '#2a2d35'])
+      .map(
+        (c) =>
+          `<button class="light-swatch ${cur && cur.toLowerCase() === c.toLowerCase() ? 'active' : ''}" data-kcswatch="${c}" style="background:${c}" title="${c}"></button>`,
+      )
+      .join('');
+  }
+
+  if (kceEmojisEl) {
+    const cur = kcSelectedKeyId ? currentKeycap(kcSelectedKeyId).emoji : undefined;
+    kceEmojisEl.innerHTML = KEYCAP_EMOJI_OPTIONS.map(
+      (e, i) =>
+        `<button class="light-swatch ${cur === e && e ? 'active' : ''}" data-kcemoji="${i}" style="background:#20242c;color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center">${e || '∅'}</button>`,
+    ).join('');
+  }
+
+  if (kceLabelInput && kcSelectedKeyId) {
+    kceLabelInput.value = currentKeycap(kcSelectedKeyId).label ?? '';
+  }
+}
+
+function openKeycapDesigner(): void {
+  if (!kceEl) return;
+  kcSelectedKeyId = null;
+  renderKeycapGrid();
+  kceEl.classList.remove('hidden');
+}
+
+function closeKeycapDesigner(): void {
+  kceEl?.classList.add('hidden');
+}
+
+function syncLightUI(): void {  const cfg = currentLight();
+  if (lightToggleBtnEl) {
+    lightToggleBtnEl.textContent = cfg.enabled ? '已开启' : '开启';
+    lightToggleBtnEl.classList.toggle('on', cfg.enabled);
+  }
+  document.querySelectorAll<HTMLButtonElement>('[data-lightfx]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.lightfx === cfg.effect);
+  });
+  if (lightBrightnessEl && document.activeElement !== lightBrightnessEl) {
+    lightBrightnessEl.value = String(Math.round(cfg.brightness * 100));
+  }
+  if (lightBrightnessValueEl) {
+    lightBrightnessValueEl.textContent = `${Math.round(cfg.brightness * 100)}%`;
+  }
+  if (lightSpeedEl && document.activeElement !== lightSpeedEl) {
+    lightSpeedEl.value = String(Math.round(cfg.speed * 100));
+  }
+  if (lightSpeedValueEl) {
+    lightSpeedValueEl.textContent = `${cfg.speed.toFixed(1)}×`;
+  }
+  renderLightSwatches();
+  renderLightColorControls();
+}
+
 function syncMenuUI(): void {
   const setCheck = (id: string, on: boolean) => {
     const el = document.getElementById(id);
@@ -148,12 +597,23 @@ function syncMenuUI(): void {
 
   const kbLayout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
   const kbOrient: KeyboardOrientation = settings.keyboardOrientation === 'viewer' ? 'viewer' : 'cat';
+  const kbScale = clampKeyboardScale(
+    kbLayout === '108' ? settings.keyboardScale108 : settings.keyboardScale65,
+    kbLayout,
+  );
   document.querySelectorAll<HTMLButtonElement>('[data-kblayout]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.kblayout === kbLayout);
   });
   document.querySelectorAll<HTMLButtonElement>('[data-kborient]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.kborient === kbOrient);
   });
+  document.querySelectorAll<HTMLButtonElement>('[data-mouseorient]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mouseorient === settings.mouseOrientation);
+  });
+  updateKbScaleVisual(kbLayout, kbScale);
+  renderDeskSkinPills();
+  renderPropUI();
+  syncLightUI();
 
   const activeCat = catList.find((c) => c.id === settings.catBreed) ?? catList[0];
   renderBreedPills();
@@ -167,11 +627,46 @@ function syncMenuUI(): void {
 
   engine.showKeyBubbles = settings.showKeyBubbles;
   engine.setCatAppearance(activeCat?.id || 'black', activeCat);
-  engine.setKeyboardConfig(kbLayout, kbOrient);
+  engine.setKeyboardConfig(kbLayout, kbOrient, {
+    scale: kbScale,
+    mouseOrientation: settings.mouseOrientation,
+  });
+  engine.setLightConfig(settings.keyboardLight);
+  engine.setDeskSkin(activeDeskSkin());
+  engine.setKeycapOverrides(settings.keycapOverrides);
+  engine.setPropConfig(settings.propConfig);
+  engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
+  const idleAutoEl = document.getElementById('idle-auto') as HTMLInputElement | null;
+  if (idleAutoEl) idleAutoEl.checked = settings.idleActionsEnabled !== false;
   if (!sliderDragging) {
     engine.setRenderScale(settings.scale);
   }
   catAudio.setEnabled(settings.soundEnabled);
+  pushHitRegions();
+  if (kceEl && !kceEl.classList.contains('hidden')) renderKeycapGrid();
+}
+
+let lastHitRegionsJson = '';
+let lastIdleSeq = 0;
+
+/** MCP writes a request + seq; play it once when the counter advances. */
+function consumeIdleRequest(): void {
+  const seq = settings.idleActionSeq ?? 0;
+  if (seq <= lastIdleSeq) return;
+  lastIdleSeq = seq;
+  const kind = settings.idleActionRequest;
+  if (kind) engine.triggerIdleAction(kind);
+}
+function pushHitRegions(): void {
+  const regions = engine.getHitRegions();
+  const json = JSON.stringify(regions);
+  if (json === lastHitRegionsJson) return;
+  lastHitRegionsJson = json;
+  try {
+    void Promise.resolve(invoke('set_hit_regions', { regions })).catch(() => {});
+  } catch {
+    // No Tauri IPC (browser preview); ignore.
+  }
 }
 
 function closeContextMenu(): void {
@@ -198,8 +693,13 @@ function openContextMenu(clientX: number, clientY: number): void {
 async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
   settings = { ...settings, ...patch };
   syncMenuUI();
-  settings = await invoke<AppSettings>('update_settings', { patch: settings });
-  syncMenuUI();
+  try {
+    settings = await invoke<AppSettings>('update_settings', { patch: settings });
+    syncMenuUI();
+  } catch (err) {
+    // Browser preview (no Tauri IPC) or a transient IPC failure: keep the local state.
+    console.warn('update_settings failed:', err);
+  }
 }
 
 async function copyMcpConfig(): Promise<void> {
@@ -395,15 +895,21 @@ async function bootstrap(): Promise<void> {
   }
 
   try {
-    const [loadedSettings, loadedCats, loadedVer] = await Promise.all([
+    const [loadedSettings, loadedCats, loadedVer, loadedSkins] = await Promise.all([
       invoke<AppSettings>('get_settings'),
       invoke<CatSkinConfig[]>('get_cats'),
       invoke<string>('get_app_version'),
+      invoke<DeskSkinConfig[]>('get_desk_skins').catch(() => []),
     ]);
     settings = loadedSettings;
     lastKnownLockState = settings.clickThroughLocked;
+    // Don't replay a request that was queued before this launch.
+    lastIdleSeq = settings.idleActionSeq ?? 0;
     if (Array.isArray(loadedCats) && loadedCats.length > 0) {
       catList = loadedCats;
+    }
+    if (Array.isArray(loadedSkins)) {
+      settings.deskSkins = loadedSkins;
     }
     if (loadedVer) {
       appVersion = loadedVer;
@@ -414,7 +920,7 @@ async function bootstrap(): Promise<void> {
     console.error('Failed to load settings or cats:', err);
   }
 
-  await listen<UpdateProgressEvent>('kuro-update-status', (ev) => {
+  await safeListen<UpdateProgressEvent>('kuro-update-status', (ev) => {
     handleUpdateProgressEvent(ev.payload, false);
   });
 
@@ -467,11 +973,159 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  await listen<AppSettings>('kuro-settings', (ev) => {
+  if (kbScaleSliderEl) {
+    kbScaleSliderEl.addEventListener('input', () => {
+      const layout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
+      const pct = Number(kbScaleSliderEl.value);
+      updateKbScaleVisual(layout, pct / 100);
+      engine.setKeyboardScale(pct / 100);
+      pushHitRegions();
+    });
+    kbScaleSliderEl.addEventListener('change', () => {
+      const layout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
+      const scale = clampKeyboardScale(Number(kbScaleSliderEl.value) / 100, layout);
+      void applySettingsPatch(
+        layout === '108' ? { keyboardScale108: scale } : { keyboardScale65: scale },
+      );
+    });
+  }
+
+  if (kbScaleValueEl) {
+    kbScaleValueEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const layout: KeyboardLayoutId = settings.keyboardLayout === '108' ? '108' : '65';
+      const def = defaultKeyboardScale(layout);
+      updateKbScaleVisual(layout, def);
+      engine.setKeyboardScale(def);
+      pushHitRegions();
+      void applySettingsPatch(
+        layout === '108' ? { keyboardScale108: def } : { keyboardScale65: def },
+      );
+    });
+  }
+
+  if (lightToggleBtnEl) {
+    lightToggleBtnEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cfg = currentLight();
+      const turningOn = !cfg.enabled;
+      patchLight({
+        enabled: turningOn,
+        effect: turningOn && cfg.effect === 'off' ? 'breath' : cfg.effect,
+      });
+    });
+  }
+
+  if (lightBrightnessEl) {
+    lightBrightnessEl.addEventListener('input', () => {
+      const v = Number(lightBrightnessEl.value) / 100;
+      if (lightBrightnessValueEl) lightBrightnessValueEl.textContent = `${Math.round(v * 100)}%`;
+      engine.setLightConfig({ ...currentLight(), brightness: v });
+    });
+    lightBrightnessEl.addEventListener('change', () => {
+      patchLight({ brightness: Number(lightBrightnessEl.value) / 100 });
+    });
+  }
+
+  if (lightSpeedEl) {
+    lightSpeedEl.addEventListener('input', () => {
+      const v = Number(lightSpeedEl.value) / 100;
+      if (lightSpeedValueEl) lightSpeedValueEl.textContent = `${v.toFixed(1)}×`;
+      engine.setLightConfig({ ...currentLight(), speed: v });
+    });
+    lightSpeedEl.addEventListener('change', () => {
+      patchLight({ speed: Number(lightSpeedEl.value) / 100 });
+    });
+  }
+
+  const propToggleBtn = document.getElementById('prop-toggle-btn');
+  if (propToggleBtn) {
+    propToggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const cfg = currentProp();
+      patchProp({ enabled: !cfg.enabled });
+    });
+  }
+
+  if (propAutoSipEl) {
+    propAutoSipEl.addEventListener('change', () => {
+      patchProp({ autoSip: propAutoSipEl.checked });
+    });
+  }
+
+  const idleAutoEl = document.getElementById('idle-auto') as HTMLInputElement | null;
+  if (idleAutoEl) {
+    idleAutoEl.addEventListener('change', () => {
+      void applySettingsPatch({ idleActionsEnabled: idleAutoEl.checked });
+    });
+  }
+
+  // ---- Keycap designer ----
+  document.getElementById('btn-open-keycap-designer')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openKeycapDesigner();
+  });
+  document.getElementById('kce-close')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeKeycapDesigner();
+  });
+  document.getElementById('kce-done')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeKeycapDesigner();
+  });
+  kceGridEl?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-kcekey]');
+    if (!btn) return;
+    e.stopPropagation();
+    kcSelectedKeyId = btn.dataset.kcekey ?? null;
+    renderKeycapGrid();
+  });
+  kceColorsEl?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-kcswatch]');
+    if (!btn || !kcSelectedKeyId) return;
+    e.stopPropagation();
+    setKeycap(kcSelectedKeyId, { top: btn.dataset.kcswatch ?? undefined });
+  });
+  kceEmojisEl?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-kcemoji]');
+    if (!btn || !kcSelectedKeyId) return;
+    e.stopPropagation();
+    const idx = Number(btn.dataset.kcemoji);
+    const emoji = KEYCAP_EMOJI_OPTIONS[idx] ?? '';
+    setKeycap(kcSelectedKeyId, { emoji });
+  });
+  document.getElementById('kce-apply-label')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!kcSelectedKeyId || !kceLabelInput) return;
+    setKeycap(kcSelectedKeyId, { label: kceLabelInput.value.slice(0, 4) });
+  });
+  document.getElementById('kce-reset-key')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!kcSelectedKeyId) return;
+    setKeycap(kcSelectedKeyId, null);
+  });
+  document.getElementById('kce-clear-all')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    engine.setKeycapOverrides({});
+    void applySettingsPatch({ keycapOverrides: {} });
+    renderKeycapGrid();
+  });
+
+  await safeListen<AppSettings>('kuro-settings', (ev) => {
     const prevLock = lastKnownLockState;
     settings = ev.payload;
     lastKnownLockState = settings.clickThroughLocked;
     syncMenuUI();
+    consumeIdleRequest();
+    // MCP may have added/edited custom desk skins; pull the fresh list.
+    void invoke<DeskSkinConfig[]>('get_desk_skins')
+      .then((list) => {
+        if (Array.isArray(list)) {
+          settings.deskSkins = list;
+          renderDeskSkinPills();
+        }
+      })
+      .catch(() => {});
     if (prevLock !== null && prevLock !== settings.clickThroughLocked) {
       if (settings.clickThroughLocked) {
         showUpdateToast('🔒 已锁定穿透（按住 Alt 点击或 ^ 托盘解锁）', { autoHideMs: 4200 });
@@ -481,14 +1135,14 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  await listen<CatSkinConfig[]>('kuro-cats', (ev) => {
+  await safeListen<CatSkinConfig[]>('kuro-cats', (ev) => {
     if (Array.isArray(ev.payload) && ev.payload.length > 0) {
       catList = ev.payload;
       syncMenuUI();
     }
   });
 
-  await listen<InputEvent>('kuro-input', (ev) => {
+  await safeListen<InputEvent>('kuro-input', (ev) => {
     const p = ev.payload;
     switch (p.kind) {
       case 'keyDown':
@@ -515,11 +1169,11 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  await listen<boolean>('kuro-privacy', (ev) => {
+  await safeListen<boolean>('kuro-privacy', (ev) => {
     engine.setPrivacyMode(Boolean(ev.payload));
   });
 
-  await listen<WindowCursorInfo>('kuro-cursor', (ev) => {
+  await safeListen<WindowCursorInfo>('kuro-cursor', (ev) => {
     const c = ev.payload;
     altOverride = Boolean(c.altOverride);
     engine.onWindowCursor(c.relX, c.relY, c.overCat);
@@ -532,6 +1186,17 @@ async function bootstrap(): Promise<void> {
     if (e.button === 0) {
       closeContextMenu();
       if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
+      // Clicking the drink refills an empty cup instead of dragging the window.
+      const logicalPt = engine.clientToLogical(e.clientX, e.clientY);
+      if (engine.hitTestProp(logicalPt.x, logicalPt.y)) {
+        const result = engine.clickProp();
+        if (result === 'refilled') {
+          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
+        } else if (result === 'sipped') {
+          showUpdateToast('🐾 猫猫喝了一口', { autoHideMs: 1800 });
+        }
+        return;
+      }
       canvas.classList.add('pet-dragging');
       void invoke('set_dragging', { dragging: true });
       try {
@@ -559,13 +1224,112 @@ async function bootstrap(): Promise<void> {
 
   menuEl.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
-      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient]',
+      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
     );
     if (!target) return;
+
+    const lightFx = target.dataset.lightfx;
+    if (lightFx) {
+      const cfg = currentLight();
+      const effect = lightFx as LightEffect;
+      patchLight({ enabled: effect !== 'off', effect });
+      return;
+    }
+
+    const lightColor = target.dataset.lightcolor;
+    if (lightColor) {
+      patchLight({ color: lightColor });
+      return;
+    }
+
+    const lightMode = target.dataset.lightmode;
+    if (lightMode) {
+      patchLight({ colorMode: lightMode as LightColorMode });
+      return;
+    }
+
+    const paletteColor = target.dataset.palettecolor;
+    if (paletteColor) {
+      const cfg = currentLight();
+      const exists = cfg.palette.some((p) => p.toLowerCase() === paletteColor.toLowerCase());
+      let next = exists
+        ? cfg.palette.filter((p) => p.toLowerCase() !== paletteColor.toLowerCase())
+        : [...cfg.palette, paletteColor];
+      // A palette needs at least two colours to be meaningful.
+      if (next.length < 2) next = [...DEFAULT_LIGHT.palette];
+      patchLight({ palette: next, enabled: true });
+      return;
+    }
+
+    const edgeLight = target.dataset.edgelight;
+    if (edgeLight) {
+      patchLight({ edgeLight: edgeLight === 'on', enabled: true });
+      return;
+    }
+
+    const lightPreset = target.dataset.lightpreset;
+    if (lightPreset) {
+      const preset = LIGHT_PRESETS.find((p) => p.id === lightPreset);
+      if (preset) void applySettingsPatch({ keyboardLight: { ...preset.config } });
+      return;
+    }
+
+    const deskSkinId = target.dataset.deskskin;
+    if (deskSkinId) {
+      void applySettingsPatch({ deskSkinId });
+      return;
+    }
+
+    const propKind = target.dataset.propkind;
+    if (propKind) {
+      patchProp({ kind: propKind as PropKind, enabled: true });
+      return;
+    }
+
+    const propSide = target.dataset.propside;
+    if (propSide) {
+      patchProp({ side: propSide as PropSide });
+      return;
+    }
+
+    const idleAction = target.dataset.idleaction;
+    if (idleAction) {
+      if (settings.idleActionsEnabled === false) {
+        void applySettingsPatch({ idleActionsEnabled: true });
+      }
+      engine.setIdleAutoEnabled(true);
+      engine.triggerIdleAction(idleAction);
+      closeContextMenu();
+      return;
+    }
+
+    const diy = target.dataset.diy;
+    if (diy) {
+      if (diy === 'clear') {
+        engine.setKeycapOverrides({});
+        void applySettingsPatch({ keycapOverrides: {} });
+      } else {
+        const preset = KEYCAP_DIY_PRESETS[diy];
+        if (preset) {
+          const merged = { ...settings.keycapOverrides, ...preset };
+          engine.setKeycapOverrides(merged);
+          void applySettingsPatch({ keycapOverrides: merged });
+        }
+      }
+      renderKeycapGrid();
+      return;
+    }
 
     const kbLayoutAttr = target.dataset.kblayout;
     if (kbLayoutAttr === '65' || kbLayoutAttr === '108') {
       void applySettingsPatch({ keyboardLayout: kbLayoutAttr });
+      closeContextMenu();
+      return;
+    }
+
+    const mouseOrientAttr = target.dataset.mouseorient;
+    if (mouseOrientAttr === 'auto' || mouseOrientAttr === 'cat' || mouseOrientAttr === 'viewer') {
+      void applySettingsPatch({ mouseOrientation: mouseOrientAttr });
       closeContextMenu();
       return;
     }
@@ -688,13 +1452,13 @@ async function bootstrap(): Promise<void> {
       };
       syncWin7OverlayFn = syncWin7Overlay;
 
-      await listen<{ x: number; y: number }>('kuro-win7-contextmenu', (ev) => {
+      await safeListen<{ x: number; y: number }>('kuro-win7-contextmenu', (ev) => {
         openContextMenu(ev.payload.x, ev.payload.y);
       });
-      await listen('kuro-win7-close-menu', () => {
+      await safeListen('kuro-win7-close-menu', () => {
         closeContextMenu();
       });
-      await listen<boolean>('kuro-win7-visibility', (ev) => {
+      await safeListen<boolean>('kuro-win7-visibility', (ev) => {
         win7Visible = Boolean(ev.payload);
         if (win7Visible) {
           lastFrameKey = '';

@@ -70,6 +70,155 @@
           <button class="kb-pill active" data-kborient="cat">面向猫咪</button>
           <button class="kb-pill" data-kborient="viewer">面向观众</button>
         </div>
+        <div class="kb-pills" id="mouse-orient-pills">
+          <button class="kb-pill active" data-mouseorient="auto">鼠标·跟随键盘</button>
+          <button class="kb-pill" data-mouseorient="cat">鼠标·面向猫咪</button>
+          <button class="kb-pill" data-mouseorient="viewer">鼠标·面向观众</button>
+        </div>
+      </div>
+      <div class="menu-scale-row">
+        <div class="scale-header">
+          <span class="menu-scale-label">键盘尺寸</span>
+          <button class="scale-value-btn" id="kb-scale-value" type="button" title="点击复位默认">85%</button>
+        </div>
+        <div class="scale-slider-wrap">
+          <input
+            type="range"
+            id="kb-scale-slider"
+            class="scale-slider"
+            min="70"
+            max="100"
+            step="1"
+            value="85"
+          />
+          <div class="scale-ticks">
+            <span>70%</span>
+            <span class="scale-tick-mid">默认</span>
+            <span>100%</span>
+          </div>
+        </div>
+      </div>
+      <div class="menu-scale-row">
+        <span class="menu-scale-label">键鼠外观</span>
+        <div class="kb-pills" id="desk-skin-pills"></div>
+      </div>
+      <div class="menu-scale-row">
+        <span class="menu-scale-label">键帽 DIY</span>
+        <div class="kb-pills" id="keycap-diy-pills">
+          <button class="kb-pill" data-diy="wasd">WASD 高亮</button>
+          <button class="kb-pill" data-diy="numpad">数字区撞色</button>
+          <button class="kb-pill" data-diy="esc">Esc 警示</button>
+          <button class="kb-pill" data-diy="arrows">方向键</button>
+          <button class="kb-pill" data-diy="emoji">表情键帽</button>
+          <button class="kb-pill" id="btn-open-keycap-designer">🎨 打开设计器</button>
+          <button class="kb-pill" data-diy="clear">清除 DIY</button>
+        </div>
+      </div>
+
+      <div id="keycap-designer" class="keycap-designer hidden">
+        <div class="kce-head">
+          <span>🎨 键帽设计器</span>
+          <button class="kce-close" id="kce-close" type="button">×</button>
+        </div>
+        <div class="kce-hint">点选下方任意按键，再挑颜色 / 图标</div>
+        <div class="kce-grid" id="kce-grid"></div>
+        <div class="kce-panel">
+          <div class="kce-selected" id="kce-selected">未选择按键</div>
+          <div class="kce-row">
+            <span class="kce-label">顶面</span>
+            <div class="light-swatches" id="kce-colors"></div>
+          </div>
+          <div class="kce-row">
+            <span class="kce-label">图标</span>
+            <div class="light-swatches" id="kce-emojis"></div>
+          </div>
+          <div class="kce-row">
+            <input id="kce-label-input" class="kce-input" maxlength="4" placeholder="自定义文字（最多4字）" />
+            <button class="kb-pill" id="kce-apply-label" type="button">应用文字</button>
+          </div>
+          <div class="kce-row">
+            <button class="kb-pill" id="kce-reset-key" type="button">清除此键</button>
+            <button class="kb-pill" id="kce-clear-all" type="button">清除全部</button>
+            <button class="kb-pill kce-done" id="kce-done" type="button">完成</button>
+          </div>
+        </div>
+      </div>
+      <div class="menu-scale-row">
+        <span class="menu-scale-label">待机动作</span>
+        <div class="kb-pills" id="idle-action-pills">
+          <button class="kb-pill" data-idleaction="drink">🥤 喝一口</button>
+          <button class="kb-pill" data-idleaction="stretch">🙆 伸懒腰</button>
+          <button class="kb-pill" data-idleaction="wave">👋 挥手</button>
+          <button class="kb-pill" data-idleaction="groom">👅 洗脸</button>
+          <button class="kb-pill" data-idleaction="nap">😴 打盹</button>
+          <button class="kb-pill" data-idleaction="cuddle">💗 撒娇</button>
+        </div>
+        <label class="menu-toggle-row">
+          <span>空闲时随机待机</span>
+          <input type="checkbox" id="idle-auto" checked />
+        </label>
+      </div>
+      <div class="menu-scale-row">
+        <div class="scale-header">
+          <span class="menu-scale-label">小道具（互动饮品）</span>
+          <button class="scale-value-btn" id="prop-toggle-btn" type="button">关闭</button>
+        </div>
+        <div class="kb-pills" id="prop-kind-pills"></div>
+        <div class="kb-pills" id="prop-side-pills"></div>
+        <label class="menu-toggle-row">
+          <span>猫猫空闲时自动喝</span>
+          <input type="checkbox" id="prop-auto-sip" checked />
+        </label>
+      </div>
+      <div class="menu-scale-row">
+        <span class="menu-scale-label">键盘灯光</span>
+        <div class="kb-pills" id="light-effect-pills">
+          <button class="kb-pill" data-lightfx="off">关闭</button>
+          <button class="kb-pill" data-lightfx="static">常亮</button>
+          <button class="kb-pill" data-lightfx="breath">呼吸</button>
+          <button class="kb-pill" data-lightfx="rainbow">彩虹</button>
+          <button class="kb-pill" data-lightfx="wave">波浪</button>
+          <button class="kb-pill" data-lightfx="ripple">涟漪</button>
+          <button class="kb-pill" data-lightfx="typing">打字余晖</button>
+          <button class="kb-pill" data-lightfx="aurora">极光</button>
+        </div>
+        <div class="light-swatches" id="light-swatches"></div>
+        <div class="kb-pills" id="light-color-mode-pills"></div>
+        <div class="light-swatches" id="light-palette-swatches"></div>
+        <div class="kb-pills" id="light-edge-pills">
+          <button class="kb-pill" data-edgelight="on">边缘灯带 · 开</button>
+          <button class="kb-pill active" data-edgelight="off">边缘灯带 · 关</button>
+        </div>
+        <div class="scale-header light-brightness-row">
+          <span class="menu-scale-label">亮度</span>
+          <span class="menu-hint" id="light-brightness-value">75%</span>
+        </div>
+        <div class="scale-slider-wrap">
+          <input
+            type="range"
+            id="light-brightness"
+            class="scale-slider"
+            min="10"
+            max="100"
+            step="5"
+            value="75"
+          />
+        </div>
+        <div class="scale-header light-brightness-row">
+          <span class="menu-scale-label">流动速度</span>
+          <span class="menu-hint" id="light-speed-value">1.0×</span>
+        </div>
+        <div class="scale-slider-wrap">
+          <input
+            type="range"
+            id="light-speed"
+            class="scale-slider"
+            min="20"
+            max="300"
+            step="10"
+            value="100"
+          />
+        </div>
       </div>
       <div class="menu-scale-row">
         <div class="scale-header">

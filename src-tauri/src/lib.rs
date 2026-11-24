@@ -2,6 +2,7 @@
 
 mod cats;
 mod config;
+mod desk_skins;
 mod input_hook;
 #[cfg(target_os = "macos")]
 mod macos_window;
@@ -18,33 +19,43 @@ mod windows_display;
 const WIN7_OFFSCREEN_PARK_POS: i32 = -16000;
 
 use cats::{all_cats, cat_exists, cats_path, sanitize_cat_id, CatSkinConfig};
+use desk_skins::{load_custom_desk_skins, DeskSkinConfig};
 use config::{
     config_path, load_settings, normalize_keyboard_layout, normalize_keyboard_orientation,
+    normalize_keyboard_scale, normalize_keycap_overrides, normalize_mouse_orientation,
     save_settings, set_windows_autostart, AppSettings,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size, State};
 
-pub const BASE_WIDTH: f64 = 420.0;
 pub const BASE_HEIGHT: f64 = 440.0;
-pub const BASE_WIDTH_108: f64 = 540.0;
-pub const BASE_HEIGHT_108: f64 = 456.0;
+pub const BASE_HEIGHT_108: f64 = 446.0;
+pub const KB_WIDTH_65: f64 = 266.0;
+pub const KB_WIDTH_108: f64 = 398.0;
+pub const KB_AISLE_65: f64 = 154.0;
+pub const KB_AISLE_108: f64 = 132.0;
 pub const MIN_WINDOW_WIDTH: f64 = 260.0;
 pub const MIN_WINDOW_HEIGHT: f64 = 410.0;
 
-pub fn base_dimensions(layout: &str) -> (f64, f64) {
+/// Logical canvas size for a layout at a given keyboard scale.
+///
+/// Mirrors `resolveDeskMetrics` in `src/deskMetrics.ts`: the 108-key deck keeps
+/// fixed left/right aisles and only grows to the right, so switching layouts no
+/// longer blows up the whole window.
+pub fn base_dimensions(layout: &str, kb_scale: f64) -> (f64, f64) {
+    let kb_scale = normalize_keyboard_scale(kb_scale);
     if layout == "108" {
-        (BASE_WIDTH_108, BASE_HEIGHT_108)
+        (KB_AISLE_108 + KB_WIDTH_108 * kb_scale, BASE_HEIGHT_108)
     } else {
-        (BASE_WIDTH, BASE_HEIGHT)
+        (KB_AISLE_65 + KB_WIDTH_65 * kb_scale, BASE_HEIGHT)
     }
 }
 
-pub fn window_dimensions(layout: &str, scale: f64) -> (f64, f64) {
-    let (bw, bh) = base_dimensions(layout);
+pub fn window_dimensions(layout: &str, scale: f64, kb_scale: f64) -> (f64, f64) {
+    let (bw, bh) = base_dimensions(layout, kb_scale);
     let s = scale.clamp(0.20, 1.50);
     (
         (bw * s).round().max(MIN_WINDOW_WIDTH),
@@ -56,8 +67,9 @@ fn resize_window_anchored_bottom_right(
     win: &tauri::WebviewWindow,
     layout: &str,
     scale: f64,
+    kb_scale: f64,
 ) -> Option<(i32, i32)> {
-    let (new_w, new_h) = window_dimensions(layout, scale);
+    let (new_w, new_h) = window_dimensions(layout, scale, kb_scale);
     #[cfg(target_os = "macos")]
     if win
         .state::<AppState>()
@@ -212,6 +224,41 @@ pub struct AppState {
     pub mcp_enabled: Arc<AtomicBool>,
     pub update_banner_open: Arc<AtomicBool>,
     pub paused_guard: Arc<AtomicBool>,
+    pub hit_regions: Arc<Mutex<Option<HitRegions>>>,
+}
+
+/// Normalized ellipse in pet-local (canvas) coordinates, sent by the frontend so
+/// the hit-test loop follows the real desk/cat/prop layout instead of hardcoded guesses.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct HitRegion {
+    pub cx: f64,
+    pub cy: f64,
+    pub rx: f64,
+    pub ry: f64,
+}
+
+impl HitRegion {
+    fn contains(&self, x: f64, y: f64) -> bool {
+        if self.rx.abs() < 1e-6 || self.ry.abs() < 1e-6 {
+            return false;
+        }
+        let dx = (x - self.cx) / self.rx;
+        let dy = (y - self.cy) / self.ry;
+        dx * dx + dy * dy <= 1.0
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HitRegions {
+    pub cat: Option<HitRegion>,
+    pub desk: Option<HitRegion>,
+    pub prop: Option<HitRegion>,
+}
+
+#[tauri::command]
+fn set_hit_regions(state: State<'_, AppState>, regions: HitRegions) {
+    *state.hit_regions.lock().unwrap() = Some(regions);
 }
 
 #[derive(Clone, Serialize)]
@@ -266,10 +313,22 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
     }
     patch.keyboard_layout = normalize_keyboard_layout(&patch.keyboard_layout);
     patch.keyboard_orientation = normalize_keyboard_orientation(&patch.keyboard_orientation);
+    patch.keyboard_scale_65 = normalize_keyboard_scale(patch.keyboard_scale_65);
+    patch.keyboard_scale_108 = normalize_keyboard_scale(patch.keyboard_scale_108);
+    patch.mouse_orientation = normalize_mouse_orientation(&patch.mouse_orientation);
+    patch.keyboard_light = patch.keyboard_light.normalized();
+    patch.keycap_overrides = normalize_keycap_overrides(std::mem::take(&mut patch.keycap_overrides));
+    patch.desk_skin_id = desk_skins::sanitize_skin_id(&patch.desk_skin_id);
+    patch.prop_config = patch.prop_config.normalized();
 
-    let (prev_autostart, prev_scale, prev_layout) = {
+    let (prev_autostart, prev_scale, prev_layout, prev_kb_scale) = {
         let s = state.settings.lock().unwrap();
-        (s.autostart, s.scale, s.keyboard_layout.clone())
+        (
+            s.autostart,
+            s.scale,
+            s.keyboard_layout.clone(),
+            s.active_keyboard_scale(),
+        )
     };
     if patch.autostart != prev_autostart {
         let _ = set_windows_autostart(patch.autostart);
@@ -277,13 +336,18 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
 
     state.mcp_enabled.store(patch.mcp_enabled, Ordering::Relaxed);
 
-    let size_changed = (patch.scale - prev_scale).abs() > 0.005 || patch.keyboard_layout != prev_layout;
+    let size_changed = (patch.scale - prev_scale).abs() > 0.005
+        || patch.keyboard_layout != prev_layout
+        || (patch.active_keyboard_scale() - prev_kb_scale).abs() > 0.001;
     set_pet_always_on_top(&app, patch.always_on_top);
     if let Some(win) = app.get_webview_window("main") {
         if size_changed {
-            if let Some((nx, ny)) =
-                resize_window_anchored_bottom_right(&win, &patch.keyboard_layout, patch.scale)
-            {
+            if let Some((nx, ny)) = resize_window_anchored_bottom_right(
+                &win,
+                &patch.keyboard_layout,
+                patch.scale,
+                patch.active_keyboard_scale(),
+            ) {
                 patch.x = Some(nx);
                 patch.y = Some(ny);
             }
@@ -457,7 +521,8 @@ pub fn reload_and_emit_all(app: &AppHandle) {
         let mut s = state.settings.lock().unwrap();
         let disk_settings = load_settings();
         let sc = (s.scale - disk_settings.scale).abs() > 0.01
-            || s.keyboard_layout != disk_settings.keyboard_layout;
+            || s.keyboard_layout != disk_settings.keyboard_layout
+            || (s.active_keyboard_scale() - disk_settings.active_keyboard_scale()).abs() > 0.001;
         let tc = s.always_on_top != disk_settings.always_on_top;
         #[cfg(target_os = "macos")]
         let display_changed = s.display_id != disk_settings.display_id;
@@ -495,12 +560,18 @@ pub fn reload_and_emit_all(app: &AppHandle) {
                 &win,
                 &disk_settings.keyboard_layout,
                 disk_settings.scale,
+                disk_settings.active_keyboard_scale(),
             );
         }
     }
 
     let _ = app.emit("kuro-cats", cats);
     let _ = app.emit("kuro-settings", disk_settings);
+}
+
+#[tauri::command]
+fn get_desk_skins() -> Vec<DeskSkinConfig> {
+    load_custom_desk_skins()
 }
 
 fn file_mtime(path: &std::path::Path) -> Option<SystemTime> {
@@ -531,9 +602,10 @@ pub fn apply_scale_and_save(app: &AppHandle, scale: f64) {
     let clamped = scale.clamp(0.20, 1.50);
     let state = app.state::<AppState>();
     let layout = { state.settings.lock().unwrap().keyboard_layout.clone() };
+    let kb_scale = { state.settings.lock().unwrap().active_keyboard_scale() };
     let new_pos = app
         .get_webview_window("main")
-        .and_then(|win| resize_window_anchored_bottom_right(&win, &layout, clamped));
+        .and_then(|win| resize_window_anchored_bottom_right(&win, &layout, clamped, kb_scale));
     let updated = {
         let mut s = state.settings.lock().unwrap();
         s.scale = clamped;
@@ -550,10 +622,18 @@ pub fn apply_scale_and_save(app: &AppHandle, scale: f64) {
 pub fn apply_keyboard_layout_and_save(app: &AppHandle, layout: &str) {
     let normalized = normalize_keyboard_layout(layout);
     let state = app.state::<AppState>();
-    let cur_scale = { state.settings.lock().unwrap().scale };
+    let (cur_scale, kb_scale) = {
+        let s = state.settings.lock().unwrap();
+        let kbs = if normalized == "108" {
+            s.keyboard_scale_108
+        } else {
+            s.keyboard_scale_65
+        };
+        (s.scale, normalize_keyboard_scale(kbs))
+    };
     let new_pos = app
         .get_webview_window("main")
-        .and_then(|win| resize_window_anchored_bottom_right(&win, &normalized, cur_scale));
+        .and_then(|win| resize_window_anchored_bottom_right(&win, &normalized, cur_scale, kb_scale));
     let updated = {
         let mut s = state.settings.lock().unwrap();
         s.keyboard_layout = normalized;
@@ -1060,6 +1140,7 @@ fn start_hit_test_loop(
     dragging: Arc<AtomicBool>,
     update_banner_open: Arc<AtomicBool>,
     paused_guard: Arc<AtomicBool>,
+    hit_regions: Arc<Mutex<Option<HitRegions>>>,
 ) {
     std::thread::spawn(move || {
         let mut last_ignore: Option<bool> = None;
@@ -1126,13 +1207,14 @@ fn start_hit_test_loop(
             let rx = (cx - win_x) as f64 / w;
             let ry = (cy - win_y) as f64 / h;
             let inside = rx >= 0.0 && rx <= 1.0 && ry >= 0.0 && ry <= 1.0;
-            let (locked, always_on_top, is_108, cur_scale, layout_str) = {
+            let (locked, always_on_top, is_108, cur_scale, cur_kb_scale, layout_str) = {
                 let s = settings.lock().unwrap();
                 (
                     s.click_through_locked,
                     s.always_on_top,
                     s.keyboard_layout == "108",
                     s.scale.clamp(0.20, 1.50),
+                    s.active_keyboard_scale(),
                     s.keyboard_layout.clone(),
                 )
             };
@@ -1225,7 +1307,7 @@ fn start_hit_test_loop(
 
             // Map window-relative (rx, ry) into exact pet-local (pet_rx, pet_ry),
             // since at small scales (20%..90%) the pet is anchored bottom-right inside a min-safe menu window!
-            let (bw, bh) = base_dimensions(&layout_str);
+            let (bw, bh) = base_dimensions(&layout_str, cur_kb_scale);
             let win_log_w = (w / sf).max(1.0);
             let win_log_h = (h / sf).max(1.0);
             let pet_w_frac = ((bw * cur_scale) / win_log_w).clamp(0.05, 1.0);
@@ -1237,7 +1319,16 @@ fn start_hit_test_loop(
             let inside_pet = pet_rx >= 0.0 && pet_rx <= 1.0 && pet_ry >= 0.0 && pet_ry <= 1.0;
 
             let (over_interactive, raw_over_cat) = if inside_pet {
-                is_over_interactive_silhouette(pet_rx, pet_ry, is_108)
+                let regions = hit_regions.lock().unwrap();
+                match regions.as_ref() {
+                    Some(r) => {
+                        let over_cat = r.cat.map(|c| c.contains(pet_rx, pet_ry)).unwrap_or(false);
+                        let over_desk = r.desk.map(|d| d.contains(pet_rx, pet_ry)).unwrap_or(false);
+                        let over_prop = r.prop.map(|p| p.contains(pet_rx, pet_ry)).unwrap_or(false);
+                        (over_cat || over_desk || over_prop, over_cat)
+                    }
+                    None => is_over_interactive_silhouette(pet_rx, pet_ry, is_108),
+                }
             } else {
                 (false, false)
             };
@@ -1612,6 +1703,7 @@ pub fn run() {
     let mcp_enabled = Arc::new(AtomicBool::new(initial_settings.mcp_enabled));
     let update_banner_open = Arc::new(AtomicBool::new(false));
     let paused_guard = Arc::new(AtomicBool::new(false));
+    let hit_regions = Arc::new(Mutex::new(None::<HitRegions>));
 
     let settings_for_setup = settings_arc.clone();
     let menu_for_setup = menu_open.clone();
@@ -1619,6 +1711,7 @@ pub fn run() {
     let mcp_for_setup = mcp_enabled.clone();
     let banner_for_setup = update_banner_open.clone();
     let paused_for_setup = paused_guard.clone();
+    let hit_regions_for_setup = hit_regions.clone();
 
     tauri::Builder::default()
         .manage(AppState {
@@ -1628,6 +1721,7 @@ pub fn run() {
             mcp_enabled,
             update_banner_open,
             paused_guard,
+            hit_regions,
         })
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -1639,7 +1733,8 @@ pub fn run() {
             }
 
             if let Some(win) = app.get_webview_window("main") {
-                let (win_w, win_h) = window_dimensions(&s.keyboard_layout, s.scale);
+                let (win_w, win_h) =
+                    window_dimensions(&s.keyboard_layout, s.scale, s.active_keyboard_scale());
                 let _ = win.set_size(Size::Logical(LogicalSize::new(win_w, win_h)));
                 #[cfg(not(target_os = "macos"))]
                 let (target_x, target_y, sz) = {
@@ -1732,6 +1827,7 @@ pub fn run() {
                 drag_for_setup,
                 banner_for_setup,
                 paused_for_setup,
+                hit_regions_for_setup,
             );
             start_storage_watcher(handle.clone());
             updater::start_background_update_checker(handle.clone());
@@ -1778,12 +1874,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             get_cats,
+            get_desk_skins,
             get_mcp_config,
             get_app_version,
             update_settings,
             set_menu_open,
             set_dragging,
             set_update_banner_open,
+            set_hit_regions,
             is_win7_ulw_mode,
             win7_present_frame,
             win7_sync_overlay,

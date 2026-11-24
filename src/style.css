@@ -15,6 +15,17 @@ body {
   font-family: "Segoe UI", "Microsoft YaHei UI", system-ui, -apple-system, sans-serif;
 }
 
+/* Browser preview: white stage so the black cat and dark keycaps stay readable. */
+html.preview-mode,
+html.preview-mode body {
+  background: #ffffff !important;
+}
+
+html.preview-mode #pet-canvas {
+  max-width: 100vw;
+  max-height: 100vh;
+}
+
 /* On Windows 7/8 ULW mode, the cat renders via native 256-level UpdateLayeredWindow while
    #context-menu and #update-toast pop in via rounded Win32 overlay regions with crisp dark surfaces. */
 html.win7-ulw-mode .context-menu {
@@ -268,6 +279,260 @@ html.win7-ulw-mode .update-toast {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 5px;
+}
+
+#light-effect-pills {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+#light-effect-pills .kb-pill {
+  font-size: 10px;
+  padding: 4px 2px;
+}
+
+.light-swatches {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.light-swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.light-swatch:hover {
+  transform: scale(1.12);
+}
+
+.light-swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+
+.light-swatch input[type='color'] {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.light-brightness-row {
+  margin-top: 2px;
+}
+
+#light-color-mode-pills {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+#light-color-mode-pills .kb-pill,
+#light-edge-pills .kb-pill {
+  font-size: 10px;
+  padding: 4px 2px;
+}
+
+#light-edge-pills {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.keycap-designer {
+  position: fixed;
+  left: 4px;
+  right: 4px;
+  top: 4px;
+  bottom: 4px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(18, 21, 28, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+  overflow-y: auto;
+}
+
+.keycap-designer.hidden {
+  display: none;
+}
+
+.kce-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #d2f244;
+}
+
+.kce-close {
+  border: none;
+  background: transparent;
+  color: #9aa4b2;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.kce-close:hover {
+  color: #fff;
+}
+
+.kce-hint {
+  font-size: 10px;
+  color: #7b8494;
+}
+
+.kce-grid {
+  position: relative;
+  width: 100%;
+  height: 132px;
+  flex: none;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.kce-key {
+  position: absolute;
+  border-radius: 3px;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  background: #e8e9e4;
+  color: #2c2f36;
+  font-size: 6.5px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  transition: outline-color 0.1s ease;
+}
+
+.kce-key:hover {
+  outline: 1px solid rgba(210, 242, 68, 0.8);
+}
+
+.kce-key.selected {
+  outline: 2px solid #d2f244;
+  z-index: 2;
+}
+
+.kce-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.kce-selected {
+  font-size: 11px;
+  color: #d2f244;
+  min-height: 15px;
+}
+
+.kce-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.kce-label {
+  font-size: 10.5px;
+  color: #9aa4b2;
+  min-width: 30px;
+}
+
+.kce-input {
+  flex: 1;
+  min-width: 90px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5e7eb;
+  font-size: 11px;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+
+.kce-input::placeholder {
+  color: #6b7280;
+}
+
+.kce-done {
+  margin-left: auto;
+  background: #d2f244;
+  border-color: #d2f244;
+  color: #14161a;
+  font-weight: 700;
+}
+
+.menu-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #e5e7eb;
+  padding: 2px 2px;
+  cursor: pointer;
+}
+
+.menu-toggle-row input[type='checkbox'] {
+  appearance: none;
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.menu-toggle-row input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.menu-toggle-row input[type='checkbox']:checked {
+  background: #c8f538;
+}
+
+.menu-toggle-row input[type='checkbox']:checked::after {
+  transform: translateX(14px);
+  background: #181a20;
+}
+
+#prop-kind-pills {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+#prop-kind-pills .kb-pill,
+#prop-side-pills .kb-pill {
+  font-size: 10px;
+  padding: 4px 2px;
+}
+
+#prop-side-pills {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .kb-pill {
