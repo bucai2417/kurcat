@@ -2708,11 +2708,9 @@ export class KuroCatEngine {
     }
 
     // Layer 1: Mini mouse & mechanical keyboard.
-    // The paw grips the palm side of the shell, so the button plates end up on the
-    // side the arm comes from when the mouse faces the viewer. In that case the
-    // mouse is drawn after the paws so L/R stays readable.
-    const mouseOnTop = this.mouseFacing === 'viewer';
-    if (!mouseOnTop) this.drawMiniMouse(ctx);
+    // The mouse shell is painted AFTER the cat's paws (see Layer 4) so the thick
+    // gripping arm can never slice across the L/R plates in any orientation/scale
+    // combination. A paw-ball overlay is stamped back on top afterwards.
     this.drawKeyboard(ctx);
 
     // Layer 2: Plush cat tail (above keyboard so near-tail key pats land cleanly on keycaps, yet seamlessly tucked behind hip!)
@@ -2734,7 +2732,10 @@ export class KuroCatEngine {
     this.drawPaw(ctx, this.leftPaw, breath);
     this.drawPaw(ctx, this.rightPaw, breath);
 
-    if (mouseOnTop) this.drawMiniMouse(ctx);
+    // The mouse covers the gripping arm, then the paw ball is re-stamped on top so
+    // the "holding it" read survives without hiding the button plates.
+    this.drawMiniMouse(ctx);
+    this.drawMousePawOverlay(ctx, breath);
 
     ctx.restore();
 
@@ -3494,6 +3495,53 @@ export class KuroCatEngine {
 
       ctx.restore();
     }
+  }
+
+  /**
+   * Stamps just the paw ball of the mouse-gripping arm back on top of the shell.
+   *
+   * The full arm is painted before the mouse so its diagonal can never cover the
+   * L/R plates; this keeps the paw visible so it still reads as "holding the mouse".
+   */
+  private drawMousePawOverlay(ctx: CanvasRenderingContext2D, breath: number): void {
+    const paw = this.mousePaw;
+    if (paw.mode !== 'mouse') return;
+    if (paw.idleWeight > 0.5) return;
+    if (this.catBreed === 'dafeiyu') return; // her own rig draws the hand
+
+    const fur = this.customSkin
+      ? this.customSkin.pawColor
+      : this.catBreed === 'ragdoll'
+        ? '#fcfaf4'
+        : '#141314';
+    const outline =
+      this.customSkin?.pawOutlineColor ??
+      (this.catBreed === 'ragdoll' ? 'rgba(93, 81, 72, 0.72)' : 'rgba(120, 124, 132, 0.34)');
+
+    const press = Math.max(this.mouseLeftPress, this.mouseRightPress, this.mouseMiddlePress);
+    const px = paw.pos.x;
+    const py = paw.pos.y + press * 1.8;
+    const r = 11.2;
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, (1 - paw.idleWeight) * 1.2);
+    ctx.fillStyle = fur;
+    ctx.beginPath();
+    ctx.ellipse(px, py, r, r * 0.86, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = 1.15;
+    ctx.stroke();
+    // Toe creases so it reads as a paw resting on the shell.
+    ctx.strokeStyle = this.catBreed === 'ragdoll' ? 'rgba(93,81,72,0.42)' : 'rgba(210,212,216,0.46)';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(px - 3.4, py + r * 0.7);
+    ctx.lineTo(px - 1.2, py - 1.5);
+    ctx.moveTo(px + 3.4, py + r * 0.7);
+    ctx.lineTo(px + 1.2, py - 1.5);
+    ctx.stroke();
+    ctx.restore();
   }
 
   private drawMiniMouse(ctx: CanvasRenderingContext2D): void {
