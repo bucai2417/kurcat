@@ -35,8 +35,10 @@ const HARNESS_DIY: Record<string, Record<string, KeycapOverride>> = {
 const params = new URLSearchParams(location.search);
 const canvas = document.getElementById('pet-canvas') as HTMLCanvasElement;
 // Embedded mode renders relative to the canvas box and centres the pet, which is
-// what a browser preview needs (the desktop app uses full-window anchoring).
-const engine = new KuroCatEngine(canvas, { embedded: true });
+// what a browser preview needs. `?mode=desktop` reproduces the packaged app's
+// full-window anchoring so rendering regressions can be reproduced here.
+const embedded = params.get('mode') !== 'desktop';
+const engine = new KuroCatEngine(canvas, { embedded });
 
 let layout: KeyboardLayoutId = params.get('layout') === '108' ? '108' : '65';
 let orient: KeyboardOrientation = params.get('orient') === 'viewer' ? 'viewer' : 'cat';

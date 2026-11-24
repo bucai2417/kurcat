@@ -1165,7 +1165,8 @@ export class KuroCatEngine {
     const color = button === 'left' ? colors.left : button === 'right' ? colors.right : colors.middle;
     const mx = this.mouseBaseX + this.mouseOffsetX;
     const my = this.mouseBaseY + this.mouseOffsetY;
-    const isCatFacing = this.keyboardOrientation === 'cat';
+    // The LMB/RMB badge must sit over the actual button side of the mouse.
+    const isCatFacing = this.mouseFacing === 'cat';
     const sideShift =
       button === 'left'
         ? isCatFacing
@@ -2561,21 +2562,23 @@ export class KuroCatEngine {
     const heldKey = this.latestHeldKeyFor(paw.side);
 
     if (paw.mode === 'mouse') {
-      const isCatFacing = this.keyboardOrientation === 'cat';
+      // Follow the MOUSE's own facing, not the keyboard's — they can be set
+      // independently, and gripping the wrong side would cover the button plates.
+      const isCatFacing = this.mouseFacing === 'cat';
       const lrBias = this.mouseLeftPress - this.mouseRightPress;
       const anyClickPress = Math.max(this.mouseLeftPress, this.mouseRightPress, this.mouseMiddlePress);
       if (isCatFacing) {
         // 180° cat-facing: palm heel at TOP, LMB = inner/+X, RMB = outer/-X
-        // Sit further back on the palm heel so the L/R button plates stay visible.
+        // Grip well back on the heel so the L/R plates below stay clear.
         paw.target = {
           x: liveMouseX + 1.2 + lrBias * 6.4,
-          y: liveMouseY - 17.6 + anyClickPress * 2.2,
+          y: liveMouseY - 21.0 + anyClickPress * 2.2,
         };
       } else {
         // 0° viewer-facing: palm heel at BOTTOM, LMB = left/-X, RMB = right/+X
         paw.target = {
           x: liveMouseX + 0.5 - lrBias * 6.4,
-          y: liveMouseY + 16.0 - anyClickPress * 2.2,
+          y: liveMouseY + 19.0 - anyClickPress * 2.2,
         };
       }
       const stillHolding =
@@ -2705,8 +2708,9 @@ export class KuroCatEngine {
     }
 
     // Layer 1: Mini mouse & mechanical keyboard.
-    // Viewer-facing puts the button plates on top, exactly where the cat's arm comes from,
-    // so the mouse is drawn last in that orientation to keep L/R visible.
+    // The paw grips the palm side of the shell, so the button plates end up on the
+    // side the arm comes from when the mouse faces the viewer. In that case the
+    // mouse is drawn after the paws so L/R stays readable.
     const mouseOnTop = this.mouseFacing === 'viewer';
     if (!mouseOnTop) this.drawMiniMouse(ctx);
     this.drawKeyboard(ctx);
@@ -4001,7 +4005,18 @@ export class KuroCatEngine {
     const pawRy = 11.8 * (1 - squash * 0.12) * pawScale;
 
     if (this.customSkin) {
-      this.drawCustomPlumpArm(ctx, this.customSkin, side, sx, sy, px, py, squash, withCrease);
+      this.drawCustomPlumpArm(
+        ctx,
+        this.customSkin,
+        side,
+        sx,
+        sy,
+        px,
+        py,
+        squash,
+        withCrease,
+        pawScale,
+      );
       return;
     }
 
@@ -5061,6 +5076,7 @@ export class KuroCatEngine {
     py: number,
     squash: number,
     withCrease: boolean,
+    pawScale = 1,
   ): void {
     const dx = px - sx;
     const dy = py - sy;
@@ -5074,8 +5090,8 @@ export class KuroCatEngine {
     const wy = sy + uy * wristDist;
     const rShoulder = 14.2;
     const rWrist = 9.4;
-    const pawRx = 14.5 * (1 + squash * 0.14);
-    const pawRy = 11.8 * (1 - squash * 0.12);
+    const pawRx = 14.5 * (1 + squash * 0.14) * pawScale;
+    const pawRy = 11.8 * (1 - squash * 0.12) * pawScale;
 
     ctx.save();
     const traceArmPath = () => {
