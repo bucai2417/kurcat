@@ -255,6 +255,14 @@ fn default_idle_action_request() -> String {
     String::new()
 }
 
+fn default_mood_tracking_enabled() -> bool {
+    true
+}
+
+fn default_mood_request() -> f64 {
+    -1.0
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PropConfig {
@@ -354,6 +362,15 @@ pub struct AppSettings {
     pub idle_action_request: String,
     #[serde(default)]
     pub idle_action_seq: u64,
+    #[serde(default = "default_mood_tracking_enabled")]
+    pub mood_tracking_enabled: bool,
+    /// −1 = "no pending request"; otherwise 0..1.
+    #[serde(default = "default_mood_request")]
+    pub mood_annoyance_request: f64,
+    #[serde(default = "default_mood_request")]
+    pub mood_dizzy_request: f64,
+    #[serde(default)]
+    pub mood_seq: u64,
     #[serde(default = "default_privacy_password_guard")]
     pub privacy_password_guard: bool,
 }
@@ -400,6 +417,10 @@ impl Default for AppSettings {
             idle_actions_enabled: default_idle_actions_enabled(),
             idle_action_request: default_idle_action_request(),
             idle_action_seq: 0,
+            mood_tracking_enabled: default_mood_tracking_enabled(),
+            mood_annoyance_request: default_mood_request(),
+            mood_dizzy_request: default_mood_request(),
+            mood_seq: 0,
             privacy_password_guard: default_privacy_password_guard(),
         }
     }

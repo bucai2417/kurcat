@@ -63,6 +63,10 @@ const DEFAULT_SETTINGS = {
   idleActionsEnabled: true,
   idleActionRequest: '',
   idleActionSeq: 0,
+  moodTrackingEnabled: true,
+  moodAnnoyanceRequest: -1,
+  moodDizzyRequest: -1,
+  moodSeq: 0,
   privacyPasswordGuard: true,
 };
 

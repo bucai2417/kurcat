@@ -71,6 +71,10 @@ interface AppSettings {
   idleActionsEnabled: boolean;
   idleActionRequest: string;
   idleActionSeq: number;
+  moodTrackingEnabled: boolean;
+  moodAnnoyanceRequest: number;
+  moodDizzyRequest: number;
+  moodSeq: number;
   privacyPasswordGuard: boolean;
 }
 
@@ -145,6 +149,10 @@ let settings: AppSettings = {
   idleActionsEnabled: true,
   idleActionRequest: '',
   idleActionSeq: 0,
+  moodTrackingEnabled: true,
+  moodAnnoyanceRequest: -1,
+  moodDizzyRequest: -1,
+  moodSeq: 0,
   privacyPasswordGuard: true,
 };
 
@@ -636,6 +644,7 @@ function syncMenuUI(): void {
   engine.setKeycapOverrides(settings.keycapOverrides);
   engine.setPropConfig(settings.propConfig);
   engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
+  engine.setMoodTrackingEnabled(settings.moodTrackingEnabled !== false);
   const idleAutoEl = document.getElementById('idle-auto') as HTMLInputElement | null;
   if (idleAutoEl) idleAutoEl.checked = settings.idleActionsEnabled !== false;
   if (!sliderDragging) {
@@ -648,6 +657,20 @@ function syncMenuUI(): void {
 
 let lastHitRegionsJson = '';
 let lastIdleSeq = 0;
+let lastMoodSeq = 0;
+
+/** MCP writes a mood request + seq; apply it once when the counter advances. */
+function consumeMoodRequest(): void {
+  const seq = settings.moodSeq ?? 0;
+  if (seq <= lastMoodSeq) return;
+  lastMoodSeq = seq;
+  const a = settings.moodAnnoyanceRequest;
+  const d = settings.moodDizzyRequest;
+  engine.setMoodMeter(
+    typeof a === 'number' && a >= 0 ? a : undefined,
+    typeof d === 'number' && d >= 0 ? d : undefined,
+  );
+}
 
 /** MCP writes a request + seq; play it once when the counter advances. */
 function consumeIdleRequest(): void {
@@ -905,6 +928,7 @@ async function bootstrap(): Promise<void> {
     lastKnownLockState = settings.clickThroughLocked;
     // Don't replay a request that was queued before this launch.
     lastIdleSeq = settings.idleActionSeq ?? 0;
+    lastMoodSeq = settings.moodSeq ?? 0;
     if (Array.isArray(loadedCats) && loadedCats.length > 0) {
       catList = loadedCats;
     }
@@ -1117,6 +1141,7 @@ async function bootstrap(): Promise<void> {
     lastKnownLockState = settings.clickThroughLocked;
     syncMenuUI();
     consumeIdleRequest();
+    consumeMoodRequest();
     // MCP may have added/edited custom desk skins; pull the fresh list.
     void invoke<DeskSkinConfig[]>('get_desk_skins')
       .then((list) => {

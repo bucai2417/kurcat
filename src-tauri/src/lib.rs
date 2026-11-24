@@ -1,4 +1,5 @@
-#![recursion_limit = "256"]
+// tools/list is a deep json! literal; serde_json's macro recurses while expanding.
+#![recursion_limit = "512"]
 
 mod cats;
 mod config;

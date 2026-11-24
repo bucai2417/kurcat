@@ -525,7 +525,10 @@ export class KuroCatEngine {
       this.propArmAlpha > 0.02 ||
       this.reaction !== null ||
       this.idleAction !== null ||
-      this.drinkFeedback !== null
+      this.drinkFeedback !== null ||
+      this.annoyance > 0.02 ||
+      this.dizzy > 0.02 ||
+      this.angerSteam.length > 0
     );
   }
 
@@ -724,6 +727,40 @@ export class KuroCatEngine {
   private nextEarFlickAt = 3;
   private recentKeyTimes: number[] = [];
   private typingEnergy = 0;
+  /** 0..1 annoyance from sustained fast typing; drives the angry → dizzy arc. */
+  private annoyance = 0;
+  /** 0..1 how dizzy the pet is once it has lost patience. */
+  private dizzy = 0;
+
+  /** Current mood meter (0..1 annoyance, 0..1 dizzy) — used by MCP/tests. */
+  public get moodMeter(): { annoyance: number; dizzy: number } {
+    return { annoyance: this.annoyance, dizzy: this.dizzy };
+  }
+
+  /** Manually push the pet toward anger (MCP `set_mood`). */
+  public setMoodMeter(annoyance?: number, dizzy?: number): void {
+    if (typeof annoyance === 'number' && Number.isFinite(annoyance)) {
+      this.annoyance = Math.min(1, Math.max(0, annoyance));
+    }
+    if (typeof dizzy === 'number' && Number.isFinite(dizzy)) {
+      this.dizzy = Math.min(1, Math.max(0, dizzy));
+    }
+    this.wakeRendering();
+  }
+
+  /** Lets MCP / settings disable the automatic "typing angers the cat" tracking. */
+  public setMoodTrackingEnabled(enabled: boolean): void {
+    this.moodTrackingEnabled = enabled;
+    if (!enabled) {
+      this.annoyance = 0;
+      this.dizzy = 0;
+      this.angerSteam.length = 0;
+    }
+    this.wakeRendering();
+  }
+  private angerSteam: Array<{ x: number; y: number; vy: number; life: number; max: number; r: number }> = [];
+  private nextSteamAt = 0;
+  private moodTrackingEnabled = true;
   private lastAnyKeyAt = -10000;
 
   // Paws & continuous held-key tracking (Fixes #3)
@@ -2121,6 +2158,146 @@ export class KuroCatEngine {
   }
 
 
+  /**
+   * Sustained fast typing slowly annoys the pet: steam, then anger marks, then a
+   * dizzy spiral. Any pause lets it cool down.
+   */
+  private updateAnnoyance(dt: number, now: number, typingEnergy: number): void {
+    const typingHot =
+      this.moodTrackingEnabled && typingEnergy > 0.62 && now - this.lastAnyKeyAt < 400;
+    if (typingHot) {
+      // Rises over roughly 6-8 seconds of relentless typing.
+      this.annoyance = Math.min(1, this.annoyance + dt * 0.16);
+    } else {
+      this.annoyance = Math.max(0, this.annoyance - dt * (now - this.lastAnyKeyAt > 1500 ? 0.42 : 0.12));
+    }
+
+    // Once it boils over, the pet goes dizzy for a while.
+    const wantDizzy = this.annoyance >= 1 ? 1 : 0;
+    if (wantDizzy) {
+      this.dizzy = Math.min(1, this.dizzy + dt * 0.9);
+      this.annoyance = Math.max(0.85, this.annoyance - dt * 0.06);
+    } else {
+      this.dizzy = Math.max(0, this.dizzy - dt * 0.5);
+    }
+
+    // Steam puffs while annoyed (denser the angrier it gets).
+    if (this.annoyance > 0.35 && this.dizzy < 0.5 && now >= this.nextSteamAt) {
+      this.nextSteamAt = now + 260 - this.annoyance * 150;
+      const count = this.annoyance > 0.75 ? 2 : 1;
+      for (let i = 0; i < count; i++) {
+        const life = 0.9 + Math.random() * 0.7;
+        this.angerSteam.push({
+          x: this.catCenterX + (Math.random() - 0.5) * 26,
+          y: this.catTopY + 34 + (Math.random() - 0.5) * 8,
+          vy: -14 - Math.random() * 12,
+          life,
+          max: life,
+          r: 4 + Math.random() * 4 * this.annoyance,
+        });
+      }
+      if (this.angerSteam.length > 40) {
+        this.angerSteam.splice(0, this.angerSteam.length - 40);
+      }
+    }
+    for (const s of this.angerSteam) {
+      s.life -= dt;
+      s.y += s.vy * dt;
+      s.x += Math.sin(this.elapsed * 3 + s.y * 0.1) * 8 * dt;
+      s.r += dt * 5;
+    }
+    this.angerSteam = this.angerSteam.filter((s) => s.life > 0);
+  }
+
+  /** Steam puffs + anger marks + dizzy spiral, drawn above the cat. */
+  private drawAngerAndDizzy(ctx: CanvasRenderingContext2D): void {
+    const headX = this.getMouthPoint().x;
+    const headY = this.catTopY + 10;
+    // Steam rises from the ears; the dizzy spiral floats higher so they never overlap.
+    const steamY = this.catTopY + 30;
+
+    // 1) Steam
+    if (this.angerSteam.length > 0) {
+      ctx.save();
+      for (const s of this.angerSteam) {
+        const t = Math.max(0, s.life / s.max);
+        ctx.globalAlpha = t * 0.72 * (0.45 + this.annoyance * 0.55);
+        const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r);
+        g.addColorStop(0, 'rgba(150, 156, 166, 1)');
+        g.addColorStop(0.55, 'rgba(132, 138, 148, 0.55)');
+        g.addColorStop(1, 'rgba(132, 138, 148, 0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // 2) Anger cross (💢) once it is really annoyed
+    if (this.annoyance > 0.55 && this.dizzy < 0.4) {
+      const pulse = 0.75 + Math.sin(this.elapsed * 9) * 0.25;
+      const alpha = Math.min(1, (this.annoyance - 0.55) / 0.35) * pulse;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = '#e8404f';
+      ctx.lineWidth = 1.9;
+      ctx.lineCap = 'round';
+      const bx = headX + 30;
+      const by = headY + 14;
+      const arm = 5.5;
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        ctx.beginPath();
+        ctx.moveTo(bx + Math.cos(a) * 2.6, by + Math.sin(a) * 2.6);
+        ctx.lineTo(bx + Math.cos(a) * (2.6 + arm), by + Math.sin(a) * (2.6 + arm));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 3) Dizzy spiral over the head
+    if (this.dizzy > 0.06) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, this.dizzy);
+      ctx.translate(headX, steamY - 26);
+      ctx.lineCap = 'round';
+      // Two passes (dark halo, then amber) so it reads on dark and light.
+      for (const pass of [
+        { color: 'rgba(20, 24, 32, 0.6)', width: 4.6 },
+        { color: '#ffd166', width: 2.0 },
+      ]) {
+        ctx.strokeStyle = pass.color;
+        ctx.lineWidth = pass.width;
+        for (const dir of [1, -1]) {
+          ctx.beginPath();
+          const spin = this.elapsed * 3.4 * dir;
+          for (let i = 0; i <= 46; i++) {
+            const tt = i / 46;
+            const ang = spin + tt * Math.PI * 2.4;
+            const rad = tt * 21;
+            const x = Math.cos(ang) * rad * (dir > 0 ? 1 : -1);
+            const y = Math.sin(ang) * rad * 0.5;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+        }
+      }
+      // Little stars orbiting the spiral.
+      for (let i = 0; i < 3; i++) {
+        const a = this.elapsed * 2.6 + (i * Math.PI * 2) / 3;
+        const sx = Math.cos(a) * 25;
+        const sy = Math.sin(a) * 12;
+        ctx.fillStyle = '#ffd166';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   private clampToKeyboardSurface(pt: Vec2): Vec2 {    // Transform into keyboard-local space and clamp so the plump paw pad NEVER extends past the keyboard bezel!
     const dx = pt.x - this.kbCenterX;
     const dy = pt.y - this.kbCenterY;
@@ -2309,6 +2486,8 @@ export class KuroCatEngine {
     const targetTypingEnergy = Math.min(1, this.recentKeyTimes.length / 7);
     this.typingEnergy += (targetTypingEnergy - this.typingEnergy) * (1 - Math.exp(-9 * dt));
 
+    this.updateAnnoyance(dt, now, targetTypingEnergy);
+
     const isTypingRecently =
       now - this.lastAnyKeyAt < 650 ||
       this.heldKeys.size > 0 ||
@@ -2479,8 +2658,8 @@ export class KuroCatEngine {
     // Slow release so the "listening" tilt is actually visible.
     this.earTurnLeft *= Math.exp(-1.6 * dt);
     this.earTurnRight *= Math.exp(-1.6 * dt);
-    // Ears droop back while dozing.
-    const wantEarBack = this.idleAction?.kind === 'nap' ? 0.5 : 0;
+    // Ears flatten while annoyed / dizzy.
+    const wantEarBack = this.idleAction?.kind === 'nap' ? 0.5 : this.annoyance > 0.4 || this.dizzy > 0.3 ? 0.45 : 0;
     this.earBack += (wantEarBack - this.earBack) * (1 - Math.exp(-5 * dt));
 
     if (!this.isBlinking && this.elapsed >= this.nextBlinkAt) {
@@ -2517,6 +2696,14 @@ export class KuroCatEngine {
     const eyeLerp = 1 - Math.exp(-20 * dt);
     this.eyeLookX += (targetEyeX - this.eyeLookX) * eyeLerp;
     this.eyeLookY += (targetEyeY - this.eyeLookY) * eyeLerp;
+
+    // Dizzy: pupils orbit slowly instead of tracking the cursor.
+    if (this.dizzy > 0.05) {
+      const orbit = Math.min(1, this.dizzy);
+      const a = this.elapsed * 3.1;
+      this.eyeLookX = Math.cos(a) * 5.2 * orbit;
+      this.eyeLookY = Math.sin(a) * 3.4 * orbit;
+    }
 
     const targetFaceTurn = dx * 4.0 + this.spineLean * 8.0 + this.typingSway * 8.5 + pureTypingGlance * 1.5;
     this.faceTurnX += (targetFaceTurn - this.faceTurnX) * (1 - Math.exp(-11 * dt));
@@ -2689,20 +2876,19 @@ export class KuroCatEngine {
       const now = performance.now();
       const layout = this.buildDaFeiYuLayout();
       this.dafeiyu.renderBody(ctx, now, layout);
-      // Facing the viewer puts the L/R plates on top, exactly where her arm comes from,
-      // so there the mouse is drawn last; otherwise her hand stays on top of the shell.
-      const fishMouseOnTop = this.mouseFacing === 'viewer';
-      if (!fishMouseOnTop) this.drawMiniMouse(ctx);
       this.drawKeyboard(ctx);
       this.drawProp(ctx);
       this.dafeiyu.renderForeground(ctx, this.lastDt, now, layout);
-      if (fishMouseOnTop) this.drawMiniMouse(ctx);
+      // Her hands are wide, so the shell is always painted after them; the button
+      // plates then can never be sliced by the arm in either orientation.
+      this.drawMiniMouse(ctx);
       this.drawParticles(ctx);
       if (this.showKeyBubbles && !this.privacyMode) {
         this.drawKeyBubbles(ctx);
         this.drawMouseBadges(ctx);
       }
       this.drawDrinkFeedback(ctx);
+      this.drawAngerAndDizzy(ctx);
       ctx.restore();
       return;
     }
@@ -2748,6 +2934,7 @@ export class KuroCatEngine {
 
     this.drawDrinkFeedback(ctx);
     this.drawSleepZzz(ctx);
+    this.drawAngerAndDizzy(ctx);
 
     ctx.restore();
   }
@@ -3519,8 +3706,11 @@ export class KuroCatEngine {
       (this.catBreed === 'ragdoll' ? 'rgba(93, 81, 72, 0.72)' : 'rgba(120, 124, 132, 0.34)');
 
     const press = Math.max(this.mouseLeftPress, this.mouseRightPress, this.mouseMiddlePress);
+    // Viewer-facing grips the palm at the bottom, so nudge the paw up so it rests
+    // ON the shell instead of hanging below it.
+    const upShift = this.mouseFacing === 'viewer' ? -4.5 : 0;
     const px = paw.pos.x;
-    const py = paw.pos.y + press * 1.8;
+    const py = paw.pos.y + press * 1.8 + upShift;
     const r = 11.2;
 
     ctx.save();

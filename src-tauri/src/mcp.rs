@@ -252,6 +252,31 @@ fn tool_definitions() -> Value {
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
+            "name": "get_mood",
+            "description": "Read the pet's current mood meter: annoyance (0-1, rises while the user types relentlessly) and dizzy (0-1, reached when it loses patience). Also reports whether automatic annoyance tracking is on.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+        },
+        {
+            "name": "set_mood",
+            "description": "Set the pet's mood meter directly (0-1). annoyance shows steam puffs and anger marks; dizzy makes its eyes spin and shows a dizzy spiral. Use 0 to calm it down instantly.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "annoyance": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "dizzy": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+            }
+        },
+        {
+            "name": "set_mood_tracking",
+            "description": "Turn automatic annoyance tracking on or off. When on, sustained fast typing slowly angers the pet until it goes dizzy.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["enabled"],
+                "properties": { "enabled": { "type": "boolean" } }
+            }
+        },
+        {
             "name": "set_keycaps",
             "description": "DIY individual keycaps on the live keyboard. Keys are KeySpec ids (a-z, 0-9, esc, tab, space, lshift, f1..f12, np_0..np_9, up/down/left/right, ...). Each entry may set top/side/text colours, a custom label, or an emoji legend. Merges with existing overrides unless replace: true.",
             "inputSchema": {
@@ -601,6 +626,50 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             };
             let mut s = load_settings();
             s.idle_actions_enabled = enabled;
+            save_settings(&s);
+            on_change();
+            ok_text(json!({ "enabled": enabled }))
+        }
+        "get_mood" => {
+            let s = load_settings();
+            ok_text(json!({
+                "tracking": s.mood_tracking_enabled,
+                "annoyanceRequest": s.mood_annoyance_request,
+                "dizzyRequest": s.mood_dizzy_request,
+                "seq": s.mood_seq,
+                "note": "The live meter is updated by the desktop UI; these fields are the last request sent via MCP."
+            }))
+        }
+        "set_mood" => {
+            let mut s = load_settings();
+            let mut changed = false;
+            if let Some(v) = args.get("annoyance").and_then(|v| v.as_f64()) {
+                s.mood_annoyance_request = v.clamp(0.0, 1.0);
+                changed = true;
+            }
+            if let Some(v) = args.get("dizzy").and_then(|v| v.as_f64()) {
+                s.mood_dizzy_request = v.clamp(0.0, 1.0);
+                changed = true;
+            }
+            if !changed {
+                return err_text("Provide 'annoyance' and/or 'dizzy' (0-1).");
+            }
+            s.mood_seq = s.mood_seq.wrapping_add(1);
+            save_settings(&s);
+            on_change();
+            ok_text(json!({
+                "status": "queued",
+                "annoyance": s.mood_annoyance_request,
+                "dizzy": s.mood_dizzy_request,
+                "seq": s.mood_seq
+            }))
+        }
+        "set_mood_tracking" => {
+            let Some(enabled) = args.get("enabled").and_then(|v| v.as_bool()) else {
+                return err_text("Missing required 'enabled' boolean argument.");
+            };
+            let mut s = load_settings();
+            s.mood_tracking_enabled = enabled;
             save_settings(&s);
             on_change();
             ok_text(json!({ "enabled": enabled }))
