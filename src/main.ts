@@ -2,6 +2,9 @@ import { installTauriPreviewShim } from './tauriPreview';
 
 // Must run before any @tauri-apps/api call is issued.
 const isPreview = installTauriPreviewShim();
+// `?desktop=1` keeps the preview shim but renders with the packaged app's
+// full-window bottom-right anchoring, so window/menu geometry can be checked here.
+const embedded = isPreview && !new URLSearchParams(location.search).has('desktop');
 
 import './style.css';
 import { invoke } from '@tauri-apps/api/core';
@@ -195,7 +198,7 @@ const updateToastTextEl = document.getElementById('update-toast-text') as HTMLSp
 const btnToastInstallEl = document.getElementById('btn-toast-install') as HTMLButtonElement;
 const btnToastOpenEl = document.getElementById('btn-toast-open') as HTMLButtonElement;
 const btnToastCloseEl = document.getElementById('btn-toast-close') as HTMLButtonElement;
-const engine = new KuroCatEngine(canvas, { embedded: isPreview });
+const engine = new KuroCatEngine(canvas, { embedded });
 
 // ---- 3D engine (lazy-loaded; the 2D engine above is never touched) ----
 const canvas3d = document.getElementById('pet-canvas-3d') as HTMLCanvasElement | null;
@@ -279,7 +282,7 @@ function activateRenderEngine(): void {
     loading3dPromise = import('./catEngine3d')
       .then(({ KuroCatEngine3D }) => {
         if (!canvas3d) return;
-        engine3d = new KuroCatEngine3D(canvas3d, { embedded: isPreview });
+        engine3d = new KuroCatEngine3D(canvas3d, { embedded });
         window.addEventListener('resize', () => engine3d?.resize());
         activateRenderEngine();
       })
@@ -300,6 +303,8 @@ if (isPreview) {
   window.addEventListener('resize', () => engine.resize());
   // Handy hook for manual testing in DevTools.
   (window as unknown as Record<string, unknown>).__kurocatEngine = engine;
+  (window as unknown as Record<string, unknown>).__openMenu = (x = 40, y = 40) =>
+    openContextMenu(x, y);
 }
 
 /**
@@ -832,6 +837,21 @@ function consumeIdleRequest(): void {
 }
 function pushHitRegions(): void {
   const regions = engine.getHitRegions();
+  // The menu sits in the margin Rust reserves outside the pet box, so Rust needs
+  // its rect too — otherwise clicks on the menu fall through to the desktop.
+  if (!menuEl.classList.contains('hidden')) {
+    const r = menuEl.getBoundingClientRect();
+    const vw = Math.max(1, window.innerWidth);
+    const vh = Math.max(1, window.innerHeight);
+    if (r.width > 2 && r.height > 2) {
+      regions.menuBox = {
+        cx: (r.left + r.width / 2) / vw,
+        cy: (r.top + r.height / 2) / vh,
+        rx: r.width / 2 / vw,
+        ry: r.height / 2 / vh,
+      };
+    }
+  }
   const json = JSON.stringify(regions);
   if (json === lastHitRegionsJson) return;
   lastHitRegionsJson = json;
@@ -847,6 +867,8 @@ function closeContextMenu(): void {
     menuEl.classList.add('hidden');
     void invoke('set_menu_open', { open: false });
     syncWin7OverlayFn?.(false);
+    // Drop the menu rect so Rust stops treating that margin as clickable.
+    pushHitRegions();
   }
 }
 
@@ -855,7 +877,8 @@ function closeContextMenu(): void {
  *
  * The pet is anchored to the bottom-right of the window, so there is usually room
  * to its left; if not, we fall back to the right edge and finally above it. The
- * clicked point is only used as a tie-breaker.
+ * pet box comes straight from the engine's render transform, so the menu cannot
+ * drift onto the model when the window size or display scale changes.
  */
 function repositionMenu(): void {
   if (menuEl.classList.contains('hidden')) return;
@@ -865,20 +888,18 @@ function repositionMenu(): void {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  // Pet occupies the bottom-right block of the window (see syncLayoutPositions).
-  const { w: logicalW, h: logicalH } = engine.getLogicalSize();
-  const scale = settings.scale ?? 1;
-  const petW = Math.min(vw, logicalW * scale);
-  const petH = Math.min(vh, logicalH * scale);
-  const petLeft = vw - petW;
-  const petTop = vh - petH;
+  const pet = engine.getPetScreenRect();
+  const petLeft = pet.left;
+  const petTop = pet.top;
+  const petRight = pet.left + pet.width;
+  const petBottom = pet.top + pet.height;
 
   const clampX = (x: number) => Math.max(pad, Math.min(x, Math.max(pad, vw - rect.width - pad)));
   const clampY = (y: number) => Math.max(pad, Math.min(y, Math.max(pad, vh - rect.height - pad)));
 
   let left: number;
   const leftOfPet = petLeft - rect.width - gap;
-  const rightOfPet = petLeft + petW + gap;
+  const rightOfPet = petRight + gap;
 
   // Rust widens the window to the left when the menu opens, so `leftOfPet` is
   // normally positive and the menu lands in that reserved margin.
@@ -889,24 +910,26 @@ function repositionMenu(): void {
   } else {
     // No horizontal room: sit above the pet, clamped on-screen.
     const above = petTop - rect.height - gap;
-    left = clampX(petLeft + petW - rect.width);
+    left = clampX(petLeft + pet.width - rect.width);
     menuEl.style.left = `${left}px`;
     menuEl.style.top = `${clampY(above >= pad ? above : vh - rect.height - pad)}px`;
     return;
   }
 
   // Vertically align the menu's bottom with the pet's bottom so it reads as attached.
-  const top = clampY(vh - rect.height - pad);
+  const top = clampY(Math.min(petBottom - rect.height, vh - rect.height - pad));
   menuEl.style.left = `${clampX(left)}px`;
   menuEl.style.top = `${top}px`;
+  // Keep Rust's click-through test in step with where the menu actually landed.
+  pushHitRegions();
 }
 
 function openContextMenu(clientX: number, clientY: number): void {
   syncMenuUI();
   menuEl.classList.remove('hidden');
-  void invoke('set_menu_open', { open: true });
 
-  // Measure after un-hiding, then place beside the pet.
+  // Place beside the pet first so the reserved margin is computed for a menu that
+  // is already where it belongs; the window resize then lands around it.
   const rect = menuEl.getBoundingClientRect();
   if (rect.width < 40) {
     // Layout not settled yet (first open): place off the click, refine next frame.
@@ -916,6 +939,19 @@ function openContextMenu(clientX: number, clientY: number): void {
   } else {
     repositionMenu();
   }
+
+  // Widening the window is async, and the resize re-lays the canvas out — so the
+  // menu has to be re-anchored once the new viewport size actually lands.
+  void invoke('set_menu_open', { open: true })
+    .then(() => {
+      requestAnimationFrame(() => {
+        repositionMenu();
+        requestAnimationFrame(repositionMenu);
+      });
+    })
+    .catch(() => {
+      // Browser preview: nothing to widen, the first placement already stands.
+    });
   syncWin7OverlayFn?.(true);
 }
 
@@ -1546,6 +1582,9 @@ async function bootstrap(): Promise<void> {
   });
 
   window.addEventListener('blur', () => closeContextMenu());
+  // The window grows/shrinks when the menu opens or the user changes scale, so the
+  // menu must re-anchor against the pet's new screen box rather than its old one.
+  window.addEventListener('resize', () => repositionMenu());
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeContextMenu();
   });

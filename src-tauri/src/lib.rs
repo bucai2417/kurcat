@@ -260,6 +260,14 @@ impl HitRegion {
         let dy = (y - self.cy) / self.ry;
         dx * dx + dy * dy <= 1.0
     }
+
+    /// Square/rect containment, for boxes reported as centre + half-extents.
+    fn contains_box(&self, x: f64, y: f64) -> bool {
+        if self.rx.abs() < 1e-6 || self.ry.abs() < 1e-6 {
+            return false;
+        }
+        (x - self.cx).abs() <= self.rx && (y - self.cy).abs() <= self.ry
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
@@ -268,6 +276,10 @@ pub struct HitRegions {
     pub cat: Option<HitRegion>,
     pub desk: Option<HitRegion>,
     pub prop: Option<HitRegion>,
+    /// The pet's real drawn box in window-normalized coordinates (frontend truth).
+    pub pet_box: Option<HitRegion>,
+    /// Open settings menu box in window-normalized coordinates.
+    pub menu_box: Option<HitRegion>,
 }
 
 #[tauri::command]
@@ -419,10 +431,14 @@ fn get_game_active() -> bool {
 
 /// Extra width reserved to the LEFT of the pet while the menu is open, so the
 /// menu never overlaps the model.
-pub const MENU_RESERVE_W: f64 = 268.0;
+pub const MENU_RESERVE_W: f64 = 276.0;
+/// Extra height grown UPWARD while the menu is open, so the tabbed panel can be
+/// taller than the pet window itself without being cut off.
+pub const MENU_RESERVE_H: f64 = 200.0;
 
-/// Grows the window to the left when the menu opens (and shrinks back on close).
-/// The pet stays anchored bottom-right, so only its left margin changes.
+/// Grows the window left and up when the menu opens (and shrinks back on close).
+/// The pet stays anchored bottom-right, so only its left/top margin changes and
+/// the model does not move on screen.
 #[tauri::command]
 fn set_menu_open(app: AppHandle, state: State<'_, AppState>, open: bool) {
     state.menu_open.store(open, Ordering::Relaxed);
@@ -441,19 +457,24 @@ fn set_menu_open(app: AppHandle, state: State<'_, AppState>, open: bool) {
     let old_pos = win.outer_position().ok();
     let old_size = win.outer_size().ok();
 
-    let target_w = if open {
-        (base_w + MENU_RESERVE_W).max(MIN_WINDOW_WIDTH)
+    let (target_w, target_h) = if open {
+        (
+            (base_w + MENU_RESERVE_W).max(MIN_WINDOW_WIDTH),
+            base_h + MENU_RESERVE_H,
+        )
     } else {
-        base_w
+        (base_w, base_h)
     };
-    let _ = win.set_size(Size::Logical(LogicalSize::new(target_w, base_h)));
+    let _ = win.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
 
-    // Keep the bottom-right corner pinned: shift left by the width we added.
+    // Keep the bottom-right corner pinned: shift left/up by exactly the size we added.
     if let (Some(pos), Some(sz)) = (old_pos, old_size) {
         let new_pw = (target_w * sf).round() as i32;
+        let new_ph = (target_h * sf).round() as i32;
         let new_x = pos.x + sz.width as i32 - new_pw;
-        if new_x != pos.x {
-            let _ = win.set_position(PhysicalPosition::new(new_x, pos.y));
+        let new_y = pos.y + sz.height as i32 - new_ph;
+        if new_x != pos.x || new_y != pos.y {
+            let _ = win.set_position(PhysicalPosition::new(new_x, new_y));
         }
     }
 }
@@ -1243,6 +1264,9 @@ fn start_hit_test_loop(
         // Mirrors the settings we need each tick, refreshed on the slow cadence.
         let mut cached_cfg: (bool, bool, bool, f64, f64, String) =
             (false, true, false, 1.0, 1.0, "65".to_string());
+        // Menu open/close resizes the window; poll its rect fast for a short burst.
+        let mut last_menu_state = false;
+        let mut menu_settle_until = Instant::now() - Duration::from_secs(5);
 
         loop {
             std::thread::sleep(Duration::from_millis(25));
@@ -1273,10 +1297,17 @@ fn start_hit_test_loop(
             };
 
             // Refresh the cached rect every ~200ms (or on demand) instead of every tick.
+            // Opening/closing the menu resizes+repositions the window; refresh fast for
+            // a short burst afterwards, then fall back to the cheap cadence.
+            let menu_changed = menu_open.load(Ordering::Relaxed) != last_menu_state;
+            if menu_changed {
+                last_menu_state = !last_menu_state;
+                menu_settle_until = Instant::now() + Duration::from_millis(600);
+            }
             let need_rect = cached_rect.is_none()
                 || rect_at.elapsed() >= Duration::from_millis(200)
                 || dragging.load(Ordering::Relaxed)
-                || menu_open.load(Ordering::Relaxed);
+                || Instant::now() < menu_settle_until;
             if need_rect {
                 let refreshed = if is_win7_ulw {
                     #[cfg(windows)]
@@ -1415,18 +1446,43 @@ fn start_hit_test_loop(
             let alt_override = input_hook::is_alt_pressed();
             let effective_locked = locked && !alt_override;
 
-            // Map window-relative (rx, ry) into exact pet-local (pet_rx, pet_ry),
-            // since at small scales (20%..90%) the pet is anchored bottom-right inside a min-safe menu window!
+            // Map window-relative (rx, ry) into exact pet-local (pet_rx, pet_ry).
+            // The frontend reports the pet's real drawn box (petBox); the estimate
+            // below is only a fallback for the brief window before the first push,
+            // because the canvas letterboxes with min(w/logicalW, h/logicalH) and
+            // that drifts from `base_size * scale / window` as soon as the window is
+            // resized (e.g. widened for the menu).
             let (bw, bh) = base_dimensions(&layout_str, cur_kb_scale);
             let win_log_w = (w / sf).max(1.0);
             let win_log_h = (h / sf).max(1.0);
-            let pet_w_frac = ((bw * cur_scale) / win_log_w).clamp(0.05, 1.0);
-            let pet_h_frac = ((bh * cur_scale) / win_log_h).clamp(0.05, 1.0);
-            let pet_x0 = 1.0 - pet_w_frac;
-            let pet_y0 = 1.0 - pet_h_frac;
+            let (pet_x0, pet_y0, pet_w_frac, pet_h_frac, reported_menu) = {
+                let regions = hit_regions.lock().unwrap();
+                match regions.as_ref() {
+                    Some(r) if r.pet_box.is_some() => {
+                        let b = r.pet_box.unwrap();
+                        (
+                            b.cx - b.rx,
+                            b.cy - b.ry,
+                            (b.rx * 2.0).max(0.01),
+                            (b.ry * 2.0).max(0.01),
+                            r.menu_box,
+                        )
+                    }
+                    _ => {
+                        let pw = ((bw * cur_scale) / win_log_w).clamp(0.05, 1.0);
+                        let ph = ((bh * cur_scale) / win_log_h).clamp(0.05, 1.0);
+                        (1.0 - pw, 1.0 - ph, pw, ph, None)
+                    }
+                }
+            };
             let pet_rx = (rx - pet_x0) / pet_w_frac;
             let pet_ry = (ry - pet_y0) / pet_h_frac;
             let inside_pet = pet_rx >= 0.0 && pet_rx <= 1.0 && pet_ry >= 0.0 && pet_ry <= 1.0;
+            // The menu floats in the reserved margin, outside the pet box; treat it
+            // as interactive too or every click on it would fall through.
+            let over_menu = reported_menu
+                .map(|m| m.contains_box(rx, ry))
+                .unwrap_or(false);
 
             let (over_interactive, raw_over_cat) = if inside_pet {
                 let regions = hit_regions.lock().unwrap();
@@ -1435,12 +1491,12 @@ fn start_hit_test_loop(
                         let over_cat = r.cat.map(|c| c.contains(pet_rx, pet_ry)).unwrap_or(false);
                         let over_desk = r.desk.map(|d| d.contains(pet_rx, pet_ry)).unwrap_or(false);
                         let over_prop = r.prop.map(|p| p.contains(pet_rx, pet_ry)).unwrap_or(false);
-                        (over_cat || over_desk || over_prop, over_cat)
+                        (over_cat || over_desk || over_prop || over_menu, over_cat)
                     }
                     None => is_over_interactive_silhouette(pet_rx, pet_ry, is_108),
                 }
             } else {
-                (false, false)
+                (over_menu, false)
             };
             // While click-through is locked (and Alt is not held), suppress petting hover so users
             // aren't misled by squinting eyes when the cat is intentionally click-through.

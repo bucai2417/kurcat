@@ -30,6 +30,15 @@ export interface HitRegions {
   cat: NormalizedRegion;
   desk: NormalizedRegion;
   prop: NormalizedRegion | null;
+  /**
+   * The pet's real box in WINDOW-normalized coordinates. Rust cannot derive this
+   * itself: the canvas fits the pet with `min(w/logicalW, h/logicalH)` and anchors
+   * it bottom-right, so once the window is resized (e.g. the menu widens it) a
+   * `base_size * scale / window` estimate drifts away from what is drawn.
+   */
+  petBox?: NormalizedRegion;
+  /** Open settings menu box, also window-normalized; null when closed. */
+  menuBox?: NormalizedRegion | null;
 }
 
 export const KB_SCALE_MIN = 0.7;
@@ -122,6 +131,7 @@ export function buildHitRegions(
   mouseFacing: 'cat' | 'viewer',
   propEnabled: boolean,
   propSide: 'left' | 'right' = 'right',
+  petBox: NormalizedRegion | null = null,
 ): HitRegions {
   const norm = (cx: number, cy: number, rx: number, ry: number): NormalizedRegion => ({
     cx: cx / m.logicalW,
@@ -148,6 +158,7 @@ export function buildHitRegions(
       (deskBottom - deskTop) / 2,
     ),
     prop: propEnabled ? norm(propX, m.propY, 26, 32) : null,
+    ...(petBox ? { petBox } : {}),
   };
 }
 

@@ -313,6 +313,43 @@ export class KuroCatEngine {
   }
 
   /**
+   * The pet's on-screen box in CSS pixels, derived from the very same fit/offset
+   * transform `render()` applies. The settings menu anchors to this so it can
+   * never sit on top of the model regardless of window size or display scale.
+   */
+  public getPetScreenRect(): { left: number; top: number; width: number; height: number } {
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const cssW = Math.max(1, this.embedded ? this.canvas.clientWidth || 420 : window.innerWidth);
+    const cssH = Math.max(1, this.embedded ? this.canvas.clientHeight || 440 : window.innerHeight);
+    const toCss = cssW / Math.max(1, cw);
+
+    let uniformScale: number;
+    let offsetX: number;
+    let offsetY: number;
+    if (this.embedded) {
+      const baseFit = Math.min((cw * 0.86) / this.logicalW, (ch * 0.86) / this.logicalH);
+      const effectiveMul =
+        this.renderScale <= 1.0 ? this.renderScale : 1.0 + (this.renderScale - 1.0) * 0.3;
+      uniformScale = baseFit * effectiveMul;
+      offsetX = (cw - this.logicalW * uniformScale) * 0.5;
+      offsetY = (ch - this.logicalH * uniformScale) * 0.52;
+    } else {
+      const dpr = cw / cssW;
+      const fitScale = Math.min(cw / this.logicalW, ch / this.logicalH);
+      uniformScale = Math.min(fitScale, this.renderScale * dpr);
+      offsetX = cw - this.logicalW * uniformScale;
+      offsetY = ch - this.logicalH * uniformScale;
+    }
+    return {
+      left: offsetX * toCss,
+      top: offsetY * toCss,
+      width: this.logicalW * uniformScale * toCss,
+      height: this.logicalH * uniformScale * toCss,
+    };
+  }
+
+  /**
    * Maps a client-space point (event.clientX/Y) into logical canvas coordinates,
    * inverting whatever fit/offset transform `render()` applied. Without this,
    * clicks drift as soon as the canvas is letterboxed or the window scale != 100%.
@@ -402,11 +439,23 @@ export class KuroCatEngine {
   }
 
   public getHitRegions(): HitRegions {
+    // Report the pet's true on-screen box so Rust maps cursor position onto the
+    // same space the canvas actually drew into, even after the window was resized.
+    const box = this.getPetScreenRect();
+    const vw = Math.max(1, window.innerWidth);
+    const vh = Math.max(1, window.innerHeight);
+    const petBox = {
+      cx: (box.left + box.width / 2) / vw,
+      cy: (box.top + box.height / 2) / vh,
+      rx: box.width / 2 / vw,
+      ry: box.height / 2 / vh,
+    };
     return buildHitRegions(
       this.metrics,
       this.mouseFacing,
       this.propConfig.enabled,
       this.propConfig.side === 'left' ? 'left' : 'right',
+      petBox,
     );
   }
 
@@ -2840,10 +2889,12 @@ export class KuroCatEngine {
           y: liveMouseY - 21.0 + anyClickPress * 2.2,
         };
       } else {
-        // 0° viewer-facing: palm heel at BOTTOM, LMB = left/-X, RMB = right/+X
+        // 0° viewer-facing: the L/R plates live at the TOP, so the paw must rest on
+        // the shell's upper rim (exactly the cat-facing read, a touch higher) or it
+        // would both cover the buttons and drag the arm across the shell.
         paw.target = {
           x: liveMouseX + 0.5 - lrBias * 6.4,
-          y: liveMouseY + 19.0 - anyClickPress * 2.2,
+          y: liveMouseY - 25.0 + anyClickPress * 2.2,
         };
       }
       const stillHolding =
@@ -2957,9 +3008,10 @@ export class KuroCatEngine {
       this.drawKeyboard(ctx);
       this.drawProp(ctx);
       this.dafeiyu.renderForeground(ctx, this.lastDt, now, layout);
-      // Her hands are wide, so the shell is always painted after them; the button
-      // plates then can never be sliced by the arm in either orientation.
+      // Her hands are wide, so the shell is always painted after them; the gripping
+      // hand is then re-stamped above the shell so it reads as "holding the mouse".
       this.drawMiniMouse(ctx);
+      this.dafeiyu.drawMouseHandOverlay(ctx);
       this.drawParticles(ctx);
       if (this.showKeyBubbles && !this.privacyMode) {
         this.drawKeyBubbles(ctx);
@@ -3784,11 +3836,10 @@ export class KuroCatEngine {
       (this.catBreed === 'ragdoll' ? 'rgba(93, 81, 72, 0.72)' : 'rgba(120, 124, 132, 0.34)');
 
     const press = Math.max(this.mouseLeftPress, this.mouseRightPress, this.mouseMiddlePress);
-    // The paw must sit ON the shell, not hang under it. Viewer-facing grips the palm
-    // at the bottom, so lift it clear over the shell's upper rim (same read as cat-facing).
-    const upShift = this.mouseFacing === 'viewer' ? -30 : 0;
+    // `updatePaw` already parks the paw on the shell's upper rim in both facings, so
+    // the overlay only has to follow it — no extra shift or it lands on the plates.
     const px = paw.pos.x;
-    const py = paw.pos.y + press * 1.8 + upShift;
+    const py = paw.pos.y + press * 1.8;
     const r = 11.2;
 
     ctx.save();

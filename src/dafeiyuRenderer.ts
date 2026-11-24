@@ -89,6 +89,8 @@ export class DaFeiYuRenderer {
   private moodChangedAt = -10000;
   private nextBlinkAt = performance.now() + 3600 + Math.random() * 2600;
   private blinkUntil = 0;
+  /** Last gripping hand placement, re-stamped above the mouse shell. */
+  private mouseGrip: { px: number; py: number; ang: number; squash: number } | null = null;
 
   // Live2D eye gaze offset in native 224x278 sprite pixel coordinates
   private eyeGazeX = 0;
@@ -944,15 +946,13 @@ export class DaFeiYuRenderer {
         rTargetY = shR.y + 34;
       }
       if (mouseMode) {
-        // Grip the palm side of the shell instead of the button plates, so the
-        // L/R buttons stay visible (the mouse is also drawn above her hand).
+        // Grip the shell's TOP rim in both facings — the button plates always sit at
+        // the far end from the palm, so this keeps L/R readable in either orientation.
+        // The mouse is painted above her hand, so the hand must not dip past the rim.
         const pressOff = layout.mouseLeft || layout.mouseRight ? 2.5 : 0;
         const cx = layout.mouseCenterX ?? layout.mouseBtnX;
         const cy = layout.mouseCenterY ?? layout.mouseBtnY;
-        const buttonsBelow = layout.mouseBtnY > cy;
-        // She has no separate overlay layer, so her hand must sit clearly ON the palm
-        // side of the shell (never below it) — the shell is drawn after her hands.
-        const handY = cy + (buttonsBelow ? -13 : 15) + pressOff;
+        const handY = cy - 22 + pressOff;
         if (layout.mouseBtnX < g.charCenterX) {
           lTargetX = cx;
           lTargetY = handY;
@@ -996,7 +996,13 @@ export class DaFeiYuRenderer {
     this.rightHand.squash *= Math.exp(-14 * dt);
 
     const maxMouseReach = layout.is108 ? 96 : 88;
-    this.drawChubbyArm(
+    this.mouseGrip = null;
+    const gripSide: 'left' | 'right' | null = mouseMode
+      ? layout.mouseBtnX < g.charCenterX
+        ? 'left'
+        : 'right'
+      : null;
+    const armL = this.drawChubbyArm(
       ctx,
       shL.x,
       shL.y,
@@ -1006,7 +1012,7 @@ export class DaFeiYuRenderer {
       this.leftHand.squash,
       mouseMode ? maxMouseReach : 72,
     );
-    this.drawChubbyArm(
+    const armR = this.drawChubbyArm(
       ctx,
       shR.x,
       shR.y,
@@ -1016,6 +1022,13 @@ export class DaFeiYuRenderer {
       this.rightHand.squash,
       mouseMode ? 86 : 72,
     );
+    // The shell is painted after her arms, so remember the gripping hand's final
+    // placement and stamp it back on top in the caller's draw loop.
+    if (gripSide === 'left') {
+      this.mouseGrip = { ...armL, squash: this.leftHand.squash };
+    } else if (gripSide === 'right') {
+      this.mouseGrip = { ...armR, squash: this.rightHand.squash };
+    }
 
     // 4) Water droplets & hearts
     for (const p of this.particles) {
@@ -1197,7 +1210,7 @@ export class DaFeiYuRenderer {
     side: 'left' | 'right',
     squash: number,
     maxLen: number,
-  ): void {
+  ): { px: number; py: number; ang: number } {
     const dx = targetX - sx;
     const dy = targetY - sy;
     const rawLen = Math.max(1, Math.hypot(dx, dy));
@@ -1282,6 +1295,19 @@ export class DaFeiYuRenderer {
     ctx.restore();
 
     // Pure round chibi hand (zero thumb!)
+    this.drawChibiHand(ctx, px, py, ang, squash);
+    ctx.restore();
+    return { px, py, ang };
+  }
+
+  /** The white round hand alone, so it can be re-stamped above the mouse shell. */
+  private drawChibiHand(
+    ctx: CanvasRenderingContext2D,
+    px: number,
+    py: number,
+    ang: number,
+    squash: number,
+  ): void {
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(ang);
@@ -1297,6 +1323,12 @@ export class DaFeiYuRenderer {
     ctx.arc(-2.2, -2.2, 2.3, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
-    ctx.restore();
+  }
+
+  /** Re-draws the gripping hand over the mouse shell (the shell paints after her arms). */
+  public drawMouseHandOverlay(ctx: CanvasRenderingContext2D): void {
+    const g = this.mouseGrip;
+    if (!g) return;
+    this.drawChibiHand(ctx, g.px, g.py, g.ang, g.squash);
   }
 }

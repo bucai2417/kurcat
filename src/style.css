@@ -76,6 +76,9 @@ html.win7-ulw-mode .update-toast {
 
 .context-menu {
   position: fixed;
+  /* Fixed width so the window margin Rust reserves (MENU_RESERVE_W) always fits
+     the menu exactly — a content-driven width would overflow onto the pet. */
+  width: 248px;
   min-width: 214px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
@@ -94,6 +97,8 @@ html.win7-ulw-mode .update-toast {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* Fill the window height so the two tabs get as much room as the screen allows. */
+  max-height: calc(100vh - 16px);
 }
 
 .menu-header-row {
