@@ -752,6 +752,19 @@ function syncMenuUI(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-headphone]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.headphone === (settings.headphoneMode ?? 'off'));
   });
+  document.querySelectorAll<HTMLButtonElement>('[data-tailmode]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tailmode === (settings.tailKeyMode ?? 'smart'));
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-obstoggle]').forEach((btn) => {
+    const on = btn.dataset.obstoggle === 'on';
+    btn.classList.toggle('active', on === (settings.obsEnabled === true));
+  });
+  const obsHint = document.getElementById('obs-url-hint');
+  if (obsHint) {
+    obsHint.textContent = settings.obsEnabled
+      ? `127.0.0.1:${settings.obsPort || 27421}`
+      : '未开启';
+  }
   updateKbScaleVisual(kbLayout, kbScale);
   renderDeskSkinPills();
   renderPropUI();
@@ -888,6 +901,37 @@ async function copyMcpConfig(): Promise<void> {
     }
   } catch (err) {
     console.error('Failed to copy MCP config:', err);
+  }
+}
+
+async function copyObsUrl(): Promise<void> {
+  const hint = document.getElementById('obs-url-hint');
+  try {
+    const url = await invoke<string>('get_obs_url');
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    if (hint) {
+      hint.textContent = '✓ 已复制';
+      hint.classList.add('copied');
+      setTimeout(() => {
+        hint.textContent = settings.obsEnabled
+          ? `127.0.0.1:${settings.obsPort || 27421}`
+          : '未开启';
+        hint.classList.remove('copied');
+      }, 1800);
+    }
+  } catch (err) {
+    console.error('Failed to copy OBS url:', err);
   }
 }
 
@@ -1222,6 +1266,11 @@ async function bootstrap(): Promise<void> {
   }
 
   // ---- Keycap designer ----
+  document.getElementById('btn-copy-obs-url')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    void copyObsUrl();
+  });
+
   document.getElementById('btn-open-keycap-designer')?.addEventListener('click', (e) => {
     e.stopPropagation();
     openKeycapDesigner();
@@ -1336,6 +1385,12 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  await safeListen<boolean>('kuro-game-active', (ev) => {
+    gameActive = Boolean(ev.payload);
+    engine3d?.setGameActive(gameActive);
+    engine3d?.setHeadphones(shouldWearHeadphonesNow());
+  });
+
   await safeListen<boolean>('kuro-privacy', (ev) => {
     privacyActive = Boolean(ev.payload);
     engine.setPrivacyMode(privacyActive);
@@ -1398,7 +1453,7 @@ async function bootstrap(): Promise<void> {
 
   menuEl.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
-      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-rendermode], [data-collar], [data-headphone], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
+      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-rendermode], [data-collar], [data-headphone], [data-tailmode], [data-obstoggle], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
     );
     if (!target) return;
 
@@ -1524,6 +1579,18 @@ async function bootstrap(): Promise<void> {
     const headphoneAttr = target.dataset.headphone;
     if (headphoneAttr === 'auto' || headphoneAttr === 'on' || headphoneAttr === 'off') {
       void applySettingsPatch({ headphoneMode: headphoneAttr });
+      return;
+    }
+
+    const tailModeAttr = target.dataset.tailmode;
+    if (tailModeAttr === 'smart' || tailModeAttr === 'edge' || tailModeAttr === 'off') {
+      void applySettingsPatch({ tailKeyMode: tailModeAttr });
+      return;
+    }
+
+    const obsToggle = target.dataset.obstoggle;
+    if (obsToggle === 'on' || obsToggle === 'off') {
+      void applySettingsPatch({ obsEnabled: obsToggle === 'on' });
       return;
     }
 

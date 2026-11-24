@@ -4,7 +4,9 @@
 mod cats;
 mod config;
 mod desk_skins;
+mod game_detect;
 mod input_hook;
+mod obs;
 #[cfg(target_os = "macos")]
 mod macos_window;
 mod mcp;
@@ -385,8 +387,23 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
         *s = patch.clone();
         save_settings(&s);
     }
+    obs::sync_obs_server(&app, patch.obs_enabled, patch.obs_port);
     let _ = app.emit("kuro-settings", patch.clone());
     patch
+}
+
+#[tauri::command]
+fn get_obs_url(state: State<'_, AppState>) -> String {
+    let port = {
+        let s = state.settings.lock().unwrap();
+        s.obs_port
+    };
+    obs::obs_url(if port == 0 { 27421 } else { port })
+}
+
+#[tauri::command]
+fn get_game_active() -> bool {
+    game_detect::is_game_active()
 }
 
 #[tauri::command]
@@ -1829,6 +1846,13 @@ pub fn run() {
                 settings_for_setup.clone(),
                 paused_for_setup.clone(),
             );
+            // OBS browser-source server + game detection (both no-ops when disabled).
+            obs::sync_obs_server(&handle, s.obs_enabled, s.obs_port);
+            game_detect::start_game_detection_watcher(
+                handle.clone(),
+                settings_for_setup.clone(),
+                paused_for_setup.clone(),
+            );
             start_hit_test_loop(
                 handle.clone(),
                 settings_for_setup,
@@ -1884,6 +1908,8 @@ pub fn run() {
             get_settings,
             get_cats,
             get_desk_skins,
+            get_obs_url,
+            get_game_active,
             get_mcp_config,
             get_app_version,
             update_settings,

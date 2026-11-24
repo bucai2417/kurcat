@@ -826,6 +826,14 @@ export class KuroCatEngine {
   public get tailKeyConfig(): { mode: TailKeyMode; ids: string[] } {
     return { mode: this.tailKeyMode, ids: [...this.tailKeyIdSet] };
   }
+
+  /**
+   * 3D-only cosmetic. The hand-drawn 2D cat has no headphone layer, so this is a
+   * deliberate no-op kept so the OBS/3D call sites can share one interface.
+   */
+  public setHeadphones(_active: boolean): void {
+    // intentionally empty
+  }
   private angerSteam: Array<{ x: number; y: number; vy: number; life: number; max: number; r: number }> = [];
   private nextSteamAt = 0;
   private moodTrackingEnabled = true;
