@@ -975,7 +975,13 @@ function hideUpdateToast(): void {
 
 function showUpdateToast(
   text: string,
-  options: { showInstall?: boolean; showOpen?: boolean; autoHideMs?: number; busy?: boolean } = {},
+  options: {
+    showInstall?: boolean;
+    showOpen?: boolean;
+    showUnlock?: boolean;
+    autoHideMs?: number;
+    busy?: boolean;
+  } = {},
 ): void {
   if (toastAutoHideTimer !== null) {
     window.clearTimeout(toastAutoHideTimer);
@@ -984,7 +990,8 @@ function showUpdateToast(
   updateToastTextEl.textContent = text;
   btnToastInstallEl.classList.toggle('hidden', !options.showInstall);
   btnToastInstallEl.disabled = Boolean(options.busy);
-  btnToastOpenEl.classList.toggle('hidden', !options.showOpen);
+  btnToastOpenEl.classList.toggle('hidden', !(options.showOpen || options.showUnlock));
+  btnToastOpenEl.textContent = options.showUnlock ? '解锁' : '发布页';
   updateToastEl.classList.remove('hidden');
   void invoke('set_update_banner_open', { open: true });
   requestAnimationFrame(() => syncWin7OverlayFn?.(false));
@@ -1121,6 +1128,14 @@ async function bootstrap(): Promise<void> {
       setUpdateHint(`v${appVersion}`);
     }
     syncMenuUI();
+    // Issue #41: the click-through lock now survives restarts, so on launch show a
+    // short escape hatch. Alt/Option always unlocks too, and the tray mirrors state.
+    if (settings.clickThroughLocked) {
+      showUpdateToast('🔒 穿透锁定已恢复 · 点此或按住 Alt 解锁', {
+        showUnlock: true,
+        autoHideMs: 9000,
+      });
+    }
   } catch (err) {
     console.error('Failed to load settings or cats:', err);
   }
@@ -1136,6 +1151,12 @@ async function bootstrap(): Promise<void> {
 
   btnToastOpenEl.addEventListener('click', (e) => {
     e.stopPropagation();
+    // Doubles as the "unlock click-through" escape hatch on launch (Issue #41).
+    if (settings.clickThroughLocked) {
+      void applySettingsPatch({ clickThroughLocked: false });
+      hideUpdateToast();
+      return;
+    }
     const url = latestUpdateInfo?.releaseUrl || 'https://github.com/qianyiai/kurocat/releases/latest';
     void invoke('open_release_page', { url });
   });

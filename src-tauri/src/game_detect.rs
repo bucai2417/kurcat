@@ -417,13 +417,14 @@ pub fn start_game_detection_watcher(
                     active_name = None;
                     clear_streak = 0;
                     GAME_ACTIVE.store(false, Ordering::Relaxed);
-                    let _ = app.emit(
-                        "kuro-game-active",
-                        GameActivePayload {
-                            active: false,
-                            game_name: None,
-                        },
-                    );
+                    let payload = GameActivePayload {
+                        active: false,
+                        game_name: None,
+                    };
+                    let _ = app.emit("kuro-game-active", payload.clone());
+                    if let Ok(raw) = serde_json::to_string(&payload) {
+                        crate::obs::set_game_active(false, &raw);
+                    }
                 }
                 continue;
             }
@@ -441,13 +442,14 @@ pub fn start_game_detection_watcher(
                     active = true;
                     active_name = Some(game_name.clone());
                     GAME_ACTIVE.store(true, Ordering::Relaxed);
-                    let _ = app.emit(
-                        "kuro-game-active",
-                        GameActivePayload {
-                            active: true,
-                            game_name: Some(game_name),
-                        },
-                    );
+                    let payload = GameActivePayload {
+                        active: true,
+                        game_name: Some(game_name),
+                    };
+                    let _ = app.emit("kuro-game-active", payload.clone());
+                    if let Ok(raw) = serde_json::to_string(&payload) {
+                        crate::obs::set_game_active(true, &raw);
+                    }
                 }
             } else if active {
                 clear_streak = clear_streak.saturating_add(1);
@@ -456,13 +458,14 @@ pub fn start_game_detection_watcher(
                     active_name = None;
                     clear_streak = 0;
                     GAME_ACTIVE.store(false, Ordering::Relaxed);
-                    let _ = app.emit(
-                        "kuro-game-active",
-                        GameActivePayload {
-                            active: false,
-                            game_name: None,
-                        },
-                    );
+                    let payload = GameActivePayload {
+                        active: false,
+                        game_name: None,
+                    };
+                    let _ = app.emit("kuro-game-active", payload.clone());
+                    if let Ok(raw) = serde_json::to_string(&payload) {
+                        crate::obs::set_game_active(false, &raw);
+                    }
                 }
             }
         }

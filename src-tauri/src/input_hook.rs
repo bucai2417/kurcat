@@ -487,8 +487,9 @@ pub fn start_global_hooks(app: AppHandle) {
                             if !repeat {
                                 KEY_EVENTS_RECEIVED.fetch_add(1, Ordering::Relaxed);
                             }
-                            let _ =
-                                app.emit("kuro-input", InputEvent::KeyDown { vk, scan, repeat });
+                            let ev = InputEvent::KeyDown { vk, scan, repeat };
+                            let _ = app.emit("kuro-input", ev.clone());
+                            crate::obs::broadcast_input(&ev);
                         }
                     }
                     RawHookMsg::KeyUp { vk, scan, source } => {
@@ -500,7 +501,9 @@ pub fn start_global_hooks(app: AppHandle) {
                             continue;
                         }
                         if dedup.on_key_up(vk, source) {
-                            let _ = app.emit("kuro-input", InputEvent::KeyUp { vk, scan });
+                            let ev = InputEvent::KeyUp { vk, scan };
+                            let _ = app.emit("kuro-input", ev.clone());
+                            crate::obs::broadcast_input(&ev);
                         }
                     }
                     RawHookMsg::MouseDown(btn) => {

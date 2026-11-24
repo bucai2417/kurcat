@@ -211,10 +211,20 @@ pub fn set_pet_always_on_top(app: &AppHandle, on_top: bool) {
 }
 
 pub fn shutdown_pet_windows() {
+    // Release the OBS port so a restart can rebind it immediately.
+    obs::shutdown_obs_server();
     #[cfg(windows)]
     if win_needs_win7_ulw() {
         win7_layered::shutdown();
     }
+}
+
+/// Clears the persisted click-through lock and exits (`KuroCat.exe --unlock`).
+pub fn clear_click_through_lock() {
+    let mut s = load_settings();
+    s.click_through_locked = false;
+    save_settings(&s);
+    println!("KuroCat: click-through lock cleared.");
 }
 
 pub fn run_mcp_stdio() {
@@ -389,6 +399,7 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
     }
     obs::sync_obs_server(&app, patch.obs_enabled, patch.obs_port);
     let _ = app.emit("kuro-settings", patch.clone());
+    obs::broadcast_raw("settings", &serde_json::to_string(&patch).unwrap_or_default());
     patch
 }
 
@@ -591,6 +602,9 @@ pub fn reload_and_emit_all(app: &AppHandle) {
         }
     }
 
+    // Broadcast BEFORE the Tauri emits, which consume these values.
+    obs::broadcast_raw("cats", &serde_json::to_string(&cats).unwrap_or_default());
+    obs::broadcast_raw("settings", &serde_json::to_string(&disk_settings).unwrap_or_default());
     let _ = app.emit("kuro-cats", cats);
     let _ = app.emit("kuro-settings", disk_settings);
 }
@@ -1717,12 +1731,10 @@ pub fn run() {
         linux_configure_display_env();
     }
 
-    let mut initial_settings = load_settings();
-    // Always start unlocked so users who accidentally toggled click-through lock can never be permanently trapped across restarts/upgrades
-    if initial_settings.click_through_locked {
-        initial_settings.click_through_locked = false;
-        save_settings(&initial_settings);
-    }
+    // Issue #41: the lock is now PERSISTED across restarts. Users who rely on
+    // click-through keep it; the frontend shows a short "click here to unlock"
+    // toast on launch and Alt/Option always releases it, so nobody gets trapped.
+    let initial_settings = load_settings();
     let settings_arc = Arc::new(Mutex::new(initial_settings.clone()));
     let menu_open = Arc::new(AtomicBool::new(false));
     let dragging = Arc::new(AtomicBool::new(false));

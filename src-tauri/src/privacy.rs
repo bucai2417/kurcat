@@ -36,6 +36,7 @@ pub fn start_password_privacy_watcher(
                     clear_streak = 0;
                     input_hook::set_password_privacy_active(false);
                     let _ = app.emit("kuro-privacy", false);
+                    crate::obs::set_privacy_active(false);
                 }
                 continue;
             }
@@ -53,6 +54,7 @@ pub fn start_password_privacy_watcher(
                     active = true;
                     input_hook::set_password_privacy_active(true);
                     let _ = app.emit("kuro-privacy", true);
+                    crate::obs::set_privacy_active(true);
                 }
             } else if active {
                 // Brief 2-tick (~280ms) debounce before exiting so focus flickers inside a login form don't flash open
@@ -62,6 +64,7 @@ pub fn start_password_privacy_watcher(
                     clear_streak = 0;
                     input_hook::set_password_privacy_active(false);
                     let _ = app.emit("kuro-privacy", false);
+                    crate::obs::set_privacy_active(false);
                 }
             }
         }
