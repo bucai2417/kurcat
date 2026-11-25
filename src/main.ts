@@ -7,6 +7,7 @@ const isPreview = installTauriPreviewShim();
 const embedded = isPreview && !new URLSearchParams(location.search).has('desktop');
 
 import './style.css';
+import { SettingsSync } from './settingsSync';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -941,9 +942,11 @@ function pushHitRegions(): void {
   if (json === lastHitRegionsJson) return;
   lastHitRegionsJson = json;
   try {
-    void Promise.resolve(invoke('set_hit_regions', { regions })).catch(() => {});
+    void Promise.resolve(invoke('set_hit_regions', { regions })).catch(() => {
+      if (lastHitRegionsJson === json) lastHitRegionsJson = '';
+    });
   } catch {
-    // No Tauri IPC (browser preview); ignore.
+    lastHitRegionsJson = ''; // Retry once IPC is ready.
   }
 }
 
@@ -1037,16 +1040,15 @@ function openContextMenu(_clientX: number, _clientY: number): void {
   syncWin7OverlayFn?.(true);
 }
 
+const settingsSync = new SettingsSync<AppSettings>(settings,
+  () => invoke<AppSettings>('get_settings'),
+  (patch) => invoke('update_settings', { patch }),
+  (value) => { settings = value; syncMenuUI(); },
+);
+
 async function applySettingsPatch(patch: Partial<AppSettings>): Promise<void> {
-  settings = { ...settings, ...patch };
-  syncMenuUI();
-  try {
-    settings = await invoke<AppSettings>('update_settings', { patch: settings });
-    syncMenuUI();
-  } catch (err) {
-    // Browser preview (no Tauri IPC) or a transient IPC failure: keep the local state.
-    console.warn('update_settings failed:', err);
-  }
+  try { await settingsSync.update(patch); }
+  catch (err) { console.warn('update_settings failed:', err); }
 }
 
 async function copyMcpConfig(): Promise<void> {
@@ -1271,7 +1273,77 @@ async function triggerManualUpdateCheck(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  // Left-click drag to reposition the transparent window.
+  // Bound to BOTH canvases: the 3D canvas is stacked on top and would otherwise
+  // swallow every pointer event, leaving the 3D pet undraggable and unselectable.
+  let dragBusy = false;
+  const onCanvasPointerDown = async (e: MouseEvent, source: HTMLCanvasElement): Promise<void> => {
+    if (e.button !== 0 || dragBusy) return;
+    const menuClosed = closeContextMenu();
+    if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
+    // Clicking the drink refills an empty cup instead of dragging the window.
+    if (active3d && engine3d) {
+      if (engine3d.hitTestProp(e.clientX, e.clientY)) {
+        const result = engine3d.clickProp();
+        if (result === 'refilled') {
+          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
+        } else if (result === 'sipped') {
+          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
+        }
+        return;
+      }
+    } else {
+      const logicalPt = engine.clientToLogical(e.clientX, e.clientY);
+      if (engine.hitTestProp(logicalPt.x, logicalPt.y)) {
+        const result = engine.clickProp();
+        if (result === 'refilled') {
+          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
+        } else if (result === 'sipped') {
+          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
+        }
+        return;
+      }
+    }
+    dragBusy = true;
+    source.classList.add('pet-dragging');
+    try {
+      await invoke('set_dragging', { dragging: true });
+      await menuClosed; // Restore the pet window before native dragging.
+      await getCurrentWindow().startDragging();
+    } catch (err) {
+      console.warn('pet dragging failed:', err);
+    } finally {
+      source.classList.remove('pet-dragging');
+      engine.onMouseUp('left');
+      engine3d?.onMouseUp('left');
+      await invoke('set_dragging', { dragging: false }).catch(() => {});
+      dragBusy = false;
+      void invoke('save_window_pos').catch(() => {});
+    }
+  };
+  canvas.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas));
+  canvas3d?.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas3d));
+
+  // Right-click opens sleek dark glass settings menu
+  const onCanvasContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+    if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
+    openContextMenu(e.clientX, e.clientY);
+  };
+  canvas.addEventListener('contextmenu', onCanvasContextMenu);
+  canvas3d?.addEventListener('contextmenu', onCanvasContextMenu);
+
+  window.addEventListener('blur', () => closeContextMenu());
+  // The window grows/shrinks when the menu opens or the user changes scale, so the
+  // menu must re-anchor against the pet's new screen box rather than its old one.
+  window.addEventListener('resize', () => { repositionMenu(); pushHitRegions(); });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeContextMenu();
+  });
+
   engine.start();
+  pushHitRegions();
+  window.setInterval(pushHitRegions, 160);
 
   // Hide Windows-only desktop shortcut button on macOS
   if (/Mac/i.test(navigator.platform) || /Macintosh/i.test(navigator.userAgent)) {
@@ -1286,7 +1358,7 @@ async function bootstrap(): Promise<void> {
       invoke<string>('get_app_version'),
       invoke<DeskSkinConfig[]>('get_desk_skins').catch(() => []),
     ]);
-    settings = loadedSettings;
+    settingsSync.accept(loadedSettings);
     lastKnownLockState = settings.clickThroughLocked;
     // Don't replay a request that was queued before this launch.
     lastIdleSeq = settings.idleActionSeq ?? 0;
@@ -1590,30 +1662,32 @@ async function bootstrap(): Promise<void> {
     renderKeycapGrid();
   });
 
-  await safeListen<AppSettings>('kuro-settings', (ev) => {
-    const prevLock = lastKnownLockState;
-    settings = ev.payload;
-    lastKnownLockState = settings.clickThroughLocked;
-    syncMenuUI();
-    consumeIdleRequest();
-    consumeMoodRequest();
-    // MCP may have added/edited custom desk skins; pull the fresh list.
-    void invoke<DeskSkinConfig[]>('get_desk_skins')
-      .then((list) => {
-        if (Array.isArray(list)) {
-          settings.deskSkins = list;
-          renderDeskSkinPills();
+  await safeListen<AppSettings>('kuro-settings', () => {
+    void settingsSync.refresh().then(() => {
+      const prevLock = lastKnownLockState;
+      lastKnownLockState = settings.clickThroughLocked;
+      consumeIdleRequest();
+      consumeMoodRequest();
+      // MCP may have added/edited custom desk skins; pull the fresh list.
+      void invoke<DeskSkinConfig[]>('get_desk_skins')
+        .then((list) => {
+          if (Array.isArray(list)) {
+            settings.deskSkins = list;
+            renderDeskSkinPills();
+          }
+        })
+        .catch(() => {});
+      if (prevLock !== null && prevLock !== settings.clickThroughLocked) {
+        if (settings.clickThroughLocked) {
+          showUpdateToast('🔒 已锁定穿透（按住 Alt 点击或 ^ 托盘解锁）', { autoHideMs: 4200 });
+        } else {
+          showUpdateToast('🔓 已解除穿透，可直接拖动或右键', { autoHideMs: 2200 });
         }
-      })
-      .catch(() => {});
-    if (prevLock !== null && prevLock !== settings.clickThroughLocked) {
-      if (settings.clickThroughLocked) {
-        showUpdateToast('🔒 已锁定穿透（按住 Alt 点击或 ^ 托盘解锁）', { autoHideMs: 4200 });
-      } else {
-        showUpdateToast('🔓 已解除穿透，可直接拖动或右键', { autoHideMs: 2200 });
       }
-    }
+    }).catch((err) => console.warn('settings refresh failed:', err));
   });
+  // Close the initial get/listen gap, including changes made from the tray during startup.
+  await settingsSync.refresh().catch(() => {});
 
   await safeListen<CatSkinConfig[]>('kuro-cats', (ev) => {
     if (Array.isArray(ev.payload) && ev.payload.length > 0) {
@@ -1683,69 +1757,6 @@ async function bootstrap(): Promise<void> {
     const interactive = !settings.clickThroughLocked || altOverride;
     canvas.classList.toggle('pet-hover', c.overCat && interactive);
     canvas3d?.classList.toggle('pet-hover', c.overCat && interactive);
-  });
-
-  // Left-click drag to reposition the transparent window.
-  // Bound to BOTH canvases: the 3D canvas is stacked on top and would otherwise
-  // swallow every pointer event, leaving the 3D pet undraggable and unselectable.
-  const onCanvasPointerDown = async (e: MouseEvent, source: HTMLCanvasElement): Promise<void> => {
-    if (e.button !== 0) return;
-    const menuClosed = closeContextMenu();
-    if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
-    // Clicking the drink refills an empty cup instead of dragging the window.
-    if (active3d && engine3d) {
-      if (engine3d.hitTestProp(e.clientX, e.clientY)) {
-        const result = engine3d.clickProp();
-        if (result === 'refilled') {
-          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
-        } else if (result === 'sipped') {
-          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
-        }
-        return;
-      }
-    } else {
-      const logicalPt = engine.clientToLogical(e.clientX, e.clientY);
-      if (engine.hitTestProp(logicalPt.x, logicalPt.y)) {
-        const result = engine.clickProp();
-        if (result === 'refilled') {
-          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
-        } else if (result === 'sipped') {
-          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
-        }
-        return;
-      }
-    }
-    await menuClosed; // Restore the pet window before the native drag loop starts.
-    source.classList.add('pet-dragging');
-    void invoke('set_dragging', { dragging: true });
-    try {
-      await getCurrentWindow().startDragging();
-    } finally {
-      source.classList.remove('pet-dragging');
-      engine.onMouseUp('left');
-      engine3d?.onMouseUp('left');
-      void invoke('set_dragging', { dragging: false });
-      void invoke('save_window_pos');
-    }
-  };
-  canvas.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas));
-  canvas3d?.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas3d));
-
-  // Right-click opens sleek dark glass settings menu
-  const onCanvasContextMenu = (e: MouseEvent): void => {
-    e.preventDefault();
-    if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
-    openContextMenu(e.clientX, e.clientY);
-  };
-  canvas.addEventListener('contextmenu', onCanvasContextMenu);
-  canvas3d?.addEventListener('contextmenu', onCanvasContextMenu);
-
-  window.addEventListener('blur', () => closeContextMenu());
-  // The window grows/shrinks when the menu opens or the user changes scale, so the
-  // menu must re-anchor against the pet's new screen box rather than its old one.
-  window.addEventListener('resize', () => repositionMenu());
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeContextMenu();
   });
 
   menuEl.addEventListener('click', (e) => {
@@ -1830,8 +1841,8 @@ async function bootstrap(): Promise<void> {
         void applySettingsPatch({ idleActionsEnabled: true });
       }
       engine.setIdleAutoEnabled(true);
-      engine.triggerIdleAction(idleAction);
-      engine3d?.triggerIdleAction(idleAction);
+      engine.triggerIdleAction(idleAction, true);
+      engine3d?.triggerIdleAction(idleAction, true);
       closeContextMenu();
       return;
     }

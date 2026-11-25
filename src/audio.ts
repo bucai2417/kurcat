@@ -1,15 +1,24 @@
-class CatAudio {
+export class CatAudio {
   private ctx: AudioContext | null = null;
   private enabled = true;
   private graphReady = false;
   private masterGain: GainNode | null = null;
   private currentIntensity = 0;
+  private outputConnected = false;
 
   public setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) {
-      this.setPurrIntensity(0);
+      this.currentIntensity = 0;
+      if (this.masterGain && this.ctx) {
+        this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+        this.masterGain.gain.setValueAtTime(0, this.ctx.currentTime);
+        this.masterGain.disconnect();
+      }
+    } else if (this.masterGain && this.ctx && !this.outputConnected) {
+      this.masterGain.connect(this.ctx.destination);
     }
+    this.outputConnected = enabled && this.graphReady;
   }
 
   public getContext(): AudioContext | null {
@@ -115,6 +124,7 @@ class CatAudio {
 
     this.masterGain = master;
     this.graphReady = true;
+    this.outputConnected = true;
     return true;
   }
 
@@ -125,9 +135,8 @@ class CatAudio {
     const target = this.enabled ? Math.max(0, Math.min(1, intensity)) : 0;
     if (target <= 0.01 && !this.graphReady) return;
     if (Math.abs(target - this.currentIntensity) < 0.005) return;
-    this.currentIntensity = target;
-
     if (target > 0.01 && !this.ensurePurrGraph()) return;
+    this.currentIntensity = target;
     if (!this.ctx || !this.masterGain) return;
 
     if (target > 0.01 && this.ctx.state === 'suspended') {

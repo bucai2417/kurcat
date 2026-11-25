@@ -225,14 +225,14 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "trigger_idle_action",
-            "description": "Play one of the pet's idle behaviours right now: drink (uses the drink prop), stretch (both paws up and out), wave (raises a paw and waves), groom (paw wipes the muzzle), nap (head down, eyes closed, Zzz), cuddle (leans over, paw up, tail swishing), or roll (3D ground roll; 2D uses cuddle). The whale girl supports drink / stretch / wave. Also re-enables automatic idle actions.",
+            "description": "Play one of the pet's idle behaviours right now: drink (uses the drink prop), stretch (both paws up and out), wave (raises a paw and waves), groom (paw wipes the muzzle), nap (head down, eyes closed, Zzz), cuddle (leans over, paw up, tail swishing), roll (3D ground roll; 2D uses cuddle), or 3D-only listen / shimmy / pawCheck. The whale girl supports drink / stretch / wave. Also re-enables automatic idle actions.",
             "inputSchema": {
                 "type": "object",
                 "required": ["kind"],
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll"]
+                        "enum": ["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck"]
                     }
                 }
             }
@@ -271,7 +271,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "set_mood_tracking",
-            "description": "Turn automatic annoyance tracking on or off. When on, sustained fast typing slowly angers the pet until it goes dizzy.",
+            "description": "Turn automatic typing reactions on or off. Sustained typing cycles through focus, rhythmic swaying, excitement and grumpiness; pausing input lets the pet calm down.",
             "inputSchema": {
                 "type": "object",
                 "required": ["enabled"],
@@ -589,18 +589,26 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
         }
         "get_idle_actions" => {
             let s = load_settings();
+            let available = if s.render_mode == "3d" {
+                vec!["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck"]
+            } else if s.cat_breed == "dafeiyu" {
+                vec!["drink", "stretch", "wave"]
+            } else {
+                vec!["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll"]
+            };
             ok_text(json!({
                 "enabled": s.idle_actions_enabled,
                 "delaySec": s.idle_delay_sec,
                 "lastRequest": s.idle_action_request,
                 "seq": s.idle_action_seq,
-                "available": ["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll"]
+                "available": available
             }))
         }
         "trigger_idle_action" => {
             let Some(raw) = args.get("kind").and_then(|v| v.as_str()) else {
                 return err_text("Missing required 'kind' string argument.");
             };
+            let mut s = load_settings();
             let kind = match raw.trim() {
                 "drink" => "drink",
                 "stretch" => "stretch",
@@ -609,14 +617,14 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 "nap" | "sleep" => "nap",
                 "cuddle" => "cuddle",
                 "roll" => "roll",
+                "listen" | "shimmy" | "pawCheck" if s.render_mode == "3d" => raw.trim(),
                 other => {
                     return err_text(&format!(
-                        "Unknown idle action '{}'. Use drink | stretch | wave | groom | nap | cuddle | roll.",
+                        "Unknown idle action '{}'. Use drink | stretch | wave | groom | nap | cuddle | roll; listen | shimmy | pawCheck require 3D.",
                         other
                     ))
                 }
             };
-            let mut s = load_settings();
             s.idle_action_request = kind.to_string();
             s.idle_action_seq = s.idle_action_seq.wrapping_add(1);
             s.idle_actions_enabled = true;

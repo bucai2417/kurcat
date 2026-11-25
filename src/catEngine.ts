@@ -48,6 +48,7 @@ import {
   type PropKind,
 } from './prop';
 import { drawProp, propLook } from './propRenderer';
+import { TypingReactions, neutralReaction, drawReactionMark } from './petReactions';
 
 const propLookHeight = (kind: PropKind): number => propLook(kind).height;
 
@@ -222,6 +223,7 @@ export class KuroCatEngine {
   private reaction: { kind: ReactionKind; t: number; max: number } | null = null;
   /** Current idle behaviour (sleep / roll), or null. */
   private idleAction: IdleActionState | null = null;
+  private menuActionMouseGraceUntil = -1;
   private idleAutoEnabled = true;
   /** Seconds of silence before an automatic idle action starts (user setting). */
   private idleDelaySec = 6;
@@ -287,6 +289,9 @@ export class KuroCatEngine {
     this.privacyMode = active;
     this.dafeiyu.onPrivacyModeChanged(active);
     if (active) {
+      this.typingReactions.reset();
+      this.typingPose = neutralReaction();
+      this.recentKeyTimes.length = 0;
       this.heldKeys.clear();
       this.catTail.heldVks.clear();
       this.catTailHeldAt.clear();
@@ -525,6 +530,7 @@ export class KuroCatEngine {
   }
 
   public setIdleAutoEnabled(enabled: boolean): void {
+    if (this.idleAutoEnabled === enabled) return;
     this.idleAutoEnabled = enabled;
     if (!enabled) this.endIdleAction();
     this.wakeRendering();
@@ -538,7 +544,7 @@ export class KuroCatEngine {
   }
 
   /** Plays one of the idle behaviours right now (also used by MCP / the menu). */
-  public triggerIdleAction(rawKind: string): boolean {
+  public triggerIdleAction(rawKind: string, fromMenu = false): boolean {
     if (this.privacyMode) return false;
     const kind: IdleActionKind = (IDLE_ALIASES[rawKind] ?? rawKind) as IdleActionKind;
     if (kind === 'drink') {
@@ -553,6 +559,7 @@ export class KuroCatEngine {
       if (kind !== 'wave' && kind !== 'stretch') return false;
       const fishDuration = kind === 'wave' ? 2.6 : 2.4;
       this.idleAction = { kind, t: 0, duration: fishDuration };
+      if (fromMenu) this.menuActionMouseGraceUntil = performance.now() + 200;
       this.wakeRendering();
       return true;
     }
@@ -568,6 +575,7 @@ export class KuroCatEngine {
               ? 2.4 + Math.random() * 0.6
               : 3.4 + Math.random() * 0.8;
     this.idleAction = { kind, t: 0, duration };
+    if (fromMenu) this.menuActionMouseGraceUntil = performance.now() + 200;
     if (kind === 'cuddle') {
       this.cuddleSide = Math.random() < 0.5 ? 'left' : 'right';
       this.spawnHeartParticle(true);
@@ -718,8 +726,8 @@ export class KuroCatEngine {
           ? [{ side: 'right' as const, x: this.fishPose.rightX, y: this.fishPose.rightY }]
           : []),
       ],
-      poseLean: this.fishPose.lean,
-      poseLift: this.fishPose.lift,
+      poseLean: this.fishPose.lean + this.typingPose.lean * 70 + this.typingPose.yaw * 20,
+      poseLift: this.fishPose.lift - this.typingPose.squash * 100 - this.typingPose.pitch * 20,
     };
   }
 
@@ -816,6 +824,8 @@ export class KuroCatEngine {
   private nextEarFlickAt = 3;
   private recentKeyTimes: number[] = [];
   private typingEnergy = 0;
+  private typingReactions = new TypingReactions();
+  private typingPose = neutralReaction();
   /** 0..1 annoyance from sustained fast typing; drives the angry → dizzy arc. */
   private annoyance = 0;
   /** 0..1 how dizzy the pet is once it has lost patience. */
@@ -844,10 +854,12 @@ export class KuroCatEngine {
     this.wakeRendering();
   }
 
-  /** Lets MCP / settings disable the automatic "typing angers the cat" tracking. */
+  /** Lets MCP / settings disable automatic reactions to sustained typing. */
   public setMoodTrackingEnabled(enabled: boolean): void {
     this.moodTrackingEnabled = enabled;
     if (!enabled) {
+      this.typingReactions.reset();
+      this.typingPose = neutralReaction();
       this.annoyance = 0;
       this.dizzy = 0;
       this.angerSteam.length = 0;
@@ -1381,6 +1393,7 @@ export class KuroCatEngine {
 
   public onMouseDown(button: string): void {
     const now = performance.now();
+    if (now < this.menuActionMouseGraceUntil) return;
     this.wakeRendering(now);
     this.interruptIdleAction();
     if (button === 'left') {
@@ -2320,18 +2333,19 @@ export class KuroCatEngine {
 
 
   /**
-   * Sustained fast typing slowly annoys the pet: steam, then anger marks, then a
-   * dizzy spiral. Any pause lets it cool down.
+   * Grumpiness is one of the sustained-typing reactions. Cool down between moods
+   * so steam and angry lids cannot mask the next focused or cheerful expression.
    */
   private updateAnnoyance(dt: number, now: number, typingEnergy: number): void {
     const typingHot =
-      this.moodTrackingEnabled && typingEnergy > 0.5 && now - this.lastAnyKeyAt < 450;
+      this.typingReactions.kind === 'grumpy' && this.moodTrackingEnabled &&
+      !this.privacyMode && typingEnergy >= 3 / 7 && now - this.lastAnyKeyAt < 350;
     if (typingHot) {
       // Rises over roughly 4-5 seconds of relentless typing, so the reaction is
       // visible within a normal burst instead of only after a long grind.
-      this.annoyance = Math.min(1, this.annoyance + dt * 0.24);
+      this.annoyance = Math.min(1, this.annoyance + dt * 0.32);
     } else {
-      this.annoyance = Math.max(0, this.annoyance - dt * (now - this.lastAnyKeyAt > 1500 ? 0.42 : 0.12));
+      this.annoyance = Math.max(0, this.annoyance - dt * 0.48);
     }
 
     // Once it boils over, the pet goes dizzy for a while.
@@ -2375,6 +2389,16 @@ export class KuroCatEngine {
   private drawAngerAndDizzy(ctx: CanvasRenderingContext2D): void {
     const headX = this.getMouthPoint().x;
     const headY = this.catTopY + 10;
+    if (this.typingPose.mark && this.typingPose.amount > 0.02 && !this.privacyMode) {
+      ctx.save();
+      for (let i = 0; i < 2; i++) {
+        const phase = (this.elapsed * 0.85 + i * 0.5) % 1;
+        ctx.globalAlpha = Math.sin(phase * Math.PI) * this.typingPose.amount * 0.8;
+        drawReactionMark(ctx, this.typingPose.mark, headX + (i ? 1 : -1) * (43 + phase * 9),
+          headY - phase * 26, 16 + i * 3);
+      }
+      ctx.restore();
+    }
     // Steam rises from the ears; the dizzy spiral floats higher so they never overlap.
     const steamY = this.catTopY + 30;
 
@@ -2656,6 +2680,8 @@ export class KuroCatEngine {
     const targetTypingEnergy = Math.min(1, this.recentKeyTimes.length / 7);
     this.typingEnergy += (targetTypingEnergy - this.typingEnergy) * (1 - Math.exp(-9 * dt));
 
+    this.typingPose = this.typingReactions.update(dt, this.recentKeyTimes.length, now - this.lastAnyKeyAt < 350,
+      this.moodTrackingEnabled && !this.privacyMode && !this.idleAction && !this.drinker.drinking && this.petEnergy < 0.3);
     this.updateAnnoyance(dt, now, targetTypingEnergy);
 
     const isTypingRecently =
@@ -2664,7 +2690,7 @@ export class KuroCatEngine {
       this.catTail.heldVks.size > 0;
     const targetHunch = Math.min(
       1,
-      (isTypingRecently ? 0.45 + this.typingEnergy * 0.55 : 0) + this.idlePose.hunch,
+      (isTypingRecently ? 0.45 + this.typingEnergy * 0.55 : 0) + this.idlePose.hunch + this.typingPose.pitch * 2 + this.typingPose.squash * 3,
     );
     this.typingHunch += (targetHunch - this.typingHunch) * (1 - Math.exp(-10 * dt));
 
@@ -2704,14 +2730,14 @@ export class KuroCatEngine {
       targetLean += dir * 0.34 * this.propReach;
     }
     // Idle poses (cuddle sway) layer on top of the typing / mouse lean.
-    targetLean += this.idlePose.lean;
+    targetLean += this.idlePose.lean + this.typingPose.lean * 3;
     this.spineLean += (targetLean - this.spineLean) * (1 - Math.exp(-10 * dt));
 
     const desiredHeadTilt =
       this.typingSway * 0.18 +
       this.typingHunch * (this.strikeRock * 0.065 - 0.02) +
       this.spineLean * 0.085 +
-      this.idlePose.headTilt;
+      this.idlePose.headTilt + this.typingPose.roll;
     this.headTilt += (desiredHeadTilt - this.headTilt) * (1 - Math.exp(-12 * dt));
 
     this.petEnergy = Math.max(0, this.petEnergy - dt * (this.cursorOverCat ? 0.22 : 1.15));
@@ -2742,10 +2768,10 @@ export class KuroCatEngine {
         : sipping || this.idleAction?.kind === 'nap'
           ? 1
           : Math.max(moodSquint, reactionSquint),
-      this.idlePose.squint,
+      this.idlePose.squint, this.typingPose.squint,
     );
     this.squintAmount += (wantSquint - this.squintAmount) * (1 - Math.exp(-12 * dt));
-    const wantEyeGlow = mood === 'hyper' || rx === 'happy' ? 1 : 0;
+    const wantEyeGlow = mood === 'hyper' || rx === 'happy' ? 1 : this.typingPose.shine;
     this.eyeGlow += (wantEyeGlow - this.eyeGlow) * (1 - Math.exp(-8 * dt));
     // Coffee: ears flick nervously. Energy: whole head buzzes a little.
     if (mood === 'jittery' && Math.random() < dt * 7) {
@@ -2829,7 +2855,7 @@ export class KuroCatEngine {
     this.earTurnLeft *= Math.exp(-1.6 * dt);
     this.earTurnRight *= Math.exp(-1.6 * dt);
     // Ears flatten while annoyed / dizzy.
-    const wantEarBack = this.idleAction?.kind === 'nap' ? 0.5 : this.annoyance > 0.4 || this.dizzy > 0.3 ? 0.45 : 0;
+    const wantEarBack = this.idleAction?.kind === 'nap' ? 0.5 : this.annoyance > 0.4 || this.dizzy > 0.3 ? 0.45 : -this.typingPose.ears * 0.45;
     this.earBack += (wantEarBack - this.earBack) * (1 - Math.exp(-5 * dt));
 
     if (!this.isBlinking && this.elapsed >= this.nextBlinkAt) {
@@ -2861,8 +2887,8 @@ export class KuroCatEngine {
     const pureTypingGlance = mouseRecentlyMoved ? 0 : this.typingHunch;
     const targetEyeX =
       dx * 7.0 * (1 - pureTypingGlance * 0.45) +
-      pureTypingGlance * (this.typingSway * 3.8 + this.lastKeyBias * 2.2);
-    const targetEyeY = dy * 5.2 * (1 - pureTypingGlance * 0.45) + pureTypingGlance * 5.8;
+      pureTypingGlance * (this.typingSway * 3.8 + this.lastKeyBias * 2.2) + this.typingPose.yaw * 18;
+    const targetEyeY = dy * 5.2 * (1 - pureTypingGlance * 0.45) + pureTypingGlance * 5.8 + this.typingPose.pitch * 18;
     const eyeLerp = 1 - Math.exp(-20 * dt);
     this.eyeLookX += (targetEyeX - this.eyeLookX) * eyeLerp;
     this.eyeLookY += (targetEyeY - this.eyeLookY) * eyeLerp;
@@ -3119,7 +3145,7 @@ export class KuroCatEngine {
     const jittery = tailMood === 'jittery' || tailMood === 'hyper';
     const gentleDrift = jittery
       ? Math.sin(this.elapsed * 6.5) * 3.4
-      : Math.sin(this.elapsed * 0.9) * 1.4;
+      : Math.sin(this.elapsed * (0.9 + this.typingPose.tail * 3)) * (1.4 + this.typingPose.tail * 3);
     const hipRight = this.spinePoint(0.84, 0);
 
     const startX = hipRight.x + 56;

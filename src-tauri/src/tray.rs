@@ -7,7 +7,7 @@ use crate::{
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Listener, Manager};
 
 fn default_tray_tooltip() -> &'static str {
     #[cfg(windows)]
@@ -283,6 +283,20 @@ pub fn setup_tray(app: &AppHandle, initial: &AppSettings) -> tauri::Result<()> {
             &quit,
         ],
     )?;
+
+    let synced_checks = [
+        click_through.clone(), key_bubbles.clone(), privacy_guard.clone(),
+        sound_toggle.clone(), always_on_top.clone(), autostart.clone(), mcp_toggle.clone(),
+    ];
+    app.listen("kuro-settings", move |event| {
+        if let Ok(s) = serde_json::from_str::<AppSettings>(event.payload()) {
+            let values = [s.click_through_locked, s.show_key_bubbles, s.privacy_password_guard,
+                s.sound_enabled, s.always_on_top, s.autostart, s.mcp_enabled];
+            for (item, checked) in synced_checks.iter().zip(values) {
+                let _ = item.set_checked(checked);
+            }
+        }
+    });
 
     let icon = Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
     let pause_guard_for_click = pause_guard.clone();

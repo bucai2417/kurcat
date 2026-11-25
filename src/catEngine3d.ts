@@ -1,3 +1,4 @@
+import { modelHitArea } from './modelHitArea';
 import { petViewport, strikeHeight, STRIKE_IMPACT, STRIKE_RELEASE, STRIKE_DURATION } from './petMotion';
 import * as THREE from 'three';
 import { GROUND_ROLL_DURATION, groundRollPose, recoverGroundRoll, type GroundRollPose } from './groundRoll3d';
@@ -25,6 +26,7 @@ import {
 } from './keyboard3d';
 import { createProp3D, type Prop3DHandle } from './prop3d';
 import type { PropConfig, PropKind } from './prop';
+import { TypingReactions, neutralReaction, propReactionPose, PROP_REACTION_DURATION, drawReactionMark, type ReactionMark } from './petReactions';
 import type { KeyboardLightConfig } from './keyboardLight';
 import type { KeycapOverride } from './deskSkin';
 import type { MouseOrientation } from './deskMetrics';
@@ -72,7 +74,7 @@ interface Popup3D {
 
 interface Fx3D {
   sprite: THREE.Sprite;
-  kind: 'bang' | 'dust' | 'z';
+  kind: 'bang' | 'dust' | 'z' | ReactionMark;
   vel: THREE.Vector3;
   t0: number;
   dur: number;
@@ -81,7 +83,7 @@ interface Fx3D {
 }
 
 interface IdleAct3D {
-  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk' | 'wave' | 'cuddle' | 'roll';
+  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk' | 'wave' | 'cuddle' | 'roll' | 'listen' | 'shimmy' | 'pawCheck';
   t0: number;
   dur: number;
   side: -1 | 1;
@@ -201,7 +203,7 @@ function getPopupTexture(text: string): { tex: THREE.CanvasTexture; aspect: numb
   return entry;
 }
 
-function getFxTexture(kind: 'z' | 'anger' | 'bang' | 'dust'): THREE.CanvasTexture {
+function getFxTexture(kind: Fx3D['kind'] | 'anger'): THREE.CanvasTexture {
   const key = `fx:${kind}`;
   const hit = spriteTexCache.get(key);
   if (hit) return hit.tex;
@@ -210,7 +212,9 @@ function getFxTexture(kind: 'z' | 'anger' | 'bang' | 'dust'): THREE.CanvasTextur
   c.width = 128;
   c.height = 128;
   const g = c.getContext('2d')!;
-  if (kind === 'z') {
+  if (kind === 'heart' || kind === 'note' || kind === 'spark' || kind === 'bubble') {
+    drawReactionMark(g, kind, 64, 64, 108);
+  } else if (kind === 'z') {
     g.font = '800 84px "Segoe UI", system-ui, sans-serif';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
@@ -752,6 +756,8 @@ export class KuroCatEngine3D {
   private propNextSipIn = 40;
   private propMoodT = 0;
   private propMood: PropKind | null = null;
+  private typingReactions = new TypingReactions();
+  private nextReactionFx = 0;
   private propLift = 0;
   private propSipMin = 45;
   private propSipMax = 110;
@@ -789,6 +795,7 @@ export class KuroCatEngine3D {
   private lastSlam = -100;
   private curiousUntil = -100;
   private idleAct: IdleAct3D | null = null;
+  private menuActionMouseGraceUntil = -1;
   private nextIdleAct = 4.5;
 
   private readonly tmpV1 = new THREE.Vector3();
@@ -1574,6 +1581,7 @@ export class KuroCatEngine3D {
       this.idleAct !== null ||
       this.rollPose.tuck > 0 ||
       this.propPhase !== 'rest' ||
+      this.propMoodT > 0 ||
       this.tailTap.synthetic ||
       this.petting ||
       this.elapsed < this.curiousUntil ||
@@ -1715,6 +1723,7 @@ export class KuroCatEngine3D {
   }
 
   public setIdleAutoEnabled(enabled: boolean): void {
+    if (this.idleAutoEnabled === enabled) return;
     this.idleAutoEnabled = enabled;
     if (!enabled) this.idleAct = null;
   }
@@ -1722,6 +1731,7 @@ export class KuroCatEngine3D {
   public setMoodTrackingEnabled(enabled: boolean): void {
     this.moodTrackingEnabled = enabled;
     if (!enabled) {
+      this.typingReactions.reset();
       this.annoy = 0;
       this.isCross = false;
       this.finishTailStrike();
@@ -1780,12 +1790,12 @@ export class KuroCatEngine3D {
   }
 
   /**
-   * Hit regions in window-normalized coordinates for the Rust click-through test.
+   * Cat/desk/prop regions are pet-local; only petBox/menuBox are window-normalized.
    *
    * The 2D desk layout does not describe the 3D framing, so reusing it left the
    * whole 3D model marked as "click-through" and nothing was clickable. The 3D
    * scene occupies a fixed bottom-right viewport even while the menu expands
-   * the window. Convert its local regions back into full-window coordinates.
+   * the window. Only petBox is converted into full-window coordinates.
    */
   public getHitRegions(): {
     cat: { cx: number; cy: number; rx: number; ry: number };
@@ -1796,8 +1806,8 @@ export class KuroCatEngine3D {
   } {
     return {
       petBox: this.windowRegion(0.5, 0.5, 0.5, 0.5),
-      cat: this.windowRegion(0.5, 0.44, 0.30, 0.36),
-      desk: this.windowRegion(0.5, 0.78, 0.40, 0.20),
+      cat: { cx: 0.5, cy: 0.44, rx: 0.30, ry: 0.36 },
+      desk: { cx: 0.5, cy: 0.78, rx: 0.40, ry: 0.20 },
       prop: this.propEnabled ? this.propScreenRegion() : null,
       menuBox: null,
     };
@@ -1812,10 +1822,8 @@ export class KuroCatEngine3D {
   }
 
   private propScreenRegion() {
-    const p = this.propHandle?.group.position;
-    if (!p) return this.windowRegion(0.5, 0.8, 0.06, 0.10);
-    this.tmpV1.set(p.x, p.y + 0.18, p.z).project(this.camera);
-    return this.windowRegion((this.tmpV1.x + 1) / 2, (1 - this.tmpV1.y) / 2, 0.07, 0.12);
+    if (!this.propHandle) return null;
+    return modelHitArea(this.propHandle.group, this.camera, this.viewport.width, this.viewport.height);
   }
 
   /** Clicking the cup refills it, or drinks from it if it still has liquid. */
@@ -1852,13 +1860,11 @@ export class KuroCatEngine3D {
     if (!this.propHandle || !this.propEnabled) return false;
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width < 2 || rect.height < 2) return false;
-    this.tmpNdc.set(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -(((clientY - rect.top) / rect.height) * 2 - 1),
-    );
-    this.raycaster.setFromCamera(this.tmpNdc, this.camera);
-    const hits = this.raycaster.intersectObject(this.propHandle.group, true);
-    return hits.length > 0;
+    const area = this.propScreenRegion();
+    if (!area) return false;
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+    return Math.abs(x - area.cx) <= area.rx && Math.abs(y - area.cy) <= area.ry;
   }
 
   private clearProp(): void {
@@ -1869,6 +1875,8 @@ export class KuroCatEngine3D {
     }
     this.propPhase = 'rest';
     this.propLift = 0;
+    this.propMoodT = 0;
+    this.propMood = null;
   }
 
   private rebuildProp(): void {
@@ -1931,7 +1939,7 @@ export class KuroCatEngine3D {
     else if (this.propPhase === 'sip') {
       this.propLevel = Math.max(0, this.propLevel - 0.1);
       this.propMood = this.propKind;
-      this.propMoodT = 3.2;
+      this.propMoodT = PROP_REACTION_DURATION + this.propPhaseDur.return;
       this.returnProp();
     } else {
       this.propPhase = 'rest';
@@ -1991,6 +1999,8 @@ export class KuroCatEngine3D {
     this.privacyMode = active;
     if (active) {
       this.releaseInputs();
+      this.typingReactions.reset();
+      this.propMoodT = 0;
       this.idleAct = null;
       this.returnProp();
       this.isCross = false;
@@ -2049,13 +2059,17 @@ export class KuroCatEngine3D {
     this.tailSlapKey(targetId);
   }
 
-  public triggerIdleAction(rawKind: string): void {
+  public triggerIdleAction(rawKind: string, fromMenu = false): void {
     if (this.privacyMode || this.propPhase !== 'rest' || this.rollPose.tuck > 0) return;
     const kind = rawKind === 'sleep' ? 'nap' : rawKind;
     if (kind === 'drink') { this.clickProp(); return; }
-    if (kind === 'nap') { this.triggerSleepDemo(); return; }
+    if (kind === 'nap') {
+      this.triggerSleepDemo();
+      if (fromMenu) this.menuActionMouseGraceUntil = this.elapsed + 0.20;
+      return;
+    }
     const durations: Partial<Record<IdleAct3D['kind'], number>> = {
-      stretch: 2.8, wave: 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION,
+      stretch: 2.8, wave: 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION, listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
     };
     const dur = durations[kind as IdleAct3D['kind']];
     if (!dur) return;
@@ -2064,6 +2078,7 @@ export class KuroCatEngine3D {
     this.isCross = false;
     this.annoy = 0;
     this.idleAct = { kind: kind as IdleAct3D['kind'], t0: this.elapsed, dur, side: Math.random() < 0.5 ? -1 : 1 };
+    if (fromMenu) this.menuActionMouseGraceUntil = this.elapsed + 0.20;
     this.nextIdleAct = this.elapsed + dur + this.idleDelaySec;
   }
 
@@ -2104,10 +2119,7 @@ export class KuroCatEngine3D {
 
     this.lastKey = this.elapsed;
     this.strokes.push(this.elapsed);
-    const burst = this.strokes.filter((s) => this.elapsed - s < 0.18).length;
-    if (this.moodTrackingEnabled && burst >= 4) {
-      this.pokeAnnoy(0.32);
-    }
+    this.propMoodT = 0;
 
     const useTail =
       this.tailKeyMode === 'custom'
@@ -2228,8 +2240,9 @@ export class KuroCatEngine3D {
   }
 
   public onMouseDown(btn: string): void {
-    // The global hook may report the same menu click after it starts a roll.
-    this.wake(this.idleAct?.kind !== 'roll' || this.elapsed - this.idleAct.t0 > 0.20);
+    // The global hook may report the menu's initiating click after its action starts.
+    if (this.elapsed < this.menuActionMouseGraceUntil) return;
+    this.wake();
     this.lastMouse = this.elapsed;
     this.paws.L.lastActive = this.elapsed;
     if (btn === 'left') this.leftMouseDown = true;
@@ -2467,7 +2480,7 @@ export class KuroCatEngine3D {
     }
   }
 
-  private spawnFx(kind: 'bang' | 'dust' | 'z', pos: THREE.Vector3, vel: THREE.Vector3, size: number, dur: number): void {
+  private spawnFx(kind: Fx3D['kind'], pos: THREE.Vector3, vel: THREE.Vector3, size: number, dur: number): void {
     const mat = new THREE.SpriteMaterial({
       map: getFxTexture(kind),
       transparent: true,
@@ -2627,15 +2640,21 @@ export class KuroCatEngine3D {
     const curiousNow = !this.asleep && !this.privacyMode && !this.isCross && t < this.curiousUntil;
     const curious = clamp(this.sCurious.step(curiousNow ? 1 : 0, dt), 0, 1);
 
-    // Grumpy annoyance state: sustained fast typing winds the cat up.
+    const typingReaction = this.typingReactions.update(dt, cps, t - this.lastKey < 0.35,
+      this.moodTrackingEnabled && !this.privacyMode && !this.asleep && !petActive &&
+      !this.idleAct && this.propPhase === 'rest' && this.rollPose.tuck === 0);
+    const grumpyTyping = this.typingReactions.kind === 'grumpy';
+
+    // Grumpiness is one of several typing moods; none generate fake input.
     if (this.moodTrackingEnabled && !this.privacyMode && !this.asleep) {
-      if (cps > 6 && t - this.lastKey < 0.25) {
-        this.pokeAnnoy((cps - 6) * 0.085 * dt);
-      } else if (this.isCross && t - this.lastKey < 0.9 && cps >= 3) {
+      if (grumpyTyping && cps >= 3 && t - this.lastKey < 0.25) {
+        this.pokeAnnoy(0.36 * dt);
+      } else if (this.isCross && grumpyTyping && t - this.lastKey < 0.9 && cps >= 3) {
         this.lastPoke = t;
       }
-      if (t - this.lastPoke > 2.2) {
-        this.annoy = Math.max(0, this.annoy - 0.15 * dt);
+      // Cool down before the next typing mood, including while input continues.
+      if (t - this.lastPoke > (grumpyTyping ? 2.2 : 0.6)) {
+        this.annoy = Math.max(0, this.annoy - (grumpyTyping ? 0.15 : 0.55) * dt);
       }
       if (!this.isCross && this.annoy >= 0.55) {
         this.isCross = true;
@@ -2670,7 +2689,7 @@ export class KuroCatEngine3D {
     if (this.idleAct && t > this.idleAct.t0 + this.idleAct.dur) this.idleAct = null;
     if (
       this.idleAutoEnabled &&
-      this.propPhase === 'rest' &&
+      this.propPhase === 'rest' && this.propMoodT === 0 &&
       !this.idleAct &&
       this.rollPose.tuck === 0 &&
       t >= this.nextIdleAct &&
@@ -2682,7 +2701,7 @@ export class KuroCatEngine3D {
       !curiousNow
     ) {
       const kinds: IdleAct3D['kind'][] = [
-        'tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail', 'stretch', 'glance', 'groom', 'perk', 'wave', 'cuddle',
+        'tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail', 'stretch', 'glance', 'groom', 'perk', 'wave', 'cuddle', 'listen', 'shimmy', 'pawCheck',
       ];
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const durMap: Record<IdleAct3D['kind'], number> = {
@@ -2698,6 +2717,7 @@ export class KuroCatEngine3D {
         wave: 2.6,
         cuddle: 3.2,
         roll: GROUND_ROLL_DURATION,
+        listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
       };
       this.idleAct = { kind, t0: t, dur: durMap[kind], side: Math.random() < 0.5 ? -1 : 1 };
       this.nextIdleAct = t + 3.4 + Math.random() * 4.0;
@@ -2713,6 +2733,17 @@ export class KuroCatEngine3D {
     this.desk.update(dt, this.leftMouseDown, this.rightMouseDown, deskHopY, this.privacyClose);
     // Drink prop state machine (only runs when a cup exists).
     this.updateProp(dt);
+    const aftertaste = this.propMoodT > 0 && this.propPhase === 'rest' && t - this.lastKey > 0.65 &&
+      !this.isMousing() && !this.privacyMode && !this.asleep && !this.isCross && !petActive && !act && !rolling;
+    const propReaction = aftertaste ? propReactionPose(this.propMood, PROP_REACTION_DURATION - this.propMoodT) : neutralReaction();
+    const typingPose = this.isCross ? neutralReaction() : typingReaction;
+    const reactionMark = propReaction.mark ?? typingPose.mark;
+    if (reactionMark && Math.max(propReaction.amount, typingPose.amount) > 0.45 && t >= this.nextReactionFx) {
+      this.nextReactionFx = t + 0.65;
+      this.headMount.getWorldPosition(this.tmpV1);
+      this.tmpV1.x += Math.sin(t * 3) * 0.42; this.tmpV1.y += 0.42;
+      this.spawnFx(reactionMark, this.tmpV1, new THREE.Vector3(0.07 * Math.sin(t), 0.32, 0), 0.17, 0.9);
+    }
 
     // 4) Spine lean, hunch, squash & breathing on continuous one-piece body
     const mousing = !rolling && this.isMousing();
@@ -2761,7 +2792,13 @@ export class KuroCatEngine3D {
     }
 
     if (act?.kind === 'cuddle') targetLean += act.side * 0.13 * Math.sin(actU * Math.PI) * actEnv;
-    targetSquash += 0.10 * this.rollPose.tuck;
+    if (act?.kind === 'shimmy') {
+      targetLean += Math.sin(actU * Math.PI * 8) * 0.08 * actEnv;
+      targetSquash += Math.cos(actU * Math.PI * 8) * 0.025 * actEnv;
+    }
+    if (act?.kind === 'listen') targetLean += act.side * 0.04 * actEnv;
+    targetLean += propReaction.lean + typingPose.lean;
+    targetSquash += propReaction.squash + typingPose.squash + 0.10 * this.rollPose.tuck;
     this.bend.x = this.sShift.step(rolling ? 0 : targetShift + targetLean, dt);
     this.bend.z = this.sHunch.step(rolling ? 0 : targetHunch, dt);
     this.bend.squash = this.sSquash.step(targetSquash, dt);
@@ -2831,11 +2868,21 @@ export class KuroCatEngine3D {
         targetYaw += act.side * 0.14 * actEnv;
       }
     }
-    if (this.propMoodT > 0 && !typingActive && !this.privacyMode && !this.asleep && !this.isCross) {
-      const content = this.propMood === 'boba' || this.propMood === 'pudding';
-      if (content) targetRoll += Math.sin(t * 3.0) * 0.07 * Math.min(1, this.propMoodT);
-      if (this.propMood === 'cola') targetPitch += Math.sin(this.propMoodT * 8) * 0.035;
+    if (act?.kind === 'listen') {
+      targetYaw += act.side * 0.25 * actEnv; targetRoll += act.side * 0.16 * actEnv;
+      targetPitch -= 0.06 * actEnv;
     }
+    if (act?.kind === 'shimmy') {
+      targetYaw += Math.sin(actU * Math.PI * 8 + 0.5) * 0.16 * actEnv;
+      targetRoll += Math.sin(actU * Math.PI * 8) * 0.11 * actEnv;
+    }
+    if (act?.kind === 'pawCheck') {
+      targetPitch += 0.15 * actEnv; targetYaw += act.side * 0.12 * actEnv;
+      targetGazeX = act.side * 0.4 * actEnv; targetGazeY = -0.65 * actEnv;
+    }
+    targetRoll += propReaction.roll + typingPose.roll;
+    targetPitch += propReaction.pitch + typingPose.pitch;
+    targetYaw += propReaction.yaw + typingPose.yaw;
     if (cross > 0.05) {
       targetYaw = mix(targetYaw, this.crossHuffDir * 0.20, cross * 0.65);
       targetGazeX = mix(targetGazeX, this.crossHuffDir * 0.72, cross * 0.65);
@@ -2881,7 +2928,7 @@ export class KuroCatEngine3D {
     // 6) Compact ears: perk when curious, fold flat sideways into airplane ears when cross
     const earTarget =
       0.12 * this.excite * (1 - cross) +
-      0.16 * curious -
+      0.16 * curious + propReaction.ears + typingPose.ears + (act?.kind === 'listen' ? 0.24 * actEnv : 0) -
       (petActive ? 0.15 : 0) -
       0.56 * cross -
       0.10 * this.sleepAmt;
@@ -2907,9 +2954,8 @@ export class KuroCatEngine3D {
       blinkClose = Math.max(blinkClose, Math.sin(actU * Math.PI));
     }
 
-    const aftertaste = this.propMoodT > 0 && !typingActive && !mousing && !this.privacyMode && !this.asleep && !this.isCross;
-    const bliss = aftertaste && this.propMood === 'pudding';
-    if (bliss) blinkClose = Math.max(blinkClose, 0.75 * Math.min(1, this.propMoodT));
+    const bliss = propReaction.squint > 0.4;
+    blinkClose = Math.max(blinkClose, propReaction.squint, typingPose.squint);
     const isSleepOrPrivacy = this.sleepAmt > 0.45 || this.privacyClose > 0.45;
     const isPetSquint = !isSleepOrPrivacy && this.squintAmt > 0.38 && blinkClose < 0.3;
     const isBlinkClosed = !isSleepOrPrivacy && !isPetSquint && blinkClose > 0.58;
@@ -2922,7 +2968,7 @@ export class KuroCatEngine3D {
 
     const pal = this.currentPalette;
     // Match original KuroCat 2D: Black Cat shows NO permanent catchlights when calm, sparkling catchlights when Curious!
-    const energyShine = aftertaste && this.propMood === 'energy' ? Math.min(1, this.propMoodT) : 0;
+    const energyShine = Math.max(propReaction.shine, typingPose.shine);
     const shineAmt = Math.max(energyShine, pal?.eyeCatchlight ? 1.0 + curious * 0.20 : Math.min(1.16, curious * 1.25));
 
     for (const e of this.eyes) {
@@ -2960,7 +3006,7 @@ export class KuroCatEngine3D {
     // Tense posture is separate from the finite, input-driven keyboard strike.
     this.updateTailStrike(dt);
 
-    const swayRate = mix(1.0, 2.5, this.excite) * (this.propMoodT > 0 && this.propMood === 'coffee' ? 1.45 : 1) * (1 - 0.75 * this.sleepAmt);
+    const swayRate = mix(1.0, 2.5, this.excite) * (1 + propReaction.tail + typingPose.tail) * (1 - 0.75 * this.sleepAmt);
     this.tailPhase += dt * swayRate;
     const tailSway = (1 - 0.7 * this.sleepAmt) * (1 + 0.42 * curious) + (act && act.kind === 'tail' ? 1.35 * actEnv : 0);
 
@@ -3017,8 +3063,10 @@ export class KuroCatEngine3D {
       const activeForMouse = isLeft && mousing && !activeForProp && !paw.down && !finishingTap;
       const activeForKey = Boolean(paw.keyId && (paw.down || t - paw.t0 < 0.52)) && !this.asleep && !this.privacyMode;
       const activeForGesture = Boolean(act && (act.kind === 'stretch' || act.kind === 'cuddle' ||
-        ((act.kind === 'groom' || act.kind === 'wave') && act.side === paw.side)));
-      const wantTuck = !activeForMouse && !activeForKey && !activeForProp && !activeForGesture ? 1 : 0;
+        ((act.kind === 'groom' || act.kind === 'wave' || act.kind === 'pawCheck') && act.side === paw.side)));
+      const activeForAftertaste = propReaction.amount > 0.01 &&
+        (propReaction.paw === 'pump' || (propReaction.paw === 'cheek' && paw.side === propArmSide));
+      const wantTuck = !activeForMouse && !activeForKey && !activeForProp && !activeForGesture && !activeForAftertaste ? 1 : 0;
       paw.tuckWeight += (wantTuck - paw.tuckWeight) * approach(wantTuck ? 6.5 : 22, dt);
 
       this.tmpPawLocal.set(paw.side * 0.24, 0.16 - this.sleepAmt * 0.06, 0.54);
@@ -3087,6 +3135,9 @@ export class KuroCatEngine3D {
           this.tmpV2.set(paw.side * (0.16 + 0.03 * Math.cos(actU * Math.PI * 6)),
             -0.02 + 0.06 * Math.sin(actU * Math.PI * 6), this.surfaceZ(0.16, 0) + 0.07);
           this.tmpV2.applyMatrix4(this.headMount.matrixWorld);
+        } else if (act.kind === 'pawCheck') {
+          this.tmpPawLocal.set(paw.side * 0.38, 1.05 + 0.03 * Math.sin(actU * Math.PI * 4), 0.78);
+          this.attachLocal(this.tmpPawLocal, this.tmpV2);
         } else {
           const wave = act.kind === 'wave';
           this.tmpPawLocal.set(paw.side * (wave ? 0.60 + 0.05 * Math.sin(actU * Math.PI * 8) : 0.42),
@@ -3097,6 +3148,19 @@ export class KuroCatEngine3D {
         paw.pos.copy(paw.spring.step(this.tmpV2, dt));
         paw.last.copy(paw.pos);
         return;
+      }
+
+      // Aftertaste owns only a free paw, after the cup has returned. Real input wins above.
+      if (propReaction.paw !== 'none' && propReaction.amount > 0.01) {
+        if (propReaction.paw === 'cheek' && paw.side === propArmSide) {
+          this.tmpV2.set(paw.side * 0.14, -0.10 + 0.025 * Math.sin(t * 8), this.surfaceZ(0.14, -0.1) + 0.09);
+          this.tmpV2.applyMatrix4(this.headMount.matrixWorld);
+        } else if (propReaction.paw === 'pump') {
+          this.tmpPawLocal.set(paw.side * 0.47, 0.92 + 0.08 * Math.sin(t * 8 + paw.side), 0.68);
+          this.attachLocal(this.tmpPawLocal, this.tmpV2);
+        } else this.tmpV2.copy(tuckHome);
+        this.tmpV2.lerpVectors(tuckHome, this.tmpV2, propReaction.amount);
+        paw.pos.copy(paw.spring.step(this.tmpV2, dt)); paw.last.copy(paw.pos); return;
       }
 
       // Return to the relaxed belly pose after the gesture.

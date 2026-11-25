@@ -343,7 +343,22 @@ fn get_mcp_config(state: State<'_, AppState>) -> String {
 }
 
 #[tauri::command]
-fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSettings) -> AppSettings {
+fn update_settings(app: AppHandle, state: State<'_, AppState>, patch: serde_json::Value) -> Result<AppSettings, String> {
+    let edits = patch.as_object().ok_or("settings patch must be an object")?;
+    let mut current = state.settings.lock().unwrap();
+    let prev_autostart = current.autostart;
+    let prev_scale = current.scale;
+    let prev_layout = current.keyboard_layout.clone();
+    let prev_kb_scale = current.active_keyboard_scale();
+    let mut merged = serde_json::to_value(&*current).map_err(|err| err.to_string())?;
+    let fields = merged.as_object_mut().ok_or("invalid settings")?;
+    for (key, value) in edits {
+        // Window placement is maintained by native dragging/display selection.
+        if fields.contains_key(key) && !matches!(key.as_str(), "x" | "y" | "displayId" | "windowsDisplayId") {
+            fields.insert(key.clone(), value.clone());
+        }
+    }
+    let mut patch: AppSettings = serde_json::from_value(merged).map_err(|err| err.to_string())?;
     patch.scale = patch.scale.clamp(0.20, 1.50);
     patch.idle_delay_sec = if patch.idle_delay_sec.is_finite() {
         patch.idle_delay_sec.clamp(2.0, 120.0)
@@ -380,18 +395,12 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
     }
     patch.prop_config = patch.prop_config.normalized();
 
-    let (prev_autostart, prev_scale, prev_layout, prev_kb_scale) = {
-        let s = state.settings.lock().unwrap();
-        (
-            s.autostart,
-            s.scale,
-            s.keyboard_layout.clone(),
-            s.active_keyboard_scale(),
-        )
-    };
-    if patch.autostart != prev_autostart {
-        let _ = set_windows_autostart(patch.autostart);
+    if patch.autostart != prev_autostart && set_windows_autostart(patch.autostart).is_err() {
+        patch.autostart = prev_autostart;
     }
+    *current = patch.clone();
+    save_settings(&current);
+    drop(current);
 
     state.mcp_enabled.store(patch.mcp_enabled, Ordering::Relaxed);
 
@@ -407,38 +416,19 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
                 patch.scale,
                 patch.active_keyboard_scale(),
             ) {
-                patch.x = Some(nx);
-                patch.y = Some(ny);
+                let mut current = state.settings.lock().unwrap();
+                current.x = Some(nx);
+                current.y = Some(ny);
+                save_settings(&current);
             }
         }
     }
 
-    {
-        let mut s = state.settings.lock().unwrap();
-        #[cfg(target_os = "macos")]
-        {
-            // Display placement is changed by the native menu and window drag, not by web settings.
-            patch.display_id = s.display_id.clone();
-            if patch.display_id.is_some() || !size_changed {
-                patch.x = s.x;
-                patch.y = s.y;
-            }
-        }
-        #[cfg(windows)]
-        {
-            patch.windows_display_id = s.windows_display_id.clone();
-            if !size_changed {
-                patch.x = s.x;
-                patch.y = s.y;
-            }
-        }
-        *s = patch.clone();
-        save_settings(&s);
-    }
+    patch = state.settings.lock().unwrap().clone();
     obs::sync_obs_server(&app, patch.obs_enabled, patch.obs_port);
     let _ = app.emit("kuro-settings", patch.clone());
     obs::broadcast_raw("settings", &serde_json::to_string(&patch).unwrap_or_default());
-    patch
+    Ok(patch)
 }
 
 #[tauri::command]
@@ -1553,7 +1543,7 @@ fn start_hit_test_loop(
                     Some(r) => {
                         let over_cat = r.cat.map(|c| c.contains(pet_rx, pet_ry)).unwrap_or(false);
                         let over_desk = r.desk.map(|d| d.contains(pet_rx, pet_ry)).unwrap_or(false);
-                        let over_prop = r.prop.map(|p| p.contains(pet_rx, pet_ry)).unwrap_or(false);
+                        let over_prop = r.prop.map(|p| p.contains_box(pet_rx, pet_ry)).unwrap_or(false);
                         (over_cat || over_desk || over_prop || over_menu, over_cat)
                     }
                     None => is_over_interactive_silhouette(pet_rx, pet_ry, is_108),
@@ -1587,16 +1577,15 @@ fn start_hit_test_loop(
 
             if last_ignore != Some(should_ignore) {
                 #[cfg(windows)]
-                if is_win7_ulw {
+                let applied = if is_win7_ulw {
                     win7_layered::set_click_through(should_ignore);
+                    true
                 } else {
-                    let _ = win.set_ignore_cursor_events(should_ignore);
-                }
+                    win.set_ignore_cursor_events(should_ignore).is_ok()
+                };
                 #[cfg(not(windows))]
-                {
-                    let _ = win.set_ignore_cursor_events(should_ignore);
-                }
-                last_ignore = Some(should_ignore);
+                let applied = win.set_ignore_cursor_events(should_ignore).is_ok();
+                if applied { last_ignore = Some(should_ignore); }
                 #[cfg(windows)]
                 {
                     drift_ticks = 0;

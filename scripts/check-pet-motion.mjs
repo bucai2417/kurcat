@@ -91,6 +91,9 @@ const { DEFAULT_PROP } = await import('../src/prop.ts');
 const { DEFAULT_BUILTIN_CATS, resolveCustomSkin } = await import('../src/catSkins.ts');
 const { clipAngryEyelid, STRIKE_DURATION, setDesktopPetInsets } = await import('../src/petMotion.ts');
 const { InputSounds, normalizeInputSound } = await import('../src/inputSounds.ts');
+const { CatAudio } = await import('../src/audio.ts');
+const { SettingsSync } = await import('../src/settingsSync.ts');
+const { TypingReactions, propReactionPose, PROP_REACTION_DURATION } = await import('../src/petReactions.ts');
 
 function engine3d() {
   window.innerWidth = 420;
@@ -141,8 +144,8 @@ test('menu expansion preserves projected model size and desktop screen position 
       const p1 = new Vector3(0.5, 1, 0).project(engine.camera);
       const pixelWidth = (p1.x - p0.x) * before.width / 2;
       const regionBefore = engine.getHitRegions().cat;
-      const hitX = regionBefore.cx * window.innerWidth;
-      const hitY = regionBefore.cy * window.innerHeight;
+      const hitX = before.left + regionBefore.cx * before.width;
+      const hitY = before.top + regionBefore.cy * before.height;
       window.innerWidth += 276;
       window.innerHeight += 200;
       engine.resize();
@@ -157,8 +160,13 @@ test('menu expansion preserves projected model size and desktop screen position 
       p1.set(0.5, 1, 0).project(engine.camera);
       near((p1.x - p0.x) * after.width / 2, pixelWidth);
       const regionAfter = engine.getHitRegions().cat;
-      near(regionAfter.cx * window.innerWidth - 276, hitX);
-      near(regionAfter.cy * window.innerHeight - 200, hitY);
+      near(after.left + regionAfter.cx * after.width - 276, hitX);
+      near(after.top + regionAfter.cy * after.height - 200, hitY);
+      // Native cursor hit testing first maps window coordinates into petBox.
+      const petBox = engine.getHitRegions().petBox;
+      const petX = ((hitX + 276) / window.innerWidth - (petBox.cx - petBox.rx)) / (petBox.rx * 2);
+      const petY = ((hitY + 200) / window.innerHeight - (petBox.cy - petBox.ry)) / (petBox.ry * 2);
+      near(petX, regionAfter.cx); near(petY, regionAfter.cy);
     }
   }
   engine.stop();
@@ -601,5 +609,320 @@ test('all synthesized switch profiles produce different bounded, finite, short s
     near(data[0], 0); assert.ok(Math.abs(data.at(-1)) < 0.001);
     for (const previous of samples) assert.notDeepEqual(data, previous);
     samples.push(data);
+  }
+});
+
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('settings edits stay ordered and preserve native changes while rapid toggles are pending', async () => {
+  let native = { sound: true, locked: false, scale: 1 }, view;
+  const writes = [], gates = [deferred(), deferred()];
+  const sync = new SettingsSync(native, async () => ({ ...native }), async patch => {
+    const n = writes.push(patch) - 1;
+    await gates[n].promise; native = { ...native, ...patch };
+  }, value => { view = value; });
+  const off = sync.update({ sound: false });
+  const on = sync.update({ sound: true });
+  assert.equal(view.sound, true, 'UI reflects the latest user choice immediately');
+  await Promise.resolve();
+  assert.deepEqual(writes, [{ sound: false }], 'only the first partial edit is in flight');
+  native = { ...native, locked: true }; // independent tray/MCP change
+  await sync.refresh();
+  assert.equal(view.locked, true); assert.equal(view.sound, true);
+  gates[0].resolve(); await off; await Promise.resolve();
+  assert.deepEqual(writes, [{ sound: false }, { sound: true }]);
+  assert.equal(view.sound, true, 'older save must not flash an old checkbox state');
+  gates[1].resolve(); await on;
+  assert.deepEqual(view, { sound: true, locked: true, scale: 1 });
+  assert.deepEqual(native, view);
+});
+
+test('settings discard stale reads and recover from failed writes without blocking later edits', async () => {
+  let view; const reads = [deferred(), deferred()]; let n = 0;
+  const sync = new SettingsSync({ sound: true }, () => reads[n++].promise, async () => {}, value => { view = value; });
+  const old = sync.refresh(), recent = sync.refresh();
+  reads[1].resolve({ sound: false }); await recent;
+  reads[0].resolve({ sound: true }); await old;
+  assert.equal(view.sound, false, 'late read cannot restore the old state');
+  let native = { sound: true, locked: false }, attempts = 0;
+  const recovery = new SettingsSync(native, async () => ({ ...native }), async patch => {
+    if (++attempts === 1) throw new Error('temporary IPC failure');
+    native = { ...native, ...patch };
+  }, value => { view = value; });
+  const failed = recovery.update({ sound: false });
+  const next = recovery.update({ locked: true });
+  await assert.rejects(failed, /temporary IPC/); await next;
+  assert.deepEqual(view, { sound: true, locked: true });
+});
+
+test('prop click areas cover actual mesh vertices, handles and straws at every scale and menu offset', () => {
+  const e = engine3d(); const point = new Vector3();
+  for (const layout of ['65', '108']) {
+    e.setKeyboardConfig(layout, 'cat');
+    const logical = layout === '65' ? { w: 420, h: 440 } : { w: 530, h: 446 };
+    e.setLogicalSize(logical);
+    for (const scale of [0.2, 0.75, 1.5]) {
+      window.innerWidth = logical.w * scale + 310;
+      window.innerHeight = logical.h * scale + 180;
+      e.setRenderScale(scale);
+      for (const side of ['left', 'right']) {
+        for (const kind of ['coffee', 'boba', 'cola', 'energy', 'pudding']) {
+          e.setPropConfig(propConfig(kind, side)); tick(e, 0.02);
+          const rect = e.getPetScreenRect(), regions = e.getHitRegions();
+          const p = regions.prop, box = regions.petBox;
+          assert.ok(p, kind + ' has a hit area');
+          let visibleVertices = 0;
+          e.propHandle.group.traverseVisible(mesh => {
+            const position = mesh.geometry?.getAttribute('position');
+            if (!position) return;
+            const extremes = [];
+            for (let i = 0; i < position.count; i++) {
+              point.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).project(e.camera);
+              const x = (point.x + 1) / 2, y = (1 - point.y) / 2;
+              if (point.z < -1 || point.z > 1 || x < 0 || x > 1 || y < 0 || y > 1) continue;
+              visibleVertices++;
+              const cx = rect.left + x * rect.width, cy = rect.top + y * rect.height;
+              if (!extremes[0] || cx < extremes[0][0]) extremes[0] = [cx, cy];
+              if (!extremes[1] || cx > extremes[1][0]) extremes[1] = [cx, cy];
+              if (!extremes[2] || cy < extremes[2][1]) extremes[2] = [cx, cy];
+              if (!extremes[3] || cy > extremes[3][1]) extremes[3] = [cx, cy];
+              const nativeX = (cx / window.innerWidth - (box.cx - box.rx)) / (2 * box.rx);
+              const nativeY = (cy / window.innerHeight - (box.cy - box.ry)) / (2 * box.ry);
+              assert.ok(Math.abs(nativeX - p.cx) <= p.rx + 1e-8 && Math.abs(nativeY - p.cy) <= p.ry + 1e-8,
+                'native rectangular area agrees with frontend');
+            }
+            for (const [cx, cy] of extremes) assert.ok(e.hitTestProp(cx, cy), kind + ' visible geometry must be clickable');
+          });
+          assert.ok(visibleVertices > 20);
+          assert.equal(e.hitTestProp(rect.left + (p.cx + p.rx) * rect.width + 2,
+            rect.top + p.cy * rect.height), false, 'padding is bounded');
+        }
+      }
+    }
+  }
+  e.setPropConfig({ ...propConfig(), enabled: false });
+  assert.equal(e.getHitRegions().prop, null); assert.equal(e.hitTestProp(0, 0), false);
+  e.stop();
+});
+
+test('purr off is immediate and persistent, while keyboard and mouse sounds keep their own output', async () => {
+  const ctx = audioContext(); const previous = window.AudioContext;
+  const param = () => ({ value: 0, events: [],
+    cancelScheduledValues(time) { this.events.push(['cancel', time]); },
+    setValueAtTime(value, time) { this.value = value; this.events.push(['set', value, time]); },
+    setTargetAtTime(value, time, constant) { this.value = value; this.events.push(['ramp', value, time, constant]); },
+  });
+  ctx.createGain = function() {
+    const g = { gain: param(), connections: new Set(), connect(target) { this.connections.add(target); },
+      disconnect() { this.connections.clear(); } };
+    this.gains.push(g); return g;
+  };
+  ctx.createBiquadFilter = () => ({ frequency: param(), Q: param(), connect() {} });
+  ctx.createOscillator = () => ({ frequency: param(), connect() {}, start() {} });
+  window.AudioContext = class { constructor() { return ctx; } };
+  try {
+    const audio = new CatAudio(); audio.setEnabled(false); audio.setPurrIntensity(1);
+    assert.equal(ctx.sources.length, 0, 'disabled startup creates no purr loop');
+    audio.setEnabled(true); audio.setPurrIntensity(0.8);
+    const master = ctx.gains.at(-1);
+    assert.ok(master.gain.value > 0 && master.connections.has(ctx.destination));
+    audio.setEnabled(false);
+    assert.equal(master.gain.value, 0); assert.equal(master.connections.size, 0);
+    assert.deepEqual(master.gain.events.slice(-2).map(e => e[0]), ['cancel', 'set']);
+    const count = master.gain.events.length;
+    for (let frame = 0; frame < 120; frame++) audio.setPurrIntensity(1);
+    assert.equal(master.gain.events.length, count, 'render loop cannot restart purring');
+    const sounds = new InputSounds(() => audio.getContext());
+    sounds.configure({ keyboard: true, mouse: true, volume: 0.4 });
+    sounds.keyDown(); sounds.mouseDown('left');
+    assert.equal(ctx.sources.length, 3, 'purr loop plus two independent input voices');
+    assert.equal(ctx.state, 'running'); assert.equal(master.connections.size, 0);
+    audio.setEnabled(true); audio.setEnabled(true); audio.setPurrIntensity(0.8);
+    assert.equal(ctx.sources.length, 3, 'reenabling reuses the purr graph');
+    assert.equal(master.connections.size, 1); assert.ok(master.gain.value > 0);
+  } finally { window.AudioContext = previous; }
+});
+
+
+test('typing reactions cycle at both frame rates and fade after pauses or disabled tracking', () => {
+  for (const dt of [1 / 30, 1 / 60]) {
+    const reactions = new TypingReactions(), seen = [], marks = new Set();
+    for (let t = 0; t < 33; t += dt) {
+      const pose = reactions.update(dt, 8, true, true);
+      if (reactions.kind && seen.at(-1) !== reactions.kind) seen.push(reactions.kind);
+      if (pose.mark) marks.add(pose.mark);
+      for (const value of Object.values(pose)) if (typeof value === 'number') assert.ok(Number.isFinite(value));
+    }
+    assert.deepEqual(seen.slice(0, 5), ['focus', 'groove', 'excited', 'grumpy', 'focus']);
+    assert.deepEqual([...marks].sort(), ['note', 'spark']);
+    for (let t = 0; t < 0.8; t += dt) reactions.update(dt, 0, false, true);
+    assert.equal(reactions.kind, null); near(reactions.amount, 0);
+    for (let t = 0; t < 3; t += dt) reactions.update(dt, 8, true, true);
+    assert.ok(reactions.amount > 0.9);
+    reactions.update(dt, 8, true, false);
+    assert.equal(reactions.kind, null); near(reactions.amount, 0);
+    for (let t = 0; t < 10; t += dt) reactions.update(dt, 8, true, false);
+    assert.equal(reactions.kind, null);
+  }
+});
+
+test('real typing drives all moods in 2D and 3D without anger masking the next focus or delayed strikes', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(performance, 'now');
+  let clock = 10000;
+  Object.defineProperty(performance, 'now', { configurable: true, value: () => clock });
+  try {
+    for (const spatial of [false, true]) {
+      clock = 10000;
+      const e = spatial ? engine3d() : new KuroCatEngine(makeCanvas());
+      e.setIdleAutoEnabled(false); e.setTailKeyConfig('off', []);
+      e.setPropConfig({ ...DEFAULT_PROP, enabled: false }); e.showKeyBubbles = false;
+      const seen = [], marks = new Set(), strikes = spatial ? countStrikes(e) : [];
+      const step = () => { clock += 1000 / 60; if (spatial) tick(e, 1 / 60); else e.update(1 / 60, clock); };
+      let focusAfterAnger = false, angerSeen = false;
+      for (let frame = 0; frame < 36 * 60; frame++) {
+        if (frame % 7 === 0) { const key = frame % 14 === 0 ? 65 : 74; e.onKeyDown(key, false); e.onKeyUp(key); }
+        step();
+        const kind = e.typingReactions.kind;
+        if (kind && seen.at(-1) !== kind) seen.push(kind);
+        if (spatial) for (const fx of e.fxList) marks.add(fx.kind);
+        else if (e.typingPose.mark) marks.add(e.typingPose.mark);
+        if (spatial ? e.isCross : e.annoyance > 0.55) angerSeen = true;
+        if (kind === 'focus' && seen.includes('grumpy') && e.typingReactions.amount > 0.6) {
+          focusAfterAnger = true;
+          assert.ok(spatial ? !e.isCross : e.annoyance < 0.26, 'next focus has clear eyes');
+        }
+      }
+      assert.deepEqual(seen.slice(0, 5), ['focus', 'groove', 'excited', 'grumpy', 'focus']);
+      assert.ok(angerSeen); assert.ok(focusAfterAnger);
+      assert.ok(marks.has('note') && marks.has('spark'));
+      for (let i = 0; i < 60; i++) step();
+      assert.equal(e.typingReactions.kind, null);
+      const finishedStrikes = strikes.length;
+      for (let i = 0; i < 180; i++) step();
+      assert.equal(strikes.length, finishedStrikes, 'no queued strikes after typing stops');
+      e.setMoodTrackingEnabled(false);
+      for (let i = 0; i < 240; i++) { if (i % 7 === 0) { e.onKeyDown(65, false); e.onKeyUp(65); } step(); }
+      assert.equal(e.typingReactions.kind, null);
+      assert.equal(spatial ? e.isCross : e.annoyance > 0, false);
+      e.setMoodTrackingEnabled(true); e.setPrivacyMode(true);
+      for (let i = 0; i < 240; i++) { if (i % 7 === 0) { e.onKeyDown(65, false); e.onKeyUp(65); } step(); }
+      assert.equal(e.typingReactions.kind, null); e.stop();
+    }
+  } finally {
+    if (descriptor) Object.defineProperty(performance, 'now', descriptor);
+    else delete performance.now;
+  }
+});
+
+test('listen, shimmy and paw check stay connected, ease in/out and yield to real input', () => {
+  for (const dt of [1 / 30, 1 / 60]) for (const kind of ['listen', 'shimmy', 'pawCheck']) {
+    const e = engine3d(); tick(e, 1, dt);
+    e.triggerIdleAction(kind); assert.equal(e.idleAct?.kind, kind);
+    // Settings publication may repeat this value several times while a manual action plays.
+    e.setIdleAutoEnabled(false); assert.equal(e.idleAct?.kind, kind);
+    const previous = e.headMount.quaternion.clone();
+    const initialPaws = [e.paws.L.pos.clone(), e.paws.R.pos.clone()];
+    const previousPaws = initialPaws.map(p => p.clone());
+    let maxHead = 0, maxPaw = 0;
+    for (let t = 0; t < 4.2; t += dt) {
+      tick(e, dt, dt);
+      maxHead = Math.max(maxHead, Math.abs(e.headRot.roll), Math.abs(e.headRot.yaw));
+      assert.ok(previous.angleTo(e.headMount.quaternion) < 0.25, 'smooth head motion');
+      previous.copy(e.headMount.quaternion);
+      for (const [i, paw] of [e.paws.L, e.paws.R].entries()) {
+        assert.ok(paw.pos.toArray().every(Number.isFinite));
+        assert.ok(paw.pos.distanceTo(previousPaws[i]) < 0.25, 'no paw teleport');
+        previousPaws[i].copy(paw.pos); maxPaw = Math.max(maxPaw, paw.pos.distanceTo(initialPaws[i]));
+      }
+      for (const arm of e.arms) {
+        const hand = arm.paw.getWorldPosition(new Vector3());
+        const wrist = arm.limb.caps[1].getWorldPosition(new Vector3());
+        assert.ok(hand.distanceTo(wrist) < 0.025, 'wrist stays attached');
+      }
+    }
+    assert.equal(e.idleAct, null);
+    assert.ok(maxHead > 0.05, kind + ' changes head pose');
+    if (kind === 'pawCheck') assert.ok(maxPaw > 0.2, 'paw comes up for inspection');
+    e.triggerIdleAction(kind); tick(e, 0.7, dt);
+    e.onKeyDown(65); e.onKeyUp(65); assert.equal(e.idleAct, null);
+    tick(e, 0.7, dt); assert.equal(e.paws.L.down || e.paws.R.down, false); e.stop();
+  }
+  const flat = new KuroCatEngine(makeCanvas()); flat.setIdleAutoEnabled(false);
+  assert.equal(flat.triggerIdleAction('wave'), true);
+  flat.setIdleAutoEnabled(false); assert.equal(flat.idleActionKind, 'wave'); flat.stop();
+});
+
+test('each 3D drink has a distinct aftertaste after return, free paw ownership and bounded lifetime', () => {
+  const signatures = new Set();
+  for (const kind of ['coffee', 'boba', 'cola', 'energy', 'pudding']) {
+    const pose = propReactionPose(kind, 1);
+    signatures.add(JSON.stringify(pose));
+    near(propReactionPose(kind, -0.1).amount, 0);
+    near(propReactionPose(kind, PROP_REACTION_DURATION).amount, 0);
+    for (const side of ['left', 'right']) {
+      const e = engine3d(); e.setPropConfig(propConfig(kind, side));
+      const strikes = countStrikes(e);
+      assert.equal(e.clickProp(), 'sipped');
+      for (let i = 0; i < 180 && e.propPhase !== 'rest'; i++) {
+        tick(e, 1 / 60);
+        if (e.propPhase !== 'rest') assert.ok(e.fxList.every(fx => !['heart', 'note', 'spark', 'bubble'].includes(fx.kind)), 'cup returns before aftertaste');
+      }
+      assert.equal(e.propPhase, 'rest'); assert.equal(e.propMood, kind); assert.ok(e.propMoodT > 3.4);
+      tick(e, 0.8);
+      assert.ok(e.fxList.some(fx => fx.kind === pose.mark), kind + ' gets its own reaction mark');
+      assert.equal(e.paws.L.down || e.paws.R.down, false);
+      assert.equal(strikes.length, 0, 'energy and burp cannot strike keys');
+      e.onKeyDown(65); e.onKeyUp(65); near(e.propMoodT, 0);
+      tick(e, 0.8); assert.equal(e.propPhase, 'rest');
+      assert.equal(e.clickProp(), 'sipped'); tick(e, 2.1);
+      assert.ok(e.propMoodT > 0);
+      tick(e, 4); near(e.propMoodT, 0);
+      assert.equal(e.clickProp(), 'sipped'); tick(e, 2.1);
+      e.setPropConfig({ ...propConfig(kind, side), enabled: false });
+      near(e.propMoodT, 0); assert.equal(e.propMood, null); e.stop();
+    }
+  }
+  assert.equal(signatures.size, 5);
+});
+
+
+test('menu action survives its delayed initiating click but later clicks and keys still interrupt', () => {
+  for (const kind of ['wave', 'listen', 'shimmy', 'pawCheck', 'roll', 'nap']) {
+    const e = engine3d(); tick(e, 1);
+    e.triggerIdleAction(kind, true);
+    tick(e, 0.08); e.onMouseDown('left'); e.onMouseUp('left');
+    if (kind === 'nap') assert.equal(e.asleep, true);
+    else assert.equal(e.idleAct?.kind, kind);
+    assert.equal(e.leftMouseDown, false, 'initiating click must not seize the mouse paw');
+    tick(e, 0.25); e.onMouseDown('left');
+    assert.equal(e.idleAct, null); assert.equal(e.asleep, false); e.onMouseUp('left'); e.stop();
+    const keyed = engine3d(); keyed.triggerIdleAction(kind, true);
+    keyed.onKeyDown(65); keyed.onKeyUp(65);
+    assert.equal(keyed.idleAct, null); assert.equal(keyed.asleep, false); keyed.stop();
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(performance, 'now');
+  let clock = 1000;
+  Object.defineProperty(performance, 'now', { configurable: true, value: () => clock });
+  try {
+    for (const kind of ['wave', 'groom', 'stretch', 'nap', 'cuddle']) {
+      const e = new KuroCatEngine(makeCanvas()); e.setIdleAutoEnabled(false);
+      assert.equal(e.triggerIdleAction(kind, true), true);
+      clock += 80; e.onMouseDown('left'); e.onMouseUp('left');
+      assert.equal(e.idleActionKind, kind); assert.equal(e.mouseLeftDown, false);
+      clock += 250; e.onMouseDown('left'); e.onMouseUp('left');
+      assert.equal(e.idleActionKind, null);
+      e.triggerIdleAction(kind, true); e.onKeyDown(65); e.onKeyUp(65);
+      assert.equal(e.idleActionKind, null); e.stop();
+    }
+    const automatic = new KuroCatEngine(makeCanvas()); automatic.triggerIdleAction('wave');
+    automatic.onMouseDown('left'); assert.equal(automatic.idleActionKind, null); automatic.stop();
+  } finally {
+    if (descriptor) Object.defineProperty(performance, 'now', descriptor);
+    else delete performance.now;
   }
 });
