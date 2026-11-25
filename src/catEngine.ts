@@ -1,3 +1,4 @@
+import { SleepReaction, drawPetCaption } from './sleepReaction';
 import { desktopPetInsets } from './petMotion';
 import { clipAngryEyelid } from './petMotion';
 import {
@@ -198,6 +199,7 @@ export class KuroCatEngine {
   public privacyMode = false;
   public onAfterRender: (() => void) | null = null;
   public catBreed: CatBreed = 'black';
+  private activeModelId = 'black';
   public customSkin: ResolvedSkin | null = null;
   public keyboardLayout: KeyboardLayoutId = '65';
   public keyboardOrientation: KeyboardOrientation = 'cat';
@@ -279,6 +281,10 @@ export class KuroCatEngine {
     impactSquash: 0,
     active: false,
   };
+  private readonly sleepReaction = new SleepReaction();
+  private groundTail = { amount: 0, lift: 0, impact: false, settled: false };
+  private groundImpactAt = -100;
+  private soothedUntil = -100;
   private privacyClose = 0;
   private privacyTypingAt = -10000;
   private lastMouseNX = 0.5;
@@ -289,6 +295,7 @@ export class KuroCatEngine {
     this.privacyMode = active;
     this.dafeiyu.onPrivacyModeChanged(active);
     if (active) {
+      this.resetWakeReaction();
       this.typingReactions.reset();
       this.typingPose = neutralReaction();
       this.recentKeyTimes.length = 0;
@@ -546,6 +553,12 @@ export class KuroCatEngine {
   /** Plays one of the idle behaviours right now (also used by MCP / the menu). */
   public triggerIdleAction(rawKind: string, fromMenu = false): boolean {
     if (this.privacyMode) return false;
+    if (rawKind === 'calm') { this.calmSleepReaction(); return true; }
+    if (rawKind === 'tailGround') {
+      if (this.catBreed === 'dafeiyu' || this.drinker.drinking) return false;
+      this.interruptIdleAction(); this.beginSleepReaction(); return true;
+    }
+    if (this.sleepReaction.visible(this.elapsed)) return false;
     const kind: IdleActionKind = (IDLE_ALIASES[rawKind] ?? rawKind) as IdleActionKind;
     if (kind === 'drink') {
       if (!this.propConfig.enabled) return false;
@@ -597,7 +610,7 @@ export class KuroCatEngine {
 
   /** Manual "drink now" trigger; returns false when the cup is empty or busy. */
   public triggerSip(): boolean {
-    if (!this.propConfig.enabled || this.privacyMode) return false;
+    if (!this.propConfig.enabled || this.privacyMode || this.sleepReaction.visible(this.elapsed)) return false;
     const started = this.drinker.startSip();
     if (started) {
       this.endIdleAction();
@@ -630,6 +643,11 @@ export class KuroCatEngine {
   }
 
   public setCatAppearance(breedId: string, skin?: CatSkinConfig | null): void {
+    if (this.activeModelId !== breedId) {
+      this.resetWakeReaction();
+      this.endIdleAction();
+      this.activeModelId = breedId;
+    }
     if (breedId === 'dafeiyu') {
       this.catBreed = 'dafeiyu';
       this.customSkin = null;
@@ -876,6 +894,7 @@ export class KuroCatEngine {
    * off: never — every key is handled by a paw.
    */
   private shouldTailPat(spec: KeySpec, targetPoint: Vec2, smartThresholdX: number): boolean {
+    if (this.sleepReaction.visible(this.elapsed)) return false;
     switch (this.tailKeyMode) {
       case 'off':
         return false;
@@ -1008,6 +1027,8 @@ export class KuroCatEngine {
   }
 
   public stop(): void {
+    this.resetWakeReaction();
+    this.endIdleAction();
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
     if (this.idleFrameTimer !== null) window.clearTimeout(this.idleFrameTimer);
     this.rafId = null;
@@ -1091,7 +1112,7 @@ export class KuroCatEngine {
       if (!repeat) this.onPrivacyTyping();
       return;
     }
-    if (!repeat) this.interruptIdleAction();
+    if (!repeat) { this.disturbSleep(); this.interruptIdleAction(); }
     const now = performance.now();
     const spec = resolveKeyByVk(vk, this.keyboardLayout);
     if (!spec) return;
@@ -1326,13 +1347,13 @@ export class KuroCatEngine {
   public onGlobalMouseMove(nx: number, ny: number): void {
     const now = performance.now();
     this.wakeRendering(now);
-    this.interruptIdleAction();
+    if (this.idleAction?.kind !== 'nap') this.interruptIdleAction();
     this.lastMouseNX = nx;
     this.mouseTargetOffsetX = (nx - 0.5) * (this.catBreed === 'dafeiyu' ? 14 : 28);
     this.mouseTargetOffsetY = (ny - 0.5) * (this.catBreed === 'dafeiyu' ? 11 : 20);
     this.lastMouseMoveAt = now;
 
-    this.activateMousePaw(now);
+    if (this.idleAction?.kind !== 'nap') this.activateMousePaw(now);
   }
 
   private getMouseButtonColors(): { left: string; right: string; middle: string } {
@@ -1393,7 +1414,8 @@ export class KuroCatEngine {
 
   public onMouseDown(button: string): void {
     const now = performance.now();
-    if (now < this.menuActionMouseGraceUntil) return;
+    if (this.privacyMode || now < this.menuActionMouseGraceUntil) return;
+    this.disturbSleep();
     this.wakeRendering(now);
     this.interruptIdleAction();
     if (button === 'left') {
@@ -1435,6 +1457,8 @@ export class KuroCatEngine {
   }
 
   public onMouseWheel(): void {
+    if (this.privacyMode) return;
+    this.disturbSleep();
     const now = performance.now();
     this.wakeRendering(now);
     this.interruptIdleAction();
@@ -1466,7 +1490,7 @@ export class KuroCatEngine {
     this.cursorRelY = relY;
     this.cursorOverCat = overCat;
 
-    if (overCat && !this.mouseLeftDown && !this.mouseRightDown) {
+    if (!this.privacyMode && overCat && !this.mouseLeftDown && !this.mouseRightDown) {
       const now = performance.now();
       const px = relX * this.logicalW;
       const py = relY * this.logicalH;
@@ -1520,6 +1544,8 @@ export class KuroCatEngine {
           // Only unlock petting energy & purring after intentional back-and-forth / circular strokes (Fixes #13)
           if (this.petStrokeCount >= REQUIRED_STROKES) {
             this.petEnergy = Math.min(1, this.petEnergy + dist * 0.015);
+            this.calmSleepReaction();
+            if (this.idleAction?.kind === 'nap') this.interruptIdleAction();
           }
         }
       } else {
@@ -1674,7 +1700,7 @@ export class KuroCatEngine {
 
   /** Clicking the prop refills an empty cup, otherwise nudges a sip. */
   public clickProp(): 'refilled' | 'sipped' | 'ignored' {
-    if (!this.propConfig.enabled) return 'ignored';
+    if (!this.propConfig.enabled || this.privacyMode || this.sleepReaction.visible(this.elapsed)) return 'ignored';
     if (this.drinker.level <= 0.02) {
       this.refillProp();
       this.spawnDrinkParticles(this.propConfig.kind, 10);
@@ -2015,42 +2041,13 @@ export class KuroCatEngine {
 
   private drawDrinkFeedback(ctx: CanvasRenderingContext2D): void {
     const f = this.drinkFeedback;
-    if (!f) return;
+    if (!f || this.privacyMode || this.sleepReaction.active(this.elapsed) || this.elapsed < this.soothedUntil) return;
     const prog = 1 - f.t / f.max;
-    // Fade in fast, hold, fade out at the tail.
     const alpha = f.t < 0.45 ? f.t / 0.45 : Math.min(1, prog / 0.12);
     const rise = Math.min(14, prog * 26);
-    const cx = this.catCenterX;
-    const cy = this.catTopY - 4 - rise;
-
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    ctx.font = '600 9px "Segoe UI Emoji", "Segoe UI", "PingFang SC", sans-serif';
-    const label = `${f.emoji} ${f.text}`;
-    const w = ctx.measureText(label).width + 14;
-    const h = 17;
-    const x = cx - w / 2;
-    const y = cy - h;
-
-    ctx.fillStyle = 'rgba(18, 22, 30, 0.88)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-    ctx.lineWidth = 1;
-    roundRectPath(ctx, x, y, w, h, h / 2);
-    ctx.fill();
-    ctx.stroke();
-    // Little tail pointing at the cat.
-    ctx.beginPath();
-    ctx.moveTo(cx - 4, y + h - 0.5);
-    ctx.lineTo(cx, y + h + 4.5);
-    ctx.lineTo(cx + 4, y + h - 0.5);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(18, 22, 30, 0.88)';
-    ctx.fill();
-
-    ctx.fillStyle = '#e8edf4';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, cx, y + h / 2 + 0.5);
+    drawPetCaption(ctx, `${f.emoji} ${f.text}`, this.catCenterX, Math.max(22, this.catTopY - 18 - rise), 16);
     ctx.restore();
   }
 
@@ -2076,6 +2073,36 @@ export class KuroCatEngine {
         spin: 0,
       });
     }
+  }
+
+  private resetWakeReaction(): void {
+    this.sleepReaction.reset();
+    this.groundTail = { amount: 0, lift: 0, impact: false, settled: false };
+    this.groundImpactAt = this.soothedUntil = -100;
+    this.annoyance = this.dizzy = 0; this.angerSteam.length = 0;
+    this.typingReactions.reset(); this.typingPose = neutralReaction();
+    this.petEnergy = 0; this.resetPetStrokes();
+  }
+
+  private beginSleepReaction(): void {
+    if (!this.sleepReaction.start(this.elapsed)) return;
+    this.typingReactions.reset(); this.catTail.active = false;
+    this.catTail.heldVks.clear(); this.catTailHeldAt.clear();
+    this.annoyance = 0.88; this.dizzy = 0;
+    this.petEnergy = 0; this.soothedUntil = -100;
+    this.wakeRendering();
+  }
+
+  private disturbSleep(): void {
+    if (!this.privacyMode && this.idleAction?.kind === 'nap') this.beginSleepReaction();
+  }
+
+  private calmSleepReaction(): void {
+    if (!this.sleepReaction.calm(this.elapsed)) return;
+    this.annoyance = this.dizzy = 0;
+    this.angerSteam.length = 0; this.typingReactions.reset();
+    this.soothedUntil = this.elapsed + 1.5;
+    this.spawnHeartParticle(false); this.wakeRendering();
   }
 
   /** Any real input (typing / mouse) ends the current idle action immediately. */
@@ -2322,10 +2349,12 @@ export class KuroCatEngine {
     for (let i = 0; i < 3; i++) {
       const phase = (this.elapsed * 0.55 + i * 0.33) % 1;
       const alpha = Math.sin(phase * Math.PI) * 0.85;
-      const size = 7 + i * 2.4;
+      const size = 13 + i * 3;
       ctx.globalAlpha = Math.max(0, alpha);
       ctx.font = `700 ${size}px "Segoe UI", system-ui, sans-serif`;
-      ctx.fillStyle = '#5b6472';
+      ctx.strokeStyle = '#282431'; ctx.lineWidth = 3;
+      ctx.strokeText('z', baseX + i * 6 + phase * 8, baseY - phase * 26);
+      ctx.fillStyle = '#fff8e5';
       ctx.fillText('z', baseX + i * 6 + phase * 8, baseY - phase * 26);
     }
     ctx.restore();
@@ -2347,6 +2376,8 @@ export class KuroCatEngine {
     } else {
       this.annoyance = Math.max(0, this.annoyance - dt * 0.48);
     }
+
+    if (this.sleepReaction.active(this.elapsed)) this.annoyance = 0.88;
 
     // Once it boils over, the pet goes dizzy for a while.
     const wantDizzy = this.annoyance >= 1 ? 1 : 0;
@@ -2395,7 +2426,7 @@ export class KuroCatEngine {
         const phase = (this.elapsed * 0.85 + i * 0.5) % 1;
         ctx.globalAlpha = Math.sin(phase * Math.PI) * this.typingPose.amount * 0.8;
         drawReactionMark(ctx, this.typingPose.mark, headX + (i ? 1 : -1) * (43 + phase * 9),
-          headY - phase * 26, 16 + i * 3);
+          headY - phase * 34, 24 + i * 3);
       }
       ctx.restore();
     }
@@ -2561,9 +2592,16 @@ export class KuroCatEngine {
   private update(dt: number, now: number): void {
     this.elapsed += dt;
     this.lightEngine.advance(dt);
+    this.groundTail = this.sleepReaction.sample(this.elapsed);
+    if (this.groundTail.impact) this.groundImpactAt = this.elapsed;
+    if (this.groundTail.settled) {
+      this.annoyance = this.dizzy = 0; this.angerSteam.length = 0;
+      this.typingReactions.reset();
+    }
+    if (this.groundTail.amount > 0) this.wakeRendering(now);
 
     // Prop drinking cycle: only runs while the user is away, so it never fights for attention.
-    if (this.propConfig.enabled && !this.idleAction) {
+    if (this.propConfig.enabled && !this.idleAction && !this.sleepReaction.visible(this.elapsed)) {
       const idleSec = (now - Math.max(this.lastAnyKeyAt, this.lastMouseMoveAt)) / 1000;
       const drank = this.drinker.update(dt, idleSec, this.propConfig);
       if (drank) {
@@ -2681,7 +2719,7 @@ export class KuroCatEngine {
     this.typingEnergy += (targetTypingEnergy - this.typingEnergy) * (1 - Math.exp(-9 * dt));
 
     this.typingPose = this.typingReactions.update(dt, this.recentKeyTimes.length, now - this.lastAnyKeyAt < 350,
-      this.moodTrackingEnabled && !this.privacyMode && !this.idleAction && !this.drinker.drinking && this.petEnergy < 0.3);
+      this.moodTrackingEnabled && !this.privacyMode && !this.idleAction && !this.drinker.drinking && this.petEnergy < 0.3 && !this.sleepReaction.visible(this.elapsed));
     this.updateAnnoyance(dt, now, targetTypingEnergy);
 
     const isTypingRecently =
@@ -3088,6 +3126,7 @@ export class KuroCatEngine {
       }
       this.drawDrinkFeedback(ctx);
       this.drawAngerAndDizzy(ctx);
+      this.drawWakeReaction(ctx);
       ctx.restore();
       return;
     }
@@ -3134,8 +3173,31 @@ export class KuroCatEngine {
     this.drawDrinkFeedback(ctx);
     this.drawSleepZzz(ctx);
     this.drawAngerAndDizzy(ctx);
+    this.drawWakeReaction(ctx);
 
     ctx.restore();
+  }
+
+  private drawWakeReaction(ctx: CanvasRenderingContext2D): void {
+    if (this.privacyMode) return;
+    const angry = this.sleepReaction.active(this.elapsed);
+    const text = angry ? '还没睡够呢！' : this.elapsed < this.soothedUntil ? '好啦，原谅你了' :
+      !this.drinkFeedback && this.typingPose.amount > 0.35 ? ({ focus: '认真陪你打字', groove: '跟着节奏摇摆', excited: '越打越起劲！', grumpy: '爪爪忙不过来啦' }[this.typingReactions.kind!] ?? '') : '';
+    if (text) drawPetCaption(ctx, text, this.catCenterX, Math.max(22, this.catTopY - 18), 16, angry);
+    const age = this.elapsed - this.groundImpactAt;
+    if (age >= 0 && age < 0.38) {
+      const p = age / 0.38;
+      const hip = this.spinePoint(0.84, 0);
+      const x = Math.min(this.logicalW - 24, hip.x + 137), y = this.catBaseY + 4;
+      ctx.save(); ctx.globalAlpha = 1 - p;
+      ctx.strokeStyle = '#f99c38'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(x, y, 9 + p * 22, 3 + p * 5, 0, 0, Math.PI * 2); ctx.stroke();
+      for (const side of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(x + side * 10, y - 5);
+        ctx.lineTo(x + side * (20 + p * 12), y - 12 - p * 12); ctx.stroke();
+      }
+      ctx.restore();
+    }
   }
 
   private drawTail(ctx: CanvasRenderingContext2D): void {
@@ -3168,12 +3230,24 @@ export class KuroCatEngine {
     const patCp2X = Math.min(maxEdgeX, Math.max(startX + 54, patEndX + 40));
     const patCp2Y = Math.min(startY + 24, (startY + patEndY) * 0.5 - 30 - this.catTail.hover * 0.55);
 
-    const cp1X = restCp1X + (patCp1X - restCp1X) * smoothR;
-    const cp1Y = restCp1Y + (patCp1Y - restCp1Y) * smoothR;
-    const cp2X = restCp2X + (patCp2X - restCp2X) * smoothR;
-    const cp2Y = restCp2Y + (patCp2Y - restCp2Y) * smoothR;
-    const endX = restEndX + (patEndX - restEndX) * smoothR;
-    const endY = restEndY + (patEndY - restEndY) * smoothR;
+    let cp1X = restCp1X + (patCp1X - restCp1X) * smoothR;
+    let cp1Y = restCp1Y + (patCp1Y - restCp1Y) * smoothR;
+    let cp2X = restCp2X + (patCp2X - restCp2X) * smoothR;
+    let cp2Y = restCp2Y + (patCp2Y - restCp2Y) * smoothR;
+    let endX = restEndX + (patEndX - restEndX) * smoothR;
+    let endY = restEndY + (patEndY - restEndY) * smoothR;
+    const ground = this.groundTail;
+    const floorY = this.catBaseY + 4;
+    const floorX = Math.min(this.logicalW - 24, startX + 81);
+    if (ground.amount > 0) {
+      const a = ground.amount;
+      cp1X += (startX + 27 - cp1X) * a;
+      cp1Y += (startY - 14 - cp1Y) * a;
+      cp2X += (floorX - 12 - cp2X) * a;
+      cp2Y += (floorY - 10 - ground.lift * 66 - cp2Y) * a;
+      endX += (floorX - endX) * a;
+      endY += (floorY - 9 - ground.lift * 58 - endY) * a;
+    }
     const tipAngle = Math.atan2(endY - cp2Y, endX - cp2X);
     const tipSquash = this.catTail.impactSquash * smoothR;
 
@@ -3182,7 +3256,7 @@ export class KuroCatEngine {
     ctx.lineJoin = 'round';
 
     // Subtle tactile contact shadow directly on the keycap when the tail pats down!
-    if (smoothR > 0.35) {
+    if (smoothR > 0.35 && ground.amount < 0.01) {
       const prox = Math.max(0, 1 - this.catTail.hover / 28);
       const shadowA = smoothR * prox * 0.34;
       if (shadowA > 0.02) {

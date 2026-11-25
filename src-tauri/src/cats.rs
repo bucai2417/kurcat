@@ -27,6 +27,8 @@ fn default_opacity() -> f64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatSkinConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_profile: Option<crate::models::ModelProfile>,
     pub id: String,
     pub name: String,
     #[serde(default)]
@@ -156,6 +158,7 @@ pub fn sanitize_cat_id(raw: &str) -> String {
 pub fn builtin_cats() -> Vec<CatSkinConfig> {
     vec![
         CatSkinConfig {
+            model_profile: None,
             id: "black".to_string(),
             name: "小黑猫".to_string(),
             emoji: Some("🐈‍⬛".to_string()),
@@ -199,6 +202,7 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             spots: vec![],
         },
         CatSkinConfig {
+            model_profile: None,
             id: "ragdoll".to_string(),
             name: "布偶猫".to_string(),
             emoji: Some("🐱".to_string()),
@@ -242,6 +246,7 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             spots: vec![],
         },
         CatSkinConfig {
+            model_profile: None,
             id: "orange-tabby".to_string(),
             name: "大橘猫".to_string(),
             emoji: Some("🍊".to_string()),
@@ -285,6 +290,7 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             spots: vec![],
         },
         CatSkinConfig {
+            model_profile: None,
             id: "calico".to_string(),
             name: "三花猫".to_string(),
             emoji: Some("🌸".to_string()),
@@ -328,6 +334,7 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             spots: vec![],
         },
         CatSkinConfig {
+            model_profile: None,
             id: "tuxedo".to_string(),
             name: "奶牛猫".to_string(),
             emoji: Some("🐄".to_string()),
@@ -371,6 +378,7 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             spots: vec![],
         },
         CatSkinConfig {
+            model_profile: None,
             id: "siamese".to_string(),
             name: "暹罗猫".to_string(),
             emoji: Some("🤎".to_string()),
@@ -414,6 +422,7 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             spots: vec![],
         },
         CatSkinConfig {
+            model_profile: None,
             id: "dafeiyu".to_string(),
             name: "大肥鱼".to_string(),
             emoji: Some("🐳".to_string()),
@@ -466,6 +475,7 @@ pub fn load_custom_cats() -> Vec<CatSkinConfig> {
             for c in &mut parsed {
                 c.id = sanitize_cat_id(&c.id);
                 c.builtin = false;
+                if c.model_profile.as_ref().is_some_and(|p| crate::models::validate_profile(p).is_err()) { c.model_profile = None; }
             }
             return parsed;
         }
@@ -499,6 +509,7 @@ pub fn all_cats() -> Vec<CatSkinConfig> {
 }
 
 pub fn upsert_custom_cat(mut cat: CatSkinConfig) -> Result<CatSkinConfig, String> {
+    if let Some(profile) = &cat.model_profile { crate::models::validate_profile(profile)?; }
     cat.id = sanitize_cat_id(&cat.id);
     if cat.name.trim().is_empty() {
         cat.name = cat.id.clone();

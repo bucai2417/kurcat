@@ -24,6 +24,7 @@
       <div class="menu-tabs" role="tablist">
         <button class="menu-tab-btn active" id="tab-appearance" data-tab="appearance" type="button" role="tab" aria-controls="panel-appearance" aria-selected="true">猫咪</button>
         <button class="menu-tab-btn" id="tab-keyboard" data-tab="keyboard" type="button" role="tab" aria-controls="panel-keyboard" aria-selected="false" tabindex="-1">键盘</button>
+        <button class="menu-tab-btn" id="tab-models" data-tab="models" type="button" role="tab" aria-controls="panel-models" aria-selected="false" tabindex="-1">模型库</button>
         <button class="menu-tab-btn" id="tab-common" data-tab="common" type="button" role="tab" aria-controls="panel-common" aria-selected="false" tabindex="-1">通用</button>
       </div>
       <div class="tab-body">
@@ -55,6 +56,7 @@
           <button class="kb-pill" data-headphone="on">常戴</button>
         </div>
       </div>
+      <p id="render-mode-status" class="menu-hint model-error" role="status" hidden></p>
       <div class="menu-scale-row">
         <span class="menu-scale-label">尾巴拍键</span>
         <div class="kb-pills" id="tail-mode-pills">
@@ -74,6 +76,8 @@
           <button class="kb-pill" data-idleaction="groom">👅 洗脸</button>
           <button class="kb-pill" data-idleaction="nap">😴 打盹</button>
           <button class="kb-pill" data-idleaction="cuddle">💗 撒娇</button>
+          <button class="kb-pill" data-idleaction="tailGround">尾巴拍地</button>
+          <button class="kb-pill" data-idleaction="calm">安抚起床气</button>
           <button class="kb-pill" data-idleaction="roll" data-model-only="3d" hidden>地上打滚</button>
           <button class="kb-pill" data-idleaction="listen" data-model-only="3d" hidden>竖耳倾听</button>
           <button class="kb-pill" data-idleaction="shimmy" data-model-only="3d" hidden>抖抖毛</button>
@@ -112,6 +116,32 @@
         </label>
       </div>
       </div><!-- /appearance -->
+      <div class="tab-panel model-library" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-tab-panel="models">
+        <div class="menu-scale-row">
+          <span class="menu-scale-label">当前模型</span>
+          <p id="model-current" class="model-copy"></p>
+          <p id="model-capabilities" class="model-copy"></p>
+          <button type="button" class="kb-pill" id="model-export">导出当前模型包</button>
+        </div>
+        <div class="menu-scale-row">
+          <label class="menu-scale-label" for="model-file">导入模型包</label>
+          <p class="model-copy">支持现有猫咪绘制器的外观与行为配置（.kurocat.json）。GLB / VRM / Live2D 骨架文件暂不支持。</p>
+          <input type="file" id="model-file" accept=".json,application/json" aria-describedby="model-status" />
+          <div id="model-preview" hidden>
+            <p id="model-preview-text" class="model-copy"></p>
+            <label class="menu-toggle-row"><span>替换同 ID 的已有模型</span><input type="checkbox" id="model-replace" /></label>
+            <button type="button" class="kb-pill" id="model-install">导入并使用</button>
+          </div>
+        </div>
+        <div class="menu-scale-row">
+          <label class="menu-scale-label" for="model-catalog-url">GitHub 模型目录</label>
+          <p class="model-copy">填写作者提供的 raw.githubusercontent.com 目录地址，加载后选择模型预览。</p>
+          <input type="url" id="model-catalog-url" placeholder="https://raw.githubusercontent.com/…/catalog.json" spellcheck="false" autocomplete="off" />
+          <button type="button" class="kb-pill" id="model-catalog-load">加载目录</button>
+          <div id="model-catalog-list" class="model-catalog-list"></div>
+        </div>
+        <p id="model-status" class="model-copy" role="status" aria-live="polite">模型包继承所选绘制器的打字、抚摸、道具和起床气反应。</p>
+      </div><!-- /models -->
       <div class="tab-panel" id="panel-keyboard" role="tabpanel" aria-labelledby="tab-keyboard" data-tab-panel="keyboard">
       <p class="menu-section-note">键帽按 2D / 3D 独立保存；配列、灯光和键鼠外观共用。</p>
       <div class="menu-scale-row">

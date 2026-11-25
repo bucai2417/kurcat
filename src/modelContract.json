@@ -1,0 +1,162 @@
+{
+  "format": "kurocat-model",
+  "version": 1,
+  "behaviorContract": "cat-v1",
+  "maxBytes": 262144,
+  "adapters": {
+    "canvas-cat-v1": {
+      "mode": "2d",
+      "actions": [
+        "drink",
+        "stretch",
+        "wave",
+        "tilt",
+        "slowBlink",
+        "groom",
+        "nap",
+        "cuddle",
+        "tailGround",
+        "calm"
+      ]
+    },
+    "three-cat-v1": {
+      "mode": "3d",
+      "actions": [
+        "drink",
+        "stretch",
+        "wave",
+        "tilt",
+        "slowBlink",
+        "groom",
+        "nap",
+        "cuddle",
+        "tailGround",
+        "calm",
+        "roll",
+        "listen",
+        "shimmy",
+        "pawCheck"
+      ]
+    }
+  },
+  "specialModels": {
+    "dafeiyu": {
+      "modes": [
+        "2d"
+      ],
+      "actions": [
+        "drink",
+        "stretch",
+        "wave"
+      ]
+    }
+  },
+  "reactions": {
+    "keyboard": [
+      "pawStrike",
+      "tailKey",
+      "focus",
+      "groove",
+      "excited",
+      "grumpy"
+    ],
+    "mouse": [
+      "follow",
+      "click",
+      "wheel"
+    ],
+    "sleep": [
+      "nap",
+      "disturbed",
+      "tailGround",
+      "calm",
+      "recover2to5Sec"
+    ],
+    "petting": [
+      "purr",
+      "heart",
+      "calm"
+    ],
+    "props": {
+      "coffee": "focus",
+      "boba": "happy",
+      "cola": "surprise",
+      "energy": "excited",
+      "pudding": "satisfied"
+    },
+    "privacy": [
+      "clearInput",
+      "suspendReactions"
+    ]
+  },
+  "actionLabels": {
+    "drink": "喝一口",
+    "stretch": "伸懒腰",
+    "wave": "招招手",
+    "tilt": "歪头",
+    "slowBlink": "慢眨眼",
+    "groom": "洗脸",
+    "nap": "打盹",
+    "cuddle": "撒娇",
+    "tailGround": "尾巴拍地",
+    "calm": "安抚",
+    "roll": "地上打滚",
+    "listen": "侧耳听",
+    "shimmy": "扭扭身",
+    "pawCheck": "看看爪子"
+  },
+  "skinRules": {
+    "requiredColors": [
+      "furColor",
+      "eyeColorTop"
+    ],
+    "colors": [
+      "furColor",
+      "furSecondaryColor",
+      "outlineColor",
+      "legLineColor",
+      "maskColor",
+      "foreheadBridgeColor",
+      "flankColor",
+      "bellyBibColor",
+      "stripeColor",
+      "calicoPatchColor",
+      "earOuterColor",
+      "earTipColor",
+      "earInnerColor",
+      "earTuftColor",
+      "tailColor",
+      "tailTipColor",
+      "eyeColorTop",
+      "eyeColorBottom",
+      "pupilColor",
+      "eyeRimColor",
+      "squintColor",
+      "squintGlowColor",
+      "noseColor",
+      "mouthColor",
+      "blushColor",
+      "whiskerColor",
+      "armColor",
+      "pawColor",
+      "pawOutlineColor",
+      "armCreaseColor",
+      "accentColor",
+      "accentSideColor"
+    ],
+    "booleans": [
+      "tailFluffy",
+      "tailStripes",
+      "eyeCatchlight"
+    ],
+    "patterns": [
+      "solid",
+      "bicolor",
+      "tuxedo",
+      "tabby",
+      "calico",
+      "siamese"
+    ],
+    "maxSpots": 64
+  }
+}

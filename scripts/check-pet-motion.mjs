@@ -37,6 +37,9 @@ registerHooks({
     if (url.startsWith('file:') && /\.(png|svg|webp)$/.test(url)) {
       return { format: 'module', shortCircuit: true, source: `export default ${JSON.stringify(url)};` };
     }
+    if (url.endsWith('/src/modelContract.json')) {
+      return { format: 'module', shortCircuit: true, source: 'export default ' + readFileSync(fileURLToPath(url), 'utf8') + ';' };
+    }
     if (url.startsWith('file:') && url.endsWith('.ts')) {
       return { format: 'module', shortCircuit: true, source: ts.transpileModule(
         readFileSync(fileURLToPath(url), 'utf8'), {
@@ -88,6 +91,8 @@ const { Vector2, Vector3, Raycaster } = await import('three');
 const { KuroCatEngine3D } = await import('../src/catEngine3d.ts');
 const { KuroCatEngine } = await import('../src/catEngine.ts');
 const { DEFAULT_PROP } = await import('../src/prop.ts');
+const { SleepReaction } = await import('../src/sleepReaction.ts');
+const { MODEL_CONTRACT, parseModelPack, exportModelPack, parseModelCatalog, fetchModelCatalog, modelActions, modelModes, modelMode } = await import('../src/modelPack.ts');
 const { DEFAULT_BUILTIN_CATS, resolveCustomSkin } = await import('../src/catSkins.ts');
 const { clipAngryEyelid, STRIKE_DURATION, setDesktopPetInsets } = await import('../src/petMotion.ts');
 const { InputSounds, normalizeInputSound } = await import('../src/inputSounds.ts');
@@ -925,4 +930,230 @@ test('menu action survives its delayed initiating click but later clicks and key
     if (descriptor) Object.defineProperty(performance, 'now', descriptor);
     else delete performance.now;
   }
+});
+
+
+// Wake-up tantrums share time and contact semantics across both renderers.
+test('sleep tantrums last 2–5 seconds and repeated inputs never extend them', () => {
+  for (const random of [0, 0.5, 1]) {
+    const r = new SleepReaction(); const start = 10; const end = start + 2 + random * 3;
+    assert.equal(r.start(start, () => random), true);
+    assert.equal(r.start(start + 0.4, () => 1), false);
+    assert.equal(r.active(end - 0.001), true);
+    assert.equal(r.active(end), false);
+    assert.equal(r.sample(end).settled, true);
+    assert.equal(r.sample(end + 0.1).settled, false);
+    assert.equal(r.start(end + 0.1), false, 'fade must finish before another tantrum');
+    assert.equal(r.sample(end + 0.3).amount, 0);
+    assert.equal(r.visible(end + 0.3), false);
+    r.reset(); assert.equal(r.sample(end + 1).amount, 0);
+  }
+  const r = new SleepReaction(); r.start(0, () => 1);
+  const before = r.sample(0.04).amount;
+  assert.equal(r.calm(0.04), true); near(r.sample(0.04).amount, before);
+  assert.ok(r.sample(0.14).amount < before); assert.equal(r.sample(0.33).amount, 0);
+});
+
+test('tail impacts land exactly on a contact frame at low and high frame rates', () => {
+  for (const dt of [1 / 60, 1 / 30, 1 / 15, 0.25]) {
+    const r = new SleepReaction(); r.start(0, () => 1); let hits = 0;
+    for (let t = 0; t < 4; t += dt) {
+      const pose = r.sample(t);
+      assert.ok(pose.lift >= 0 && pose.lift <= 1);
+      if (pose.impact) { hits++; assert.equal(pose.lift, 0); assert.ok(pose.amount > 0.99); }
+      assert.equal(r.sample(t).impact, false, 'only one effect per contact');
+    }
+    assert.ok(hits >= 5 && hits <= 6);
+  }
+});
+
+function engine2d() {
+  const e = new KuroCatEngine(makeCanvas()); e.setIdleAutoEnabled(false); return e;
+}
+function advancePet(e, seconds, dt = 1 / 60) {
+  if (e instanceof KuroCatEngine3D) { tick(e, seconds, dt); return; }
+  for (let left = seconds; left > 1e-8; left -= dt) {
+    const step = Math.min(dt, left); e.update(step, performance.now() + step * 1000);
+  }
+}
+
+test('both renderers wake angrily on keys, clicks and wheels, not ordinary cursor motion', () => {
+  for (const create of [engine2d, engine3d]) {
+    for (const input of ['key', 'mouse', 'wheel']) {
+      const e = create(); e.triggerIdleAction('nap'); advancePet(e, 0.4);
+      e.onGlobalMouseMove(0.25, 0.4); e.onWindowCursor(0.3, 0.4, false);
+      assert.ok(e.asleep ?? e.idleAction?.kind === 'nap');
+      assert.equal(e.sleepReaction.active(e.elapsed), false);
+      if (input === 'key') { e.onKeyDown(65); e.onKeyUp(65); }
+      else if (input === 'mouse') { e.onMouseDown('left'); e.onMouseUp('left'); }
+      else e.onMouseWheel();
+      assert.equal(e.sleepReaction.active(e.elapsed), true);
+      const until = e.sleepReaction.until;
+      assert.ok(until - e.elapsed >= 2 && until - e.elapsed <= 5);
+      advancePet(e, 0.2); e.onKeyDown(66); e.onKeyUp(66); e.onMouseWheel();
+      assert.equal(e.sleepReaction.until, until);
+      advancePet(e, until - e.elapsed + 0.35);
+      assert.equal(e.sleepReaction.visible(e.elapsed), false);
+      assert.equal(e.isCross ?? e.annoyance > 0.26, false); e.stop();
+    }
+  }
+});
+
+test('petting soothes both renderers and prop actions wait for the tail to settle', () => {
+  for (const create of [engine2d, engine3d]) {
+    const e = create(); e.setPropConfig(propConfig());
+    e.triggerIdleAction('nap'); advancePet(e, 0.3); e.onMouseWheel(); advancePet(e, 0.6);
+    assert.equal(e.clickProp(), e instanceof KuroCatEngine3D ? 'busy' : 'ignored');
+    e.onWindowCursor(0.4, 0.4, true);
+    for (const x of [0.45, 0.5, 0.45, 0.4, 0.45, 0.5]) e.onWindowCursor(x, 0.4, true);
+    assert.equal(e.sleepReaction.active(e.elapsed), false);
+    assert.ok(e.soothedUntil > e.elapsed);
+    advancePet(e, 0.35); assert.equal(e.groundTail.amount, 0);
+    assert.equal(e.clickProp(), 'sipped'); e.stop();
+  }
+});
+
+test('3D ground-tail contacts keep the root attached and leave the keyboard untouched', () => {
+  const e = engine3d(); e.triggerIdleAction('tailGround');
+  let hits = 0; const original = e.spawnFx.bind(e);
+  e.spawnFx = (type, position, ...rest) => {
+    if (type === 'bang') {
+      const points = e.tailCurve.points; const tip = points.at(-1);
+      near(tip.y, 0.048, 1e-5, 'tail floor contact'); near(position.x, tip.x);
+      near(position.z, tip.z); hits++;
+    }
+    return original(type, position, ...rest);
+  };
+  for (let i = 0; i < 90; i++) {
+    tick(e, 1 / 60);
+    const root = e.tailCurve.points[0];
+    assert.ok(root.distanceTo(e.homePos) < 1.5, 'root stays with the body');
+    for (const p of e.tailCurve.points) assert.ok(p.y >= 0.04, 'tail does not pass through floor');
+    assert.equal(e.tailTap.keyId, null);
+    assert.equal(e.paws.L.keyId, null); assert.equal(e.paws.R.keyId, null);
+  }
+  assert.ok(hits >= 2); e.stop();
+});
+
+test('model changes, renderer stops and privacy clear tantrums; ordinary settings sync preserves them', () => {
+  for (const create of [engine2d, engine3d]) {
+    for (const operation of ['model', 'stop', 'privacy']) {
+      const e = create(); const cat = DEFAULT_BUILTIN_CATS[0];
+      const setSkin = skin => e instanceof KuroCatEngine3D ? e.setCatSkin(skin) : e.setCatAppearance(skin.id, skin);
+      setSkin(cat); e.triggerIdleAction('tailGround'); advancePet(e, 0.6);
+      const until = e.sleepReaction.until; setSkin(cat); assert.equal(e.sleepReaction.until, until);
+      if (operation === 'model') setSkin({ ...cat, id: 'different-custom', builtin: false });
+      else if (operation === 'stop') e.stop(); else e.setPrivacyMode(true);
+      assert.equal(e.sleepReaction.visible(e.elapsed), false);
+      assert.equal(e.groundTail.amount, 0);
+      assert.equal(e.isCross ?? e.annoyance > 0, false);
+      if (operation === 'privacy') {
+        e.onKeyDown(65); e.onMouseWheel(); e.onWindowCursor(0.6, 0.4, true);
+        assert.equal(e.sleepReaction.active(e.elapsed), false);
+      }
+      e.stop();
+    }
+  }
+});
+
+function examplePack() {
+  return { format: 'kurocat-model', version: 1,
+    profile: { adapters: ['canvas-cat-v1', 'three-cat-v1'], behaviorContract: 'cat-v1', author: '猫咪作者' },
+    skin: { id: 'regression-cat', name: '测试猫咪', furColor: '#aabbcc', eyeColorTop: '#ffcc00' } };
+}
+
+test('model packages preserve Chinese text, round-trip builtins and expose renderer capabilities', () => {
+  for (const cat of DEFAULT_BUILTIN_CATS.filter(c => c.id !== 'dafeiyu')) {
+    const pack = parseModelPack(JSON.stringify(exportModelPack(cat)));
+    assert.equal(pack.skin.name, cat.name); assert.equal(pack.skin.id, cat.id + '-custom');
+    assert.deepEqual(modelModes(pack.skin), ['2d', '3d']);
+    assert.ok(modelActions(pack.skin, '2d').includes('tailGround'));
+    assert.ok(!modelActions(pack.skin, '2d').includes('roll'));
+    assert.ok(modelActions(pack.skin, '3d').includes('roll'));
+  }
+  assert.throws(() => exportModelPack(DEFAULT_BUILTIN_CATS.find(c => c.id === 'dafeiyu')));
+  const p = examplePack(); p.profile.adapters = ['three-cat-v1'];
+  const parsed = parseModelPack(p);
+  assert.equal(parsed.skin.name, '测试猫咪'); assert.equal(parsed.profile.author, '猫咪作者');
+  assert.equal(modelMode(parsed.skin, '2d'), '3d');
+  assert.deepEqual(modelActions(parsed.skin, '2d'), [], 'unsupported modes must not expose actions');
+  assert.deepEqual(modelModes({ id: 'dafeiyu' }), ['2d']);
+  p.skin.spots = [{ part: 'head', color: '#000000', x: 0, y: 1, rx: 4, ry: 5 }];
+  const spot = parseModelPack(p).skin.spots[0]; assert.equal(spot.opacity, 1); assert.equal(spot.rotation, 0);
+});
+
+test('model package validation rejects invalid versions, adapters, colors, coordinates and reserved IDs', () => {
+  const mutations = [
+    p => p.version = 2, p => p.profile.behaviorContract = 'unknown',
+    p => p.profile.adapters = [], p => p.profile.adapters = ['canvas-cat-v1', 'canvas-cat-v1'],
+    p => p.profile.adapters = [['canvas-cat-v1']], p => p.profile.adapters = ['__proto__'],
+    p => p.skin.id = 'black', p => p.skin.id = '../cat', p => p.skin.name = '坏\n名称',
+    p => p.skin.furColor = 'url(script)', p => p.skin.furColor = 'rgb(256,0,0)',
+    p => p.skin.eyeColorTop = 'rgba(0,0,0,2)', p => p.skin.tailFluffy = 'true',
+    p => p.skin.pattern = 'script', p => p.skin.spots = Array(65).fill({}),
+    p => p.skin.spots = [{ part: 'head', color: '#000000', x: 0, y: 0, rx: -1, ry: 1 }],
+  ];
+  for (const mutate of mutations) { const p = examplePack(); mutate(p); assert.throws(() => parseModelPack(p)); }
+  assert.throws(() => parseModelPack(' '.repeat(MODEL_CONTRACT.maxBytes + 1)));
+  const raw = examplePack(); raw.skin.script = 'alert(1)'; raw.skin.builtin = true;
+  const safe = parseModelPack(raw); assert.equal(safe.skin.script, undefined); assert.equal(safe.skin.builtin, false);
+});
+
+test('GitHub catalog rejects duplicate packages, oversized files and untrusted URLs', async () => {
+  const p = examplePack();
+  assert.equal(parseModelCatalog(JSON.stringify({ format: 'kurocat-catalog', version: 1, models: [p] })).length, 1);
+  assert.throws(() => parseModelCatalog(JSON.stringify({ format: 'kurocat-catalog', version: 1, models: [p, p] })));
+  const originalFetch = globalThis.fetch; let calls = 0;
+  globalThis.fetch = async () => { calls++; throw Error('unexpected network'); };
+  try {
+    for (const url of ['http://raw.githubusercontent.com/a', 'https://github.com/a', 'https://raw.githubusercontent.com.evil.example/a', 'https://user@raw.githubusercontent.com/a', 'file:///cat.json']) await assert.rejects(fetchModelCatalog(url));
+    assert.equal(calls, 0);
+    const url = 'https://raw.githubusercontent.com/example/cats/main/catalog.json';
+    globalThis.fetch = async (_url, options) => {
+      assert.equal(options.redirect, 'error'); assert.equal(options.credentials, 'omit');
+      return new Response(JSON.stringify({ format: 'kurocat-catalog', version: 1, models: [p] }));
+    };
+    assert.equal((await fetchModelCatalog(url))[0].skin.name, '测试猫咪');
+    globalThis.fetch = async () => new Response(new Uint8Array([0xff]));
+    await assert.rejects(fetchModelCatalog(url));
+    globalThis.fetch = async () => new Response(' '.repeat(MODEL_CONTRACT.maxBytes + 1));
+    await assert.rejects(fetchModelCatalog(url), /256 KB/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('the normal 2D render path draws tail impacts and one readable caption by priority', () => {
+  const e = engine2d(); const ctx = makeContext(true); e.ctx = ctx;
+  e.triggerIdleAction('tailGround'); advancePet(e, 0.42);
+  e.drinkFeedback = { emoji: '☕', text: '精神回来啦！', t: 1, max: 2 };
+  e.typingPose.amount = 0.8; e.typingReactions.kind = 'focus';
+  const captions = () => ctx.calls.filter(c => c[0] === 'fillText').map(c => c[1]);
+  const redraw = () => { ctx.calls.length = 0; e.render(); return captions(); };
+  let words = redraw();
+  assert.ok(words.includes('还没睡够呢！'));
+  assert.ok(!words.includes('☕ 精神回来啦！') && !words.includes('认真陪你打字'));
+  const hip = e.spinePoint(0.84, 0);
+  assert.ok(ctx.calls.some(c => c[0] === 'ellipse' && Math.abs(c[1] - Math.min(e.logicalW - 24, hip.x + 137)) < 0.01 && c[2] === e.catBaseY + 4 && c[3] >= 9), 'ground impact must be painted by render');
+  e.triggerIdleAction('calm'); words = redraw();
+  assert.ok(words.includes('好啦，原谅你了'));
+  assert.ok(!words.includes('☕ 精神回来啦！'));
+  e.soothedUntil = -100; e.typingPose.amount = 0.8; e.typingReactions.kind = 'focus'; words = redraw();
+  assert.ok(words.includes('☕ 精神回来啦！') && !words.includes('认真陪你打字'));
+  e.drinkFeedback = null; words = redraw();
+  assert.ok(words.includes('认真陪你打字'));
+  e.setPrivacyMode(true); words = redraw();
+  for (const text of ['还没睡够呢！', '好啦，原谅你了', '认真陪你打字']) assert.ok(!words.includes(text));
+  e.stop();
+});
+
+
+test('the shipped model-store catalog and standalone model import with identical capabilities', () => {
+  const raw = readFileSync(new URL('../model-store/mint-cloud.kurocat.json', import.meta.url), 'utf8');
+  const cat = parseModelPack(raw);
+  const catalog = parseModelCatalog(readFileSync(new URL('../model-store/catalog.json', import.meta.url), 'utf8'));
+  assert.deepEqual(catalog, [cat]);
+  assert.equal(cat.skin.name, '薄荷云朵');
+  assert.ok(modelActions(cat.skin, '2d').includes('tailGround'));
+  assert.ok(modelActions(cat.skin, '3d').includes('roll'));
+  assert.equal(parseModelPack(exportModelPack(cat.skin)).profile.author, 'KuroCat 示例');
 });

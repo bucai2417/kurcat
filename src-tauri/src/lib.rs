@@ -2,6 +2,7 @@
 #![recursion_limit = "512"]
 
 mod cats;
+mod models;
 mod config;
 mod desk_skins;
 mod game_detect;
@@ -323,6 +324,16 @@ fn get_settings(state: State<'_, AppState>) -> AppSettings {
 fn get_cats() -> Vec<CatSkinConfig> {
     all_cats()
 }
+
+#[tauri::command]
+fn import_model_pack(app: AppHandle, package: serde_json::Value, replace: bool) -> Result<CatSkinConfig, String> {
+    let cat = models::install(package, replace)?;
+    reload_and_emit_all(&app);
+    Ok(cat)
+}
+
+#[tauri::command]
+fn export_model_pack(id: String) -> Result<String, String> { models::export_file(&id) }
 
 #[tauri::command]
 fn get_mcp_config(state: State<'_, AppState>) -> String {
@@ -2098,6 +2109,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             get_cats,
+            import_model_pack,
+            export_model_pack,
             get_desk_skins,
             get_obs_url,
             get_game_active,

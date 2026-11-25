@@ -11,7 +11,15 @@ export interface CatSpot {
 
 export type CatPattern = 'solid' | 'bicolor' | 'tuxedo' | 'tabby' | 'calico' | 'siamese';
 
+export interface ModelProfile {
+  adapters: ('canvas-cat-v1' | 'three-cat-v1')[];
+  behaviorContract: 'cat-v1';
+  author?: string;
+  license?: string;
+}
+
 export interface CatSkinConfig {
+  modelProfile?: ModelProfile;
   id: string;
   name: string;
   emoji?: string;

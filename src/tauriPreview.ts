@@ -9,6 +9,9 @@
  *
  * Returns `true` when the shim is active (i.e. we are in a browser preview).
  */
+import { DEFAULT_BUILTIN_CATS, type CatSkinConfig } from './catSkins';
+import { parseModelPack, exportModelPack } from './modelPack';
+
 type EventHandler = (event: { event: string; id: number; payload: unknown }) => void;
 
 interface PreviewStore {
@@ -139,7 +142,24 @@ export function installTauriPreviewShim(): boolean {
         return next;
       }
       case 'get_cats':
-        return store.cats ?? [];
+        return [...DEFAULT_BUILTIN_CATS, ...(store.cats ?? [])];
+      case 'import_model_pack': {
+        const pack = parseModelPack(args.package);
+        const cats = (store.cats ?? []) as CatSkinConfig[];
+        if (!args.replace && cats.some(c => c.id === pack.skin.id)) throw Error('该模型 ID 已存在；请选择替换，或修改模型包的 ID');
+        store.cats = cats.filter(c => c.id !== pack.skin.id).concat(pack.skin); persist();
+        queueMicrotask(() => emit('kuro-cats', [...DEFAULT_BUILTIN_CATS, ...store.cats!]));
+        return pack.skin;
+      }
+      case 'export_model_pack': {
+        const cat = [...DEFAULT_BUILTIN_CATS, ...((store.cats ?? []) as CatSkinConfig[])].find(c => c.id === args.id);
+        if (!cat) throw Error('模型不存在');
+        const pack = exportModelPack(cat); const name = pack.skin.id + '.kurocat.json';
+        const url = URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json;charset=utf-8' }));
+        const link = document.createElement('a'); link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        return '已交给浏览器下载：' + name;
+      }
       case 'get_desk_skins':
         return store.deskSkins ?? [];
       case 'get_app_version':

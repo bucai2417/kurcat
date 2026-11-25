@@ -1,3 +1,4 @@
+import { SleepReaction, drawPetCaption } from './sleepReaction';
 import { modelHitArea } from './modelHitArea';
 import { petViewport, strikeHeight, STRIKE_IMPACT, STRIKE_RELEASE, STRIKE_DURATION } from './petMotion';
 import * as THREE from 'three';
@@ -789,6 +790,11 @@ export class KuroCatEngine3D {
   private tailPhase = 0;
   private annoy = 0;
   private lastPoke = -100;
+  private readonly sleepReaction = new SleepReaction();
+  private groundTail = { amount: 0, lift: 0, impact: false, settled: false };
+  private soothedUntil = -100;
+  private captionSprite: THREE.Sprite | null = null;
+  private captionText = '';
   private isCross = false;
   private crossSince = -100;
   private crossHuffDir: -1 | 1 = -1;
@@ -1526,6 +1532,7 @@ export class KuroCatEngine3D {
   }
 
   public stop(): void {
+    this.resetWakeReaction();
     this.releaseInputs();
     this.idleAct = null;
     this.rollPose = { lean: 0, twist: 0, tuck: 0, retreat: 0 };
@@ -1626,6 +1633,10 @@ export class KuroCatEngine3D {
   };
 
   public setCatSkin(skin: CatSkinConfig): void {
+    if (this.currentSkin && this.currentSkin.id !== skin.id) {
+      this.resetWakeReaction();
+      this.releaseInputs(); this.idleAct = null;
+    }
     this.currentSkin = skin;
     const p = resolveFurPalette3D(skin, this.renderStyle);
     this.currentPalette = p;
@@ -1828,7 +1839,7 @@ export class KuroCatEngine3D {
 
   /** Clicking the cup refills it, or drinks from it if it still has liquid. */
   public clickProp(): 'refilled' | 'sipped' | 'busy' {
-    if (!this.propHandle || this.privacyMode || this.rollPose.tuck > 0 || this.idleAct?.kind === 'roll') return 'busy';
+    if (!this.propHandle || this.privacyMode || this.sleepReaction.visible(this.elapsed) || this.rollPose.tuck > 0 || this.idleAct?.kind === 'roll') return 'busy';
     if (this.propPhase !== 'rest') return 'busy';
     this.wake();
     this.finishTailStrike();
@@ -1998,6 +2009,7 @@ export class KuroCatEngine3D {
   public setPrivacyMode(active: boolean): void {
     this.privacyMode = active;
     if (active) {
+      this.resetWakeReaction();
       this.releaseInputs();
       this.typingReactions.reset();
       this.propMoodT = 0;
@@ -2041,6 +2053,7 @@ export class KuroCatEngine3D {
 
   public triggerSleepDemo(): void {
     if (this.privacyMode || this.propPhase !== 'rest') return;
+    this.sleepReaction.reset();
     this.releaseInputs();
     this.wakeRendering();
     this.isCross = false;
@@ -2061,6 +2074,9 @@ export class KuroCatEngine3D {
 
   public triggerIdleAction(rawKind: string, fromMenu = false): void {
     if (this.privacyMode || this.propPhase !== 'rest' || this.rollPose.tuck > 0) return;
+    if (rawKind === 'calm') { this.calmSleepReaction(); return; }
+    if (rawKind === 'tailGround') { this.wake(); this.beginSleepReaction(); return; }
+    if (this.sleepReaction.visible(this.elapsed)) return;
     const kind = rawKind === 'sleep' ? 'nap' : rawKind;
     if (kind === 'drink') { this.clickProp(); return; }
     if (kind === 'nap') {
@@ -2110,9 +2126,10 @@ export class KuroCatEngine3D {
       }
       return;
     }
+    if (!repeat) this.disturbSleep();
+    this.wake();
     const k = this.desk.resolveKey(vk);
     if (!k) return;
-    this.wake();
     this.returnProp(); // Real typing yields the paw; passive cursor motion must not cancel a sip.
     this.heldKeys.add(k.spec.id);
     if (repeat) return;
@@ -2121,13 +2138,13 @@ export class KuroCatEngine3D {
     this.strokes.push(this.elapsed);
     this.propMoodT = 0;
 
-    const useTail =
+    const useTail = !this.sleepReaction.visible(this.elapsed) && (
       this.tailKeyMode === 'custom'
         ? this.tailKeyIdSet.has(k.spec.id)
         : !this.isCross &&
           this.tailKeyMode !== 'off' &&
           (this.desk.isRightEdgeTailKey(k.spec.id) ||
-            (this.tailKeyMode === 'smart' && (k.spec.id === 'space' || k.spec.id === 'enter')));
+            (this.tailKeyMode === 'smart' && (k.spec.id === 'space' || k.spec.id === 'enter'))));
     if (useTail) {
       this.triggerTailKey(k.spec.id, k.spec.bubble || k.spec.label || k.spec.id);
       return;
@@ -2199,6 +2216,7 @@ export class KuroCatEngine3D {
 
     this.lastMouseNX = nx;
     this.lastMouseNY = ny;
+    if (this.asleep) return; // Moving toward the sleeping cat must still allow gentle petting.
 
     const typingNow = this.elapsed - this.lastKey < 0.5 || this.paws.L.down || this.paws.R.down;
     if (typingNow && moveDelta < 0.015) {
@@ -2231,7 +2249,8 @@ export class KuroCatEngine3D {
       this.cursorActiveAt = this.elapsed;
       this.wakeRendering();
     }
-    if (overCat && !this.leftMouseDown && !this.rightMouseDown && delta > 0.006) {
+    if (!this.privacyMode && overCat && !this.leftMouseDown && !this.rightMouseDown && delta > 0.006) {
+      this.calmSleepReaction();
       this.petting = true;
       this.petUntil = this.elapsed + 0.36;
       this.petX = clamp(this.cursorNdc.x * 2.0, -1, 1);
@@ -2241,7 +2260,8 @@ export class KuroCatEngine3D {
 
   public onMouseDown(btn: string): void {
     // The global hook may report the menu's initiating click after its action starts.
-    if (this.elapsed < this.menuActionMouseGraceUntil) return;
+    if (this.privacyMode || this.elapsed < this.menuActionMouseGraceUntil) return;
+    this.disturbSleep();
     this.wake();
     this.lastMouse = this.elapsed;
     this.paws.L.lastActive = this.elapsed;
@@ -2257,6 +2277,8 @@ export class KuroCatEngine3D {
   }
 
   public onMouseWheel(): void {
+    if (this.privacyMode) return;
+    this.disturbSleep();
     this.wake();
     this.lastMouse = this.elapsed;
     this.paws.L.lastActive = this.elapsed;
@@ -2278,6 +2300,8 @@ export class KuroCatEngine3D {
     this.cursorActiveAt = this.elapsed;
     this.wakeRendering();
 
+    const moved = this.lastSampleX !== null && this.lastSampleY !== null &&
+      Math.hypot(clientX / 1440 - this.lastSampleX, clientY / 1440 - this.lastSampleY) > 0.0015;
     const sx = clientX / 1440;
     const sy = clientY / 1440;
     const gap = this.elapsed - this.lastSampleT;
@@ -2300,11 +2324,12 @@ export class KuroCatEngine3D {
     }
 
     let overHead = false;
-    if (insideCanvas && allowPetting && !this.leftMouseDown && !this.rightMouseDown) {
+    if (!this.privacyMode && insideCanvas && allowPetting && !this.leftMouseDown && !this.rightMouseDown) {
       this.raycaster.setFromCamera(this.cursorNdc, this.camera);
       const hits = this.raycaster.intersectObjects(this.petMeshes, false);
       overHead = hits.length > 0 && hits[0].point.y >= 1.15;
-      if (overHead) {
+      if (overHead && moved) {
+        this.calmSleepReaction();
         this.petting = true;
         this.petUntil = this.elapsed + 0.30;
         this.petX = clamp(this.cursorNdc.x * 2.5, -1, 1);
@@ -2339,6 +2364,65 @@ export class KuroCatEngine3D {
       collar: this.collarId,
       style: this.renderStyle,
     };
+  }
+
+  private resetWakeReaction(): void {
+    this.sleepReaction.reset();
+    this.groundTail = { amount: 0, lift: 0, impact: false, settled: false };
+    this.soothedUntil = -100; this.isCross = false; this.annoy = 0;
+    this.sCross.set(0);
+    this.asleep = false; this.sleepAmt = 0; this.petting = false;
+    this.lastInput = this.elapsed;
+    this.typingReactions.reset();
+    if (this.captionSprite) this.captionSprite.visible = false;
+    for (const fx of this.fxList) { this.scene.remove(fx.sprite); fx.sprite.material.dispose(); }
+    this.fxList.length = 0;
+  }
+
+  private beginSleepReaction(): void {
+    if (!this.sleepReaction.start(this.elapsed)) return;
+    this.finishTailStrike(); this.typingReactions.reset();
+    this.isCross = true; this.annoy = 0.88; this.crossSince = this.elapsed;
+    this.crossHuffDir = this.cursorNdc.x >= 0 ? -1 : 1;
+    this.curiousUntil = this.soothedUntil = -100; this.petting = false;
+    this.wakeRendering();
+  }
+
+  private disturbSleep(): void {
+    if (this.asleep && !this.privacyMode) this.beginSleepReaction();
+  }
+
+  private calmSleepReaction(): void {
+    if (!this.sleepReaction.calm(this.elapsed)) return;
+    this.isCross = false; this.annoy = 0; this.typingReactions.reset();
+    this.soothedUntil = this.elapsed + 1.5;
+    this.spawnFx('heart', this.headMount.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.5, 0)),
+      new THREE.Vector3(0, 0.22, 0), 0.27, 1.2);
+    this.wakeRendering();
+  }
+
+  private updateCaption(text: string, angry: boolean): void {
+    if (!text || this.privacyMode) { if (this.captionSprite) this.captionSprite.visible = false; return; }
+    if (!this.captionSprite) {
+      this.captionSprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false }));
+      this.captionSprite.renderOrder = 50; this.scene.add(this.captionSprite);
+    }
+    if (text !== this.captionText) {
+      const key = 'caption:' + text;
+      let cached = spriteTexCache.get(key);
+      if (!cached) {
+        const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 112;
+        drawPetCaption(canvas.getContext('2d')!, text, 256, 56, 35, angry);
+        const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+        cached = { tex, aspect: 512 / 112 }; spriteTexCache.set(key, cached);
+      }
+      this.captionSprite.material.map = cached.tex; this.captionSprite.material.needsUpdate = true;
+      this.captionText = text;
+    }
+    this.captionSprite.visible = true;
+    this.headMount.updateMatrixWorld(false);
+    this.captionSprite.position.set(0, 0.73, 0.15).applyMatrix4(this.headMount.matrixWorld);
+    this.captionSprite.scale.set(1.65, 1.65 * 112 / 512, 1);
   }
 
   // ---- Internal helpers ----
@@ -2612,7 +2696,7 @@ export class KuroCatEngine3D {
 
     const sleepAfterSec = this.embedded ? 18 : 28;
     const idleSec = t - this.lastInput;
-    if (!this.asleep && !this.privacyMode && !this.petting && this.propPhase === 'rest' && !this.idleAct && this.rollPose.tuck === 0 && idleSec > sleepAfterSec) {
+    if (!this.asleep && !this.privacyMode && !this.petting && this.propPhase === 'rest' && !this.idleAct && this.rollPose.tuck === 0 && !this.sleepReaction.visible(t) && idleSec > sleepAfterSec) {
       this.asleep = true;
       this.isCross = false;
       this.idleAct = null;
@@ -2627,7 +2711,9 @@ export class KuroCatEngine3D {
     if (this.petting && t > this.petUntil) {
       this.petting = false;
     }
-    const petActive = this.petting && !this.privacyMode && !this.isCross;
+    this.groundTail = this.sleepReaction.sample(t);
+    if (this.groundTail.settled) { this.isCross = false; this.annoy = 0; this.typingReactions.reset(); }
+    const petActive = this.petting && !this.privacyMode && !this.sleepReaction.active(t);
     this.squintAmt += ((petActive ? 1 : 0) - this.squintAmt) * approach(12, dt);
 
     // Curious trigger from swift cursor sweep
@@ -2642,7 +2728,7 @@ export class KuroCatEngine3D {
 
     const typingReaction = this.typingReactions.update(dt, cps, t - this.lastKey < 0.35,
       this.moodTrackingEnabled && !this.privacyMode && !this.asleep && !petActive &&
-      !this.idleAct && this.propPhase === 'rest' && this.rollPose.tuck === 0);
+      !this.idleAct && this.propPhase === 'rest' && this.rollPose.tuck === 0 && !this.sleepReaction.visible(t));
     const grumpyTyping = this.typingReactions.kind === 'grumpy';
 
     // Grumpiness is one of several typing moods; none generate fake input.
@@ -2669,10 +2755,11 @@ export class KuroCatEngine3D {
       this.isCross = false;
       this.annoy = Math.max(0, this.annoy - 0.35 * dt);
     }
+    if (this.sleepReaction.active(t)) { this.isCross = true; this.annoy = 0.88; }
     const cross = clamp(this.sCross.step(this.isCross ? 1 : 0, dt), 0, 1);
 
     // Anger may linger; strikes require a fresh keystroke and have a finite release.
-    if (this.isCross && cross > 0.35 && t >= this.nextAngrySlapAt &&
+    if (!this.sleepReaction.visible(t) && this.isCross && cross > 0.35 && t >= this.nextAngrySlapAt &&
         t - this.lastKey < 0.14 && this.lastKey > this.lastAngryInput &&
         this.tailKeyMode !== 'off' && !this.tailTap.down && !this.tailTap.synthetic && this.propPhase === 'rest') {
       this.lastAngryInput = this.lastKey;
@@ -2698,6 +2785,7 @@ export class KuroCatEngine3D {
       !this.privacyMode &&
       !petActive &&
       !this.isCross &&
+      !this.sleepReaction.visible(t) &&
       !curiousNow
     ) {
       const kinds: IdleAct3D['kind'][] = [
@@ -3033,7 +3121,7 @@ export class KuroCatEngine3D {
       pt.lerpVectors(attached, loose, smoothstep(0.1, 0.7, w));
     }
 
-    if (!rolling && this.tailTap.reach > 0.01 && this.tailTap.keyId) {
+    if (!rolling && this.groundTail.amount < 0.01 && this.tailTap.reach > 0.01 && this.tailTap.keyId) {
       const tipWorld = this.desk.keyTopWorld(this.tailTap.keyId, this.tailTap.tip);
       tipWorld.y += this.tailTap.hover + 0.045;
       const root = this.tailCurve.points[0];
@@ -3044,6 +3132,26 @@ export class KuroCatEngine3D {
       for (let i = 1; i < this.tailCurve.points.length; i++) {
         const dst = i - 1 < 4 ? this.tmpTailPath[i - 1] : tipWorld;
         this.tailCurve.points[i].lerp(dst, this.tailTap.reach);
+      }
+    }
+
+    if (!rolling && this.groundTail.amount > 0) {
+      // Root stays attached; the distal tail hits the floor outside the desk footprint.
+      const ground = this.groundTail;
+      const root = this.tailCurve.points[0];
+      for (let i = 1; i < this.tailCurve.points.length; i++) {
+        const w = i / (this.tailCurve.points.length - 1);
+        this.tmpTailScratch.set(root.x + w * 1.06,
+          mix(root.y, 0.048, w) + Math.sin(w * Math.PI) * 0.12 + ground.lift * 0.60 * w * w,
+          mix(root.z, this.homePos.z + 0.18, w));
+        this.tailCurve.points[i].lerp(this.tmpTailScratch, ground.amount);
+      }
+      if (ground.impact) {
+        const tip = this.tailCurve.points[this.tailCurve.points.length - 1];
+        const contact = new THREE.Vector3(tip.x, 0.065, tip.z);
+        this.spawnFx('bang', contact, new THREE.Vector3(0, 0.04, 0), 0.48, 0.32);
+        for (const side of [-1, 1]) this.spawnFx('dust', contact.clone(), new THREE.Vector3(side * 0.6, 0.25, 0.12), 0.22, 0.5);
+        this.sSquash.kick(0.42); this.sPitch.kick(0.55);
       }
     }
 
@@ -3244,7 +3352,7 @@ export class KuroCatEngine3D {
       this.headMount.updateMatrixWorld(false);
       this.tmpFxPos.set(-0.52, 0.44, 0.18).applyMatrix4(this.headMount.matrixWorld);
       this.angerSprite.position.copy(this.tmpFxPos);
-      this.angerSprite.scale.setScalar(0.30 * pulse * smoothstep(0.25, 0.65, cross));
+      this.angerSprite.scale.setScalar(0.40 * pulse * smoothstep(0.25, 0.65, cross));
     } else {
       this.angerSprite.visible = false;
     }
@@ -3253,8 +3361,14 @@ export class KuroCatEngine3D {
       this.nextZ = t + 1.35;
       this.headMount.updateMatrixWorld(false);
       const zPos = this.tmpFxPos.set(0.46, 0.42, 0.16).applyMatrix4(this.headMount.matrixWorld);
-      this.spawnFx('z', zPos, new THREE.Vector3(0.08, 0.36, 0), 0.22, 2.3);
+      this.spawnFx('z', zPos, new THREE.Vector3(0.08, 0.36, 0), 0.31, 2.3);
     }
+
+    const wakeAngry = this.sleepReaction.active(t);
+    const caption = wakeAngry ? '还没睡够呢！' : t < this.soothedUntil ? '好啦，原谅你了' :
+      propReaction.amount > 0.35 && this.propMood ? ({ coffee: '精神回来啦！', boba: '甜甜的好幸福', cola: '嗝，气泡冒出来了', energy: '元气充满！', pudding: '再来一口嘛' }[this.propMood] ?? '') :
+      typingPose.amount > 0.35 && this.typingReactions.kind ? ({ focus: '认真陪你打字', groove: '跟着节奏摇摆', excited: '越打越起劲！', grumpy: '爪爪忙不过来啦' }[this.typingReactions.kind]) : '';
+    this.updateCaption(caption, wakeAngry);
 
     for (let i = this.fxList.length - 1; i >= 0; i--) {
       const fx = this.fxList[i];

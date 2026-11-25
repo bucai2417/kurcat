@@ -27,7 +27,25 @@ permissions:
   contents: write
 
 jobs:
+  validate-frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies on GitHub runner
+        run: npm ci
+      - name: Check TypeScript without emitting files
+        run: node node_modules/typescript/bin/tsc --noEmit
+      - name: Check pet motions and model packages
+        run: node scripts/check-pet-motion.mjs
+
   build-windows:
+    needs: validate-frontend
     if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.linux_only || inputs.macos_only)) }}
     runs-on: windows-latest
     steps:
@@ -50,6 +68,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run Windows Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Build Tauri app (Windows x64 - 65% Classic Installer)
         run: npm run tauri -- build --bundles nsis
@@ -102,6 +123,7 @@ jobs:
             KuroCat-*-x64-portable.zip
 
   build-macos:
+    needs: validate-frontend
     if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.linux_only || inputs.windows_only)) }}
     runs-on: macos-latest
     steps:
@@ -173,6 +195,7 @@ jobs:
             KuroCat-*-macos-universal.app.tar.gz
 
   build-linux:
+    needs: validate-frontend
     if: ${{ !(github.event_name == 'workflow_dispatch' && (inputs.macos_only || inputs.windows_only)) }}
     strategy:
       fail-fast: false

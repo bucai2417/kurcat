@@ -8,6 +8,7 @@ use crate::desk_skins::{
     sanitize_skin_id, upsert_desk_skin, DeskSkinConfig,
 };
 use serde_json::{json, Value};
+use crate::models;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,10 +25,60 @@ const VALID_KEY_IDS: &[&str] = &[
     "v", "b", "n", "m", "comma", "dot", "slash", "rshift", "lctrl", "lwin", "lalt", "space",
     "ralt", "rwin", "menu", "rctrl", "left", "down", "up", "right", "f1", "f2", "f3", "f4",
     "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+    "np_0", "np_1", "np_2", "np_3", "np_4", "np_5", "np_6", "np_7", "np_8", "np_9",
+    "np_div", "np_mul", "np_sub", "np_add", "np_ent", "np_dot", "numlk", "ins", "del", "home", "end", "pgup", "pgdn", "prt", "scr", "pau",
+    "m_mute", "m_vdown", "m_vup", "m_calc",
 ];
 
 fn tool_definitions() -> Value {
     json!([
+        {
+            "name": "get_model_contract",
+            "description": "Get model package version, renderer adapters, supported reactions, action labels, and skin validation rules. Packages customize built-in procedural cats; raw GLB/VRM/Live2D rigs are not supported.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "import_model_pack",
+            "description": "Validate and install a version 1 data-only cat model package. Existing IDs require replace:true; built-in IDs are protected. Optionally activate with a compatible render mode.",
+            "inputSchema": {
+                "type": "object",
+                "required": [
+                    "package"
+                ],
+                "properties": {
+                    "package": {
+                        "type": "object"
+                    },
+                    "replace": {
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "activate": {
+                        "type": "boolean",
+                        "default": false
+                    }
+                }
+            }
+        },
+        {
+            "name": "export_model_pack",
+            "description": "Return the complete version 1 package JSON for a cat. Save it as UTF-8 .kurocat.json. Built-in cats export with a new custom ID; the dedicated whale renderer cannot be exported.",
+            "inputSchema": {
+                "type": "object",
+                "required": [
+                    "id"
+                ],
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         {
             "name": "list_cats",
             "description": "List all available KuroCat desktop pet skins (built-in and custom cats) and show which cat is currently active on screen.",
@@ -225,14 +276,14 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "trigger_idle_action",
-            "description": "Play one of the pet's idle behaviours right now: drink (uses the drink prop), stretch (both paws up and out), wave (raises a paw and waves), groom (paw wipes the muzzle), nap (head down, eyes closed, Zzz), cuddle (leans over, paw up, tail swishing), roll (3D ground roll; 2D uses cuddle), or 3D-only listen / shimmy / pawCheck. The whale girl supports drink / stretch / wave. Also re-enables automatic idle actions.",
+            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tail tantrum; calm soothes it. An action may be ignored while privacy or an incompatible interaction is active.",
             "inputSchema": {
                 "type": "object",
                 "required": ["kind"],
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck"]
+                        "enum": ["drink", "stretch", "wave", "tilt", "slowBlink", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck", "tailGround", "calm"]
                     }
                 }
             }
@@ -250,17 +301,17 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "get_idle_actions",
-            "description": "Read whether automatic idle behaviours are enabled, the silence delay, plus the last request/sequence.",
+            "description": "Read the active model/mode, supported actions, automatic idle settings and last request/sequence. Available actions come from the versioned model contract.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
             "name": "get_mood",
-            "description": "Read the pet's current mood meter: annoyance (0-1, rises while the user types relentlessly) and dizzy (0-1, reached when it loses patience). Also reports whether automatic annoyance tracking is on.",
+            "description": "Read automatic typing-tracking settings and the last requested mood values/sequence. These saved requests are not live renderer mood measurements.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
             "name": "set_mood",
-            "description": "Set the pet's mood meter directly (0-1). annoyance shows steam puffs and anger marks; dizzy makes its eyes spin and shows a dizzy spiral. Use 0 to calm it down instantly.",
+            "description": "Set the pet's mood meter directly (0-1). annoyance shows steam puffs and anger marks; dizzy makes its eyes spin and shows a dizzy spiral. Use 0 to clear these mood meters. A sleep tantrum is a separate reaction: use trigger_idle_action with calm to soothe it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -280,7 +331,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "set_keycaps",
-            "description": "DIY individual keycaps on the live keyboard. Keys are KeySpec ids (a-z, 0-9, esc, tab, space, lshift, f1..f12, np_0..np_9, up/down/left/right, ...). Each entry may set top/side/text colours, a custom label, or an emoji legend. Merges with existing overrides unless replace: true.",
+            "description": "DIY keycaps independently per mode (defaults to the active model mode). 3D supports top colors only; 2D also supports side/text colors and legends. Keys are KeySpec ids (a-z, 0-9, esc, tab, space, lshift, f1..f12, np_0..np_9, up/down/left/right, ...). Each entry may set top/side/text colours, a custom label, or an emoji legend. Merges with existing overrides unless replace: true.",
             "inputSchema": {
                 "type": "object",
                 "required": ["keycaps"],
@@ -299,6 +350,7 @@ fn tool_definitions() -> Value {
                             }
                         }
                     },
+                    "mode": { "type": "string", "enum": ["2d", "3d"] },
                     "replace": { "type": "boolean", "description": "Replace all existing overrides instead of merging (default false)" }
                 }
             }
@@ -306,12 +358,12 @@ fn tool_definitions() -> Value {
         {
             "name": "get_keycaps",
             "description": "Read the current DIY keycap overrides and the list of valid key ids.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+            "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["2d", "3d"] } }, "additionalProperties": false }
         },
         {
             "name": "clear_keycaps",
             "description": "Remove all DIY keycap overrides and return to the desk skin's own keycaps.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
+            "inputSchema": { "type": "object", "properties": { "mode": { "type": "string", "enum": ["2d", "3d"] } }, "additionalProperties": false }
         },
         {
             "name": "set_lighting",
@@ -352,10 +404,16 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "update_settings",
-            "description": "Update KuroCat desktop pet settings live (scale 0.2-1.5, showKeyBubbles, soundEnabled, alwaysOnTop, clickThroughLocked, catBreed, keyboardLayout 65|108, keyboardOrientation cat|viewer, keyboardScale65/keyboardScale108 0.6-1.2, mouseOrientation auto|cat|viewer, autostart).",
+            "description": "Update live settings: model/render mode (falls back to a supported adapter), collar, headphones, tail keys, independent keyboard/mouse sound profiles, purring, window and keyboard layout preferences. Use dedicated tools for props, idle, mood and lighting.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "renderMode": {"type":"string","enum":["2d","3d"]},
+                    "collarColor": {"type":"string","enum":["none","red","blue","pink","green"]},
+                    "headphoneMode": {"type":"string","enum":["auto","on","off"]},
+                    "tailKeyMode": {"type":"string","enum":["smart","custom","edge","off"]},
+                    "tailKeyIds": {"type":"array","items":{"type":"string"}},
+                    "inputSound": {"type":"object","description":"Independent keyboard/mouse effects; soundEnabled controls purring.","properties":{"keyboard":{"type":"boolean"},"mouse":{"type":"boolean"},"profile":{"type":"string","enum":["linear","tactile","clicky","silent"]},"volume":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false},
                     "catBreed": { "type": "string" },
                     "scale": { "type": "number", "minimum": 0.2, "maximum": 1.5 },
                     "keyboardLayout": { "type": "string", "enum": ["65", "108"] },
@@ -401,6 +459,27 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 "cats": cats
             }))
         }
+        "get_model_contract" => ok_text(models::contract()),
+        "import_model_pack" => {
+            let Some(package) = args.get("package") else { return err_text("Missing package object"); };
+            match models::install(package.clone(), args["replace"].as_bool().unwrap_or(false)) {
+                Ok(cat) => {
+                    let activate = args["activate"].as_bool().unwrap_or(false);
+                    if activate {
+                        let mut s = load_settings();
+                        s.cat_breed = cat.id.clone(); s.render_mode = models::mode(&cat, &s.render_mode);
+                        save_settings(&s);
+                    }
+                    on_change();
+                    ok_text(json!({"status": "installed", "activated": activate, "cat": cat}))
+                }
+                Err(e) => err_text(&e),
+            }
+        }
+        "export_model_pack" => match args["id"].as_str() {
+            Some(id) => match models::export(id) { Ok(package) => ok_text(package), Err(e) => err_text(&e) },
+            None => err_text("Missing model id"),
+        },
         "get_cat_schema" => ok_text(cat_schema_guide()),
         "upsert_cat" => {
             let Some(cat_val) = args.get("cat") else {
@@ -419,6 +498,7 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                     if activate {
                         let mut s = load_settings();
                         s.cat_breed = saved.id.clone();
+                        s.render_mode = models::mode(&saved, &s.render_mode);
                         save_settings(&s);
                     }
                     on_change();
@@ -445,6 +525,9 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             }
             let mut s = load_settings();
             s.cat_breed = id.clone();
+            if let Some(cat) = all_cats().iter().find(|cat| cat.id == id) {
+                s.render_mode = models::mode(cat, &s.render_mode);
+            }
             save_settings(&s);
             on_change();
             ok_text(json!({
@@ -589,14 +672,12 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
         }
         "get_idle_actions" => {
             let s = load_settings();
-            let available = if s.render_mode == "3d" {
-                vec!["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck"]
-            } else if s.cat_breed == "dafeiyu" {
-                vec!["drink", "stretch", "wave"]
-            } else {
-                vec!["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll"]
-            };
+            let available = models::actions(&s.cat_breed, &s.render_mode);
+            let active_mode = all_cats().iter().find(|cat| cat.id == s.cat_breed)
+                .map(|cat| models::mode(cat, &s.render_mode)).unwrap_or_else(|| s.render_mode.clone());
             ok_text(json!({
+                "modelId": s.cat_breed,
+                "mode": active_mode,
                 "enabled": s.idle_actions_enabled,
                 "delaySec": s.idle_delay_sec,
                 "lastRequest": s.idle_action_request,
@@ -609,25 +690,13 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 return err_text("Missing required 'kind' string argument.");
             };
             let mut s = load_settings();
-            let kind = match raw.trim() {
-                "drink" => "drink",
-                "stretch" => "stretch",
-                "wave" => "wave",
-                "groom" => "groom",
-                "nap" | "sleep" => "nap",
-                "cuddle" => "cuddle",
-                "roll" => "roll",
-                "listen" | "shimmy" | "pawCheck" if s.render_mode == "3d" => raw.trim(),
-                other => {
-                    return err_text(&format!(
-                        "Unknown idle action '{}'. Use drink | stretch | wave | groom | nap | cuddle | roll; listen | shimmy | pawCheck require 3D.",
-                        other
-                    ))
-                }
-            };
+            let available = models::actions(&s.cat_breed, &s.render_mode);
+            let kind = if raw.trim() == "sleep" { "nap" } else { raw.trim() };
+            if !available.as_array().is_some_and(|list| list.contains(&json!(kind))) {
+                return err_text(&format!("Action '{}' is unavailable for this model; available: {}", kind, available));
+            }
             s.idle_action_request = kind.to_string();
             s.idle_action_seq = s.idle_action_seq.wrapping_add(1);
-            s.idle_actions_enabled = true;
             save_settings(&s);
             on_change();
             ok_text(json!({ "status": "queued", "kind": kind, "seq": s.idle_action_seq }))
@@ -695,50 +764,27 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             on_change();
             ok_text(json!({ "enabled": enabled }))
         }
-        "get_keycaps" => {
-            let s = load_settings();
-            ok_text(json!({
-                "keycaps": s.keycap_overrides,
-                "validKeyIds": VALID_KEY_IDS,
-            }))
-        }
-        "set_keycaps" => {
-            let Some(map) = args.get("keycaps") else {
-                return err_text("Missing required 'keycaps' object argument.");
-            };
-            let parsed: std::collections::HashMap<String, crate::config::KeycapOverride> =
-                match serde_json::from_value(map.clone()) {
-                    Ok(m) => m,
-                    Err(e) => return err_text(&format!("Invalid keycaps JSON: {}", e)),
+        "get_keycaps" | "set_keycaps" | "clear_keycaps" => {
+            let mut s = load_settings();
+            let actual = all_cats().iter().find(|c| c.id == s.cat_breed).map(|c| models::mode(c, &s.render_mode)).unwrap_or_else(|| s.render_mode.clone());
+            let mode = args["mode"].as_str().unwrap_or(&actual);
+            if !matches!(mode, "2d" | "3d") { return err_text("mode must be 2d or 3d"); }
+            let mut next = if mode == "3d" { s.keycap_overrides3d.clone().unwrap_or_else(|| s.keycap_overrides.clone()) } else { s.keycap_overrides.clone() };
+            if name == "get_keycaps" { return ok_text(json!({ "mode": mode, "keycaps": next, "validKeyIds": VALID_KEY_IDS })); }
+            if name == "clear_keycaps" { next.clear(); } else {
+                let parsed: std::collections::HashMap<String, crate::config::KeycapOverride> = match serde_json::from_value(args["keycaps"].clone()) {
+                    Ok(m) => m, Err(e) => return err_text(&format!("Invalid keycaps: {}", e)),
                 };
-            let replace = args
-                .get("replace")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
-            let mut s = load_settings();
-            let mut next = if replace {
-                std::collections::HashMap::new()
-            } else {
-                s.keycap_overrides.clone()
-            };
-            for (k, v) in parsed {
-                next.insert(k, v);
+                if mode == "3d" && parsed.values().any(|k| k.side.is_some() || k.text.is_some() || k.label.is_some() || k.emoji.is_some()) {
+                    return err_text("3D keycaps support top colors only; side, text, label and emoji are 2D-only");
+                }
+                if args["replace"].as_bool().unwrap_or(false) { next.clear(); }
+                next.extend(parsed);
+                next = crate::config::normalize_keycap_overrides(next);
             }
-            s.keycap_overrides = crate::config::normalize_keycap_overrides(next);
-            save_settings(&s);
-            on_change();
-            ok_text(json!({
-                "status": "saved",
-                "count": s.keycap_overrides.len(),
-                "keycaps": s.keycap_overrides
-            }))
-        }
-        "clear_keycaps" => {
-            let mut s = load_settings();
-            s.keycap_overrides.clear();
-            save_settings(&s);
-            on_change();
-            ok_text(json!({ "status": "cleared" }))
+            if mode == "3d" { s.keycap_overrides3d = Some(next.clone()); } else { s.keycap_overrides = next.clone(); }
+            save_settings(&s); on_change();
+            ok_text(json!({ "status": "saved", "mode": mode, "count": next.len(), "keycaps": next }))
         }
         "get_lighting" => {
             let s = load_settings();
@@ -838,6 +884,21 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             if let Some(b) = args.get("clickThroughLocked").and_then(|v| v.as_bool()) {
                 s.click_through_locked = b;
             }
+            if let Some(v) = args["renderMode"].as_str() { s.render_mode = crate::config::normalize_render_mode(v); }
+            if let Some(v) = args["collarColor"].as_str() { s.collar_color = crate::config::normalize_collar_color(v); }
+            if let Some(v) = args["headphoneMode"].as_str() { s.headphone_mode = crate::config::normalize_headphone_mode(v); }
+            if let Some(v) = args["tailKeyMode"].as_str() { s.tail_key_mode = crate::config::normalize_tail_key_mode(v); }
+            if let Some(ids) = args["tailKeyIds"].as_array() {
+                s.tail_key_ids = ids.iter().filter_map(|id| id.as_str()).filter(|id| VALID_KEY_IDS.contains(id)).map(String::from).collect();
+            }
+            if let Some(patch) = args["inputSound"].as_object() {
+                let mut sound = serde_json::to_value(&s.input_sound).unwrap();
+                for (k, v) in patch { sound[k] = v.clone(); }
+                s.input_sound = match serde_json::from_value::<crate::config::InputSoundConfig>(sound) {
+                    Ok(v) => v.normalized(), Err(e) => return err_text(&format!("Invalid inputSound: {}", e)),
+                };
+            }
+            if let Some(cat) = all_cats().iter().find(|cat| cat.id == s.cat_breed) { s.render_mode = models::mode(cat, &s.render_mode); }
             if let Some(b) = args.get("autostart").and_then(|v| v.as_bool()) {
                 if set_windows_autostart(b).is_ok() {
                     s.autostart = b;
@@ -881,7 +942,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
                     "name": SERVER_NAME,
                     "version": SERVER_VERSION
                 },
-                "instructions": "Use get_cat_schema to inspect the custom cat design format, then call upsert_cat (with activate: true) to create or customize desktop pet cats in real time on the user's Windows desktop."
+                "instructions": "Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
             }))
         }
         "ping" => Ok(json!({})),

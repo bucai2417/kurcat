@@ -1,0 +1,197 @@
+//! Versioned, data-only packages for the built-in procedural cat renderers.
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::io::Write;
+use crate::cats::{self, CatSkinConfig};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProfile {
+    pub adapters: Vec<String>,
+    pub behavior_contract: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+}
+pub fn contract() -> Value { serde_json::from_str(include_str!("../../src/modelContract.json")).expect("bundled model contract") }
+fn text<'a>(v: &'a Value, max: usize) -> Result<&'a str, String> {
+    let s = v.as_str().ok_or("Expected text")?;
+    if s.trim().is_empty() || s.chars().count() > max || s.chars().any(|c| c.is_control()) { return Err("Invalid text length or control characters".into()); }
+    Ok(s.trim())
+}
+fn color(v: &Value) -> bool {
+    let Some(s) = v.as_str() else { return false; };
+    if s.len() == 7 && s.starts_with('#') && s[1..].bytes().all(|c| c.is_ascii_hexdigit()) { return true; }
+    let (prefix, count) = if s.starts_with("rgba(") { ("rgba(", 4) } else { ("rgb(", 3) };
+    let Some(inner) = s.strip_prefix(prefix).and_then(|s| s.strip_suffix(')')) else { return false; };
+    let values: Vec<_> = inner.split(',').collect();
+    values.len() == count && values.iter().enumerate().all(|(i, s)| { let part = s.trim(); let pieces: Vec<_> = part.split('.').collect();
+        if pieces.len() > 2 || pieces.iter().any(|p| p.is_empty() || !p.bytes().all(|b| b.is_ascii_digit())) { return false; }
+        part.parse::<f64>().map(|v| v.is_finite() && v >= 0.0 && v <= if i == 3 { 1.0 } else { 255.0 }).unwrap_or(false) })
+}
+pub fn validate_profile(profile: &ModelProfile) -> Result<(), String> {
+    let c = contract();
+    if profile.behavior_contract != "cat-v1" || profile.adapters.is_empty() || profile.adapters.len() > 2 ||
+        profile.adapters.iter().any(|a| c["adapters"].get(a.as_str()).is_none()) ||
+        (profile.adapters.len() == 2 && profile.adapters[0] == profile.adapters[1]) { return Err("Unsupported adapter or behavior contract".into()); }
+    for field in [&profile.author, &profile.license].into_iter().flatten() { text(&json!(field), 100)?; }
+    Ok(())
+}
+pub fn validate(value: Value) -> Result<CatSkinConfig, String> {
+    if value.to_string().len() > 262144 { return Err("Model package exceeds 256 KB".into()); }
+    if value["format"] != "kurocat-model" || value["version"] != 1 { return Err("Expected kurocat-model version 1".into()); }
+    let c = contract();
+    let profile: ModelProfile = serde_json::from_value(value["profile"].clone()).map_err(|e| e.to_string())?;
+    validate_profile(&profile)?;
+    let s = &value["skin"];
+    let id = text(&s["id"], 36)?;
+    if !id.as_bytes()[0].is_ascii_lowercase() && !id.as_bytes()[0].is_ascii_digit() { return Err("Invalid model ID".into()); }
+    if !id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_') || cats::builtin_cats().iter().any(|c| c.id == id) { return Err("Invalid or reserved model ID".into()); }
+    let mut skin = json!({ "id": id, "name": text(&s["name"], 48)?, "builtin": false });
+    if !s["emoji"].is_null() { skin["emoji"] = json!(text(&s["emoji"], 12)?); }
+    for key in c["skinRules"]["requiredColors"].as_array().unwrap() {
+        if !color(&s[key.as_str().unwrap()]) { return Err(format!("Invalid color: {}", key)); }
+    }
+    for key in c["skinRules"]["colors"].as_array().unwrap() {
+        let k = key.as_str().unwrap();
+        if !s[k].is_null() { if !color(&s[k]) { return Err(format!("Invalid color: {}", k)); } skin[k] = s[k].clone(); }
+    }
+    for key in c["skinRules"]["booleans"].as_array().unwrap() {
+        let k = key.as_str().unwrap();
+        if !s[k].is_null() { if !s[k].is_boolean() { return Err(format!("Expected boolean: {}", k)); } skin[k] = s[k].clone(); }
+    }
+    if !s["pattern"].is_null() {
+        if !c["skinRules"]["patterns"].as_array().unwrap().contains(&s["pattern"]) { return Err("Invalid coat pattern".into()); }
+        skin["pattern"] = s["pattern"].clone();
+    }
+    if !s["spots"].is_null() {
+        let spots = s["spots"].as_array().ok_or("Expected spots array")?;
+        if spots.len() > 64 { return Err("At most 64 spots".into()); }
+        let mut normalized = Vec::new();
+        for spot in spots {
+            let mut out = json!({ "part": spot["part"], "color": spot["color"] });
+            if !["head","body","leftArm","rightArm"].contains(&spot["part"].as_str().unwrap_or("")) || !color(&spot["color"]) { return Err("Invalid spot part or color".into()); }
+            for k in ["x","y","rx","ry","rotation","opacity"] {
+                let v = if spot[k].is_null() && k == "rotation" { 0.0 } else if spot[k].is_null() && k == "opacity" { 1.0 } else { spot[k].as_f64().ok_or("Invalid spot coordinate")? };
+                let valid = match k { "opacity" => (0.0..=1.0).contains(&v), "rx" | "ry" => v > 0.0 && v <= 300.0, _ => v.abs() <= 360.0 };
+                if !v.is_finite() || !valid { return Err(format!("Spot parameter out of range: {}", k)); }
+                out[k] = json!(v);
+            }
+            normalized.push(out);
+        }
+        skin["spots"] = json!(normalized);
+    }
+    let mut cat: CatSkinConfig = serde_json::from_value(skin).map_err(|e| e.to_string())?;
+    cat.model_profile = Some(profile);
+    Ok(cat)
+}
+pub fn install(value: Value, replace: bool) -> Result<CatSkinConfig, String> {
+    let cat = validate(value)?;
+    if !replace && cats::cat_exists(&cat.id) { return Err("该模型 ID 已存在；请选择替换，或修改模型包的 ID".into()); }
+    cats::upsert_custom_cat(cat)
+}
+pub fn export(id: &str) -> Result<Value, String> {
+    let cat = cats::all_cats().into_iter().find(|c| c.id == id).ok_or("Model not found")?;
+    if id == "dafeiyu" { return Err("大肥鱼使用专用绘制器，暂不支持导出为猫咪模型包".into()); }
+    let profile = cat.model_profile.clone().unwrap_or(ModelProfile { adapters: vec!["canvas-cat-v1".into(), "three-cat-v1".into()], behavior_contract: "cat-v1".into(), author: None, license: None });
+    let copy_id = if cat.builtin { format!("{}-custom", id) } else { id.to_string() };
+    let mut skin = serde_json::to_value(cat).map_err(|e| e.to_string())?;
+    skin.as_object_mut().unwrap().remove("modelProfile");
+    skin["id"] = json!(copy_id); skin["builtin"] = json!(false);
+    let package = json!({ "format": "kurocat-model", "version": 1, "profile": profile, "skin": skin });
+    validate(package.clone())?;
+    Ok(package)
+}
+pub fn export_file(id: &str) -> Result<String, String> {
+    let package = export(id)?;
+    let dir = crate::config::app_data_dir().join("exports");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = package["skin"]["id"].as_str().ok_or("Missing model ID")?;
+    for n in 0..10000 {
+        let suffix = if n == 0 { String::new() } else { format!("-{}", n) };
+        let path = dir.join(format!("{}{}.kurocat.json", stem, suffix));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => { file.write_all(serde_json::to_string_pretty(&package).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())?; return Ok(path.to_string_lossy().into_owned()); },
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("Export filenames exhausted".into())
+}
+pub fn mode(cat: &CatSkinConfig, preferred: &str) -> String {
+    if cat.id == "dafeiyu" { return "2d".into(); }
+    if let Some(p) = &cat.model_profile {
+        let c = contract();
+        if p.adapters.iter().any(|a| c["adapters"][a.as_str()]["mode"] == preferred) { return preferred.into(); }
+        return p.adapters.first().and_then(|a| c["adapters"][a.as_str()]["mode"].as_str()).unwrap_or("2d").into();
+    }
+    if preferred == "3d" { "3d".into() } else { "2d".into() }
+}
+pub fn actions(id: &str, preferred: &str) -> Value {
+    let c = contract();
+    if id == "dafeiyu" { return c["specialModels"]["dafeiyu"]["actions"].clone(); }
+    let actual = cats::all_cats().iter().find(|cat| cat.id == id).map(|cat| mode(cat, preferred)).unwrap_or_else(|| preferred.into());
+    c["adapters"][if actual == "3d" { "three-cat-v1" } else { "canvas-cat-v1" }]["actions"].clone()
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn example() -> Value {
+        serde_json::from_str(include_str!("../../model-store/mint-cloud.kurocat.json"))
+            .expect("bundled UTF-8 model example")
+    }
+
+    #[test]
+    fn bundled_model_preserves_chinese_and_modes() {
+        let cat = validate(example()).unwrap();
+        assert_eq!(cat.name, "薄荷云朵");
+        assert!(!cat.builtin);
+        assert_eq!(mode(&cat, "2d"), "2d");
+        assert_eq!(mode(&cat, "3d"), "3d");
+        assert_eq!(cat.model_profile.as_ref().unwrap().author.as_deref(), Some("KuroCat 示例"));
+        let mut only_three = example();
+        only_three["profile"]["adapters"] = json!(["three-cat-v1"]);
+        assert_eq!(mode(&validate(only_three).unwrap(), "2d"), "3d");
+    }
+
+    #[test]
+    fn invalid_model_packages_are_rejected() {
+        for (path, bad) in [
+            ("/version", json!(2)),
+            ("/profile/behaviorContract", json!("unknown")),
+            ("/profile/adapters", json!([])),
+            ("/profile/adapters", json!(["three-cat-v1", "three-cat-v1"])),
+            ("/profile/adapters", json!(["unknown"])),
+            ("/skin/id", json!("black")),
+            ("/skin/id", json!("../outside")),
+            ("/skin/name", json!("坏\n名称")),
+            ("/skin/furColor", json!("rgb(256,0,0)")),
+            ("/skin/furColor", json!("rgba(0,0,0,2)")),
+            ("/skin/tailFluffy", json!("true")),
+        ] {
+            let mut package = example();
+            *package.pointer_mut(path).unwrap() = bad;
+            assert!(validate(package).is_err(), "accepted invalid {}", path);
+        }
+        let mut package = example();
+        package["skin"]["spots"] = json!([{"part":"head", "color":"#000000", "x":0, "y":0, "rx":-1, "ry":1}]);
+        assert!(validate(package).is_err());
+    }
+
+    #[test]
+    fn data_only_normalization_and_spot_defaults() {
+        let mut package = example();
+        package["skin"]["builtin"] = json!(true);
+        package["skin"]["script"] = json!("ignored");
+        package["skin"]["spots"] = json!([{"part":"head", "color":"#000000", "x":0, "y":0, "rx":1, "ry":1}]);
+        let normalized = serde_json::to_value(validate(package).unwrap()).unwrap();
+        assert_eq!(normalized["builtin"], false);
+        assert!(normalized["script"].is_null());
+        assert_eq!(normalized["spots"][0]["opacity"], 1.0);
+        assert_eq!(normalized["spots"][0]["rotation"], 0.0);
+    }
+}

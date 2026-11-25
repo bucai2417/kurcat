@@ -5,6 +5,11 @@ import {
   type TailKeyMode,
 } from './catEngine';
 import { catAudio } from './audio';
+import { modelMode, modelActions } from './modelPack';
+import { normalizePropConfig, type PropConfig } from './prop';
+import { normalizeLightConfig, type KeyboardLightConfig } from './keyboardLight';
+import type { KeycapOverride } from './deskSkin';
+import type { MouseOrientation } from './deskMetrics';
 import { DEFAULT_BUILTIN_CATS, type CatSkinConfig } from './catSkins';
 import type { KeyboardLayoutId } from './keyboardLayout';
 import type { CollarColorId, KuroCatEngine3D } from './catEngine3d';
@@ -23,6 +28,19 @@ interface ObsAppSettings {
   renderMode?: ObsRenderMode;
   collarColor?: CollarColorId;
   headphoneMode?: ObsHeadphoneMode;
+  propConfig?: PropConfig;
+  keyboardLight?: KeyboardLightConfig;
+  keycapOverrides?: Record<string, KeycapOverride>;
+  keycapOverrides3d?: Record<string, KeycapOverride> | null;
+  mouseOrientation?: MouseOrientation;
+  idleActionsEnabled?: boolean;
+  idleDelaySec?: number;
+  moodTrackingEnabled?: boolean;
+  idleActionRequest?: string;
+  idleActionSeq?: number;
+  moodSeq?: number;
+  moodAnnoyanceRequest?: number;
+  moodDizzyRequest?: number;
 }
 
 type InputEvent =
@@ -51,6 +69,36 @@ let active3d = false;
 let webglBlocked = false;
 let privacyActive = false;
 let gameActive = false;
+let lastIdleSeq: number | null = null;
+let lastMoodSeq: number | null = null;
+
+function syncBehavior(target: KuroCatEngine | KuroCatEngine3D): void {
+  target.setIdleAutoEnabled(currentSettings.idleActionsEnabled !== false);
+  target.setIdleDelaySec(currentSettings.idleDelaySec ?? 6);
+  target.setMoodTrackingEnabled(currentSettings.moodTrackingEnabled !== false);
+  target.setMouseOrientation(currentSettings.mouseOrientation ?? 'auto');
+  target.setPropConfig(normalizePropConfig(currentSettings.propConfig));
+  target.setLightConfig(normalizeLightConfig(currentSettings.keyboardLight));
+}
+
+function consumeRequests(cat: CatSkinConfig | undefined, mode: ObsRenderMode): void {
+  if (lastIdleSeq === null || lastMoodSeq === null) return; // wait for first server snapshot
+  if (mode === '3d' && !webglBlocked && !active3d) return;
+  const target = active3d && engine3d ? engine3d : engine;
+  const idleSeq = currentSettings.idleActionSeq ?? 0;
+  const moodSeq = currentSettings.moodSeq ?? 0;
+  if (idleSeq !== lastIdleSeq) {
+    lastIdleSeq = idleSeq;
+    const kind = currentSettings.idleActionRequest ?? '';
+    if (modelActions(cat, active3d ? '3d' : '2d').includes(kind)) target.triggerIdleAction(kind);
+  }
+  if (moodSeq !== lastMoodSeq) {
+    lastMoodSeq = moodSeq;
+    const a = currentSettings.moodAnnoyanceRequest ?? -1;
+    const d = currentSettings.moodDizzyRequest ?? -1;
+    target.setMoodMeter(a >= 0 ? a : undefined, d >= 0 ? d : undefined);
+  }
+}
 
 // Mute audio inside OBS Browser Source so purring never double-plays on stream
 catAudio.setEnabled(false);
@@ -147,6 +195,9 @@ function syncObs3D(
     engine3d.setTailKeyConfig(tailMode, tailIds);
     engine3d.setRenderScale(overrideScale ?? 1.0);
     engine3d.setPrivacyMode(privacyActive);
+    engine3d.setGameActive(gameActive);
+    syncBehavior(engine3d);
+    engine3d.setKeycapOverrides(currentSettings.keycapOverrides3d ?? currentSettings.keycapOverrides ?? {});
     if (!active3d) {
       engine.stop();
       canvas.classList.add('hidden');
@@ -165,8 +216,10 @@ function syncObs3D(
         window.addEventListener('resize', () => engine3d?.resize());
         applyState();
       })
-      .catch(() => {
+      .catch((err) => {
+        console.warn('OBS 3D unavailable; using 2D compatibility preview:', err);
         webglBlocked = true;
+        applyState();
       })
       .finally(() => {
         loading3d = null;
@@ -192,8 +245,7 @@ function applyState(): void {
     : [...DEFAULT_TAIL_KEY_IDS];
   const showBubbles =
     overrideBubbles !== null ? overrideBubbles : currentSettings.showKeyBubbles !== false;
-  const mode: ObsRenderMode =
-    overrideMode || (currentSettings.renderMode === '2d' ? '2d' : '3d');
+  const mode = modelMode(activeCat, overrideMode || (currentSettings.renderMode === '2d' ? '2d' : '3d'));
   const collar: CollarColorId =
     overrideCollar ||
     (currentSettings.collarColor === 'red' ||
@@ -209,7 +261,10 @@ function applyState(): void {
   engine.setKeyboardConfig(layout, orient);
   engine.setTailKeyConfig(tailMode, tailIds);
   engine.setRenderScale(overrideScale ?? 1.0);
+  syncBehavior(engine);
+  engine.setKeycapOverrides(currentSettings.keycapOverrides);
   syncObs3D(activeCat, mode, collar, layout, orient, tailMode, tailIds, showBubbles);
+  consumeRequests(activeCat, mode);
 }
 
 function handleInput(p: InputEvent): void {
@@ -261,6 +316,9 @@ function connectStream(): void {
       }
       if (snap.settings) {
         currentSettings = { ...currentSettings, ...snap.settings };
+        // Reconnecting must not replay historical commands.
+        lastIdleSeq = currentSettings.idleActionSeq ?? 0;
+        lastMoodSeq = currentSettings.moodSeq ?? 0;
       }
       if (typeof snap.privacy === 'boolean') {
         privacyActive = snap.privacy;

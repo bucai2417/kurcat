@@ -8,6 +8,8 @@ const embedded = isPreview && !new URLSearchParams(location.search).has('desktop
 
 import './style.css';
 import { SettingsSync } from './settingsSync';
+import { modelActions, modelMode, modelModes } from './modelPack';
+import { setupModelLibrary } from './modelLibrary';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -218,10 +220,12 @@ let engine3d: KuroCatEngine3D | null = null;
 let loading3dPromise: Promise<void> | null = null;
 let webgl3dUnavailable = false;
 let active3d = false;
+let syncModelLibrary = () => {};
+function effectiveMode(): '2d' | '3d' { return modelMode(catList.find(c => c.id === settings.catBreed) ?? catList[0], settings.renderMode === '3d' ? '3d' : '2d'); }
 
 /** True when the user picked 3D and the environment supports it. */
 function wants3DNow(): boolean {
-  if (settings.renderMode === '2d') return false;
+  if (effectiveMode() === '2d') return false;
   if (settings.catBreed === 'dafeiyu') return false; // no 3D rig for her
   if (!canvas3d) return false;
   if (webgl3dUnavailable) return false;
@@ -312,6 +316,8 @@ function activateRenderEngine(): void {
         engine3d = new KuroCatEngine3D(canvas3d, { embedded });
         window.addEventListener('resize', () => engine3d?.resize());
         activateRenderEngine();
+        consumeIdleRequest();
+        consumeMoodRequest();
       })
       .catch((err) => {
         console.warn('3D WebGL unavailable, keeping 2D mode:', err);
@@ -321,6 +327,9 @@ function activateRenderEngine(): void {
         canvas.classList.remove('hidden');
         engine.start();
         loading3dPromise = null;
+        syncMenuUI();
+        consumeIdleRequest();
+        consumeMoodRequest();
       });
   }
 }
@@ -637,11 +646,11 @@ function activeLayoutId(): KeyboardLayoutId {
 }
 
 function activeKeycaps(): Record<string, KeycapOverride> {
-  return (settings.renderMode === '3d' ? settings.keycapOverrides3d ?? settings.keycapOverrides : settings.keycapOverrides) ?? {};
+  return (effectiveMode() === '3d' ? settings.keycapOverrides3d ?? settings.keycapOverrides : settings.keycapOverrides) ?? {};
 }
 
 function saveActiveKeycaps(next: Record<string, KeycapOverride>): void {
-  if (settings.renderMode === '3d') {
+  if (effectiveMode() === '3d') {
     engine3d?.setKeycapOverrides(next);
     void applySettingsPatch({ keycapOverrides3d: next });
   } else {
@@ -679,8 +688,8 @@ function renderKeycapGrid(): void {
     const height = (rSpan / layout.totalRows) * 100;
     const ov = overrides[key.id];
     const bg = ov?.top ?? '#e8e9e4';
-    const fg = settings.renderMode === '3d' ? '#2c2f36' : ov?.text ?? '#2c2f36';
-    const glyph = settings.renderMode === '3d' ? key.label : ov?.emoji || ov?.label || key.label;
+    const fg = effectiveMode() === '3d' ? '#2c2f36' : ov?.text ?? '#2c2f36';
+    const glyph = effectiveMode() === '3d' ? key.label : ov?.emoji || ov?.label || key.label;
     const sel = kcSelectedKeyId === key.id ? ' selected' : '';
     parts.push(
       `<button class="kce-key${sel}" data-kcekey="${key.id}" style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${width.toFixed(2)}%;height:${height.toFixed(2)}%;background:${bg};color:${fg}" title="${key.id}">${glyph}</button>`,
@@ -694,7 +703,7 @@ function renderKeycapGrid(): void {
       const ov = currentKeycap(kcSelectedKeyId);
       const bits = [key?.label || kcSelectedKeyId];
       if (ov.top) bits.push(ov.top);
-      if (settings.renderMode !== '3d') {
+      if (effectiveMode() !== '3d') {
         if (ov.emoji) bits.push(ov.emoji);
         if (ov.label) bits.push(`“${ov.label}”`);
       }
@@ -797,7 +806,8 @@ function syncMenuUI(): void {
     btn.classList.toggle('active', btn.dataset.mouseorient === settings.mouseOrientation);
   });
   document.querySelectorAll<HTMLButtonElement>('[data-rendermode]').forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.rendermode === (settings.renderMode ?? '2d'));
+    btn.classList.toggle('active', btn.dataset.rendermode === effectiveMode());
+    btn.disabled = !modelModes(catList.find(c => c.id === settings.catBreed)).includes(btn.dataset.rendermode as '2d' | '3d');
   });
   document.querySelectorAll<HTMLButtonElement>('[data-collar]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.collar === (settings.collarColor ?? 'none'));
@@ -875,16 +885,24 @@ function syncMenuUI(): void {
   if (volume) volume.value = String(Math.round(settings.inputSound.volume * 100));
   const volumeText = document.getElementById('sound-volume-value');
   if (volumeText) volumeText.textContent = Math.round(settings.inputSound.volume * 100) + '%';
-  const modeName = settings.renderMode === '3d' ? '3D' : '2D';
+  const modeName = effectiveMode() === '3d' ? '3D' : '2D';
   for (const id of ['keycap-mode-title', 'keycap-designer-title']) {
     const el = document.getElementById(id);
     if (el) el.textContent = modeName + (id === 'keycap-mode-title' ? ' 键帽 DIY · 独立保存' : ' 键帽设计器');
   }
   document.querySelectorAll<HTMLElement>('[data-model-only]').forEach((el) => {
-    el.hidden = el.dataset.modelOnly !== settings.renderMode;
+    el.hidden = el.dataset.modelOnly !== effectiveMode();
   });
+  const renderStatus = document.getElementById('render-mode-status');
+  if (renderStatus) {
+    renderStatus.hidden = !webgl3dUnavailable;
+    renderStatus.textContent = '3D 加载失败，当前显示 2D 兼容预览。请检查显卡或 WebGL 支持后重启；3D 专属动作暂不可用。';
+  }
+  const allowedActions = modelActions(activeCat, webgl3dUnavailable ? '2d' : effectiveMode());
+  document.querySelectorAll<HTMLButtonElement>('[data-idleaction]').forEach(btn => { btn.hidden = !allowedActions.includes(btn.dataset.idleaction ?? ''); });
+  syncModelLibrary();
   const keycapHint = document.getElementById('kce-hint');
-  if (keycapHint) keycapHint.textContent = settings.renderMode === '3d'
+  if (keycapHint) keycapHint.textContent = effectiveMode() === '3d'
     ? '点选下方任意按键，再挑颜色；3D 当前支持顶面配色'
     : '点选下方任意按键，再挑颜色 / 图标';
   if (kceEl && !kceEl.classList.contains('hidden')) renderKeycapGrid();
@@ -900,24 +918,27 @@ let lastMoodSeq = 0;
 function consumeMoodRequest(): void {
   const seq = settings.moodSeq ?? 0;
   if (seq <= lastMoodSeq) return;
+  if (wants3DNow() && !active3d) return;
   lastMoodSeq = seq;
   const a = settings.moodAnnoyanceRequest;
   const d = settings.moodDizzyRequest;
   const ann = typeof a === 'number' && a >= 0 ? a : undefined;
   const dz = typeof d === 'number' && d >= 0 ? d : undefined;
-  engine.setMoodMeter(ann, dz);
-  engine3d?.setMoodMeter(ann, dz);
+  if (active3d) engine3d?.setMoodMeter(ann, dz);
+  else engine.setMoodMeter(ann, dz);
 }
 
 /** MCP writes a request + seq; play it once when the counter advances. */
 function consumeIdleRequest(): void {
   const seq = settings.idleActionSeq ?? 0;
   if (seq <= lastIdleSeq) return;
+  if (wants3DNow() && !active3d) return; // keep pending while the 3D engine loads
   lastIdleSeq = seq;
   const kind = settings.idleActionRequest;
-  if (!kind) return;
-  engine.triggerIdleAction(kind);
-  engine3d?.triggerIdleAction(kind);
+  const cat = catList.find(c => c.id === settings.catBreed) ?? catList[0];
+  if (!kind || !modelActions(cat, active3d ? '3d' : '2d').includes(kind)) return;
+  if (active3d) engine3d?.triggerIdleAction(kind);
+  else engine.triggerIdleAction(kind);
 }
 function pushHitRegions(): void {
   // In 3D the framing differs completely from the 2D desk layout; using the 2D
@@ -1574,6 +1595,17 @@ async function bootstrap(): Promise<void> {
   });
   soundVolume?.addEventListener('change', () => void applySettingsPatch({ inputSound: settings.inputSound }));
 
+  syncModelLibrary = setupModelLibrary({
+    current: () => ({ cat: catList.find(c => c.id === settings.catBreed), mode: webgl3dUnavailable ? '2d' : effectiveMode() }),
+    install: async (packageValue, replace) => {
+      const cat = await invoke<CatSkinConfig>('import_model_pack', { package: packageValue, replace });
+      catList = catList.filter(c => c.id !== cat.id).concat(cat);
+      await settingsSync.update({ catBreed: cat.id, renderMode: modelMode(cat, effectiveMode()) });
+    },
+    export: async id => invoke<string>('export_model_pack', { id }),
+    resize: () => { repositionMenu(); pushHitRegions(); },
+  });
+
   // ---- Keycap designer ----
   // Tab switching (menu stays a single scroll-free panel per tab).
   document.querySelectorAll<HTMLButtonElement>('.menu-tab-btn').forEach((btn) => {
@@ -1837,12 +1869,8 @@ async function bootstrap(): Promise<void> {
 
     const idleAction = target.dataset.idleaction;
     if (idleAction) {
-      if (settings.idleActionsEnabled === false) {
-        void applySettingsPatch({ idleActionsEnabled: true });
-      }
-      engine.setIdleAutoEnabled(true);
-      engine.triggerIdleAction(idleAction, true);
-      engine3d?.triggerIdleAction(idleAction, true);
+      if (active3d && engine3d) engine3d.triggerIdleAction(idleAction, true);
+      else engine.triggerIdleAction(idleAction, true);
       closeContextMenu();
       return;
     }
@@ -1916,7 +1944,7 @@ async function bootstrap(): Promise<void> {
 
     const breedAttr = target.dataset.breed;
     if (breedAttr) {
-      void applySettingsPatch({ catBreed: breedAttr });
+      void applySettingsPatch({ catBreed: breedAttr, renderMode: modelMode(catList.find(c => c.id === breedAttr), effectiveMode()) });
       closeContextMenu();
       return;
     }
