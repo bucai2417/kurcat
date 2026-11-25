@@ -49,6 +49,7 @@ const DEFAULT_SETTINGS = {
     reactive: true,
     underglow: true,
     zone: 'all',
+    backlitCaps: false,
   },
   deskSkinId: 'classic-cream',
   propConfig: {

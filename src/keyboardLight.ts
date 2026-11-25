@@ -31,6 +31,12 @@ export interface KeyboardLightConfig {
   reactive: boolean;
   underglow: boolean;
   zone: LightZone;
+  /**
+   * Dim the keycaps into a dark backlit shell so the LED reads through them.
+   * Off by default: the chosen desk skin stays as-is and the light merely glows
+   * on top of it.
+   */
+  backlitCaps: boolean;
 }
 
 export const LIGHT_COLOR_MODES: Array<{ id: LightColorMode; label: string }> = [
@@ -86,6 +92,7 @@ export const LIGHT_PRESETS: Array<{ id: string; label: string; config: KeyboardL
       palette: DEFAULT_LIGHT_PALETTE,
       colorMode: 'solid',
       edgeLight: false,
+      backlitCaps: false,
     },
   },
   {
@@ -104,6 +111,7 @@ export const LIGHT_PRESETS: Array<{ id: string; label: string; config: KeyboardL
       palette: DEFAULT_LIGHT_PALETTE,
       colorMode: 'solid',
       edgeLight: false,
+      backlitCaps: false,
     },
   },
   {
@@ -122,6 +130,7 @@ export const LIGHT_PRESETS: Array<{ id: string; label: string; config: KeyboardL
       palette: DEFAULT_LIGHT_PALETTE,
       colorMode: 'solid',
       edgeLight: false,
+      backlitCaps: false,
     },
   },
   {
@@ -140,6 +149,7 @@ export const LIGHT_PRESETS: Array<{ id: string; label: string; config: KeyboardL
       palette: DEFAULT_LIGHT_PALETTE,
       colorMode: 'solid',
       edgeLight: false,
+      backlitCaps: false,
     },
   },
   {
@@ -158,6 +168,7 @@ export const LIGHT_PRESETS: Array<{ id: string; label: string; config: KeyboardL
       palette: DEFAULT_LIGHT_PALETTE,
       colorMode: 'solid',
       edgeLight: false,
+      backlitCaps: false,
     },
   },
 ];
@@ -175,6 +186,7 @@ export const DEFAULT_LIGHT: KeyboardLightConfig = {
   reactive: true,
   underglow: true,
   zone: 'all',
+  backlitCaps: false,
 };
 
 const HEX_RE = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -222,6 +234,8 @@ export function normalizeLightConfig(raw: unknown): KeyboardLightConfig {
     reactive: typeof src.reactive === 'boolean' ? src.reactive : DEFAULT_LIGHT.reactive,
     underglow: typeof src.underglow === 'boolean' ? src.underglow : DEFAULT_LIGHT.underglow,
     zone: zoneIds.includes(src.zone as LightZone) ? (src.zone as LightZone) : DEFAULT_LIGHT.zone,
+    backlitCaps:
+      typeof src.backlitCaps === 'boolean' ? src.backlitCaps : DEFAULT_LIGHT.backlitCaps,
   };
 }
 

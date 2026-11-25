@@ -4168,9 +4168,10 @@ export class KuroCatEngine {
 
     const lightCfg = this.lightEngine.getConfig();
     const nowMs = performance.now();
-    // Backlit decks need dark keycaps for additive light to register at all; a
-    // near-white deck simply swallows the glow.
+    // `backlit` = lighting is on; it only darkens the caps when the user opted
+    // into backlitCaps, so the desk skin otherwise stays untouched.
     const backlit = !this.privacyMode && lightCfg.enabled && lightCfg.effect !== 'off';
+    const dimDeck = backlit && lightCfg.backlitCaps;
     const skin = this.deskSkin;
     const kbs = skin.keyboard;
 
@@ -4196,7 +4197,7 @@ export class KuroCatEngine {
     ctx.fill();
     ctx.restore();
 
-    ctx.fillStyle = backlit && kbs.pattern === 'solid' ? this.shade(kbs.deckTop, -0.06) : kbs.deckTop;
+    ctx.fillStyle = dimDeck && kbs.pattern === 'solid' ? this.shade(kbs.deckTop, -0.06) : kbs.deckTop;
     ctx.strokeStyle = kbs.deckEdge;
     ctx.lineWidth = 1.1;
     this.trapezoidPath(ctx, topHalfW, botHalfW, -halfH, halfH, 6.5);
@@ -4240,7 +4241,7 @@ export class KuroCatEngine {
     }
 
     // Bright clean light-grey inner keybed matching ORIG 0.3s bright airy white keyboard!
-    ctx.fillStyle = backlit && kbs.pattern === 'solid' ? this.shade(kbs.bedFill, -0.02) : kbs.bedFill;
+    ctx.fillStyle = dimDeck && kbs.pattern === 'solid' ? this.shade(kbs.bedFill, -0.02) : kbs.bedFill;
     this.trapezoidPath(ctx, topHalfW - 5, botHalfW - 5, -halfH + 4, halfH - 4, 3.5);
     ctx.fill();
 
@@ -4303,8 +4304,10 @@ export class KuroCatEngine {
         if (diy.text) textColor = diy.text;
       }
 
-      // Backlit mode: mute every cap to a dark translucent shell so the LED reads through.
-      if (backlit && press <= 0.14 && !diy) {
+      // Backlit mode is opt-in: muting the caps to a dark shell only happens when
+      // the user asked for it, otherwise the desk skin keeps its own colours and
+      // the LED simply glows on top.
+      if (backlit && lightCfg.backlitCaps && press <= 0.14 && !diy) {
         topColor = key.accent === 'orange' ? this.shade(kbs.accentKeyTop, -0.62) : this.shade(topColor, -0.78);
         sideColor = key.accent === 'orange' ? this.shade(kbs.accentKeySide, -0.62) : this.shade(sideColor, -0.78);
       }
@@ -4380,7 +4383,7 @@ export class KuroCatEngine {
           ? '#111214'
           : textColor !== kbs.keyText
             ? textColor
-            : backlit
+            : dimDeck
               ? rgba(this.readableInk(topColor), 0.78)
               : key.accent === 'orange'
                 ? '#ffffff'

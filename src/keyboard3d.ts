@@ -1179,11 +1179,16 @@ export class KeyboardAndMouse3D {
           lr = col.r;
           lg = col.g;
           lb = col.b;
-          // Blend the lit colour over the cap colour by intensity.
+          // Blend the lit colour over the cap colour by intensity. With backlit
+          // caps the cap base is darkened first so the LED reads like a real
+          // backlit key; otherwise the skin colour stays and the light glows on top.
           const a = Math.min(1, intensity * 1.25);
-          r = white.r * (1 - a) + lr * a;
-          g = white.g * (1 - a) + lg * a;
-          b = white.b * (1 - a) + lb * a;
+          const baseR = cfg.backlitCaps ? r * 0.22 : r;
+          const baseG = cfg.backlitCaps ? g * 0.22 : g;
+          const baseB = cfg.backlitCaps ? b * 0.22 : b;
+          r = baseR * (1 - a) + lr * a;
+          g = baseG * (1 - a) + lg * a;
+          b = baseB * (1 - a) + lb * a;
         }
       } else if (k.glow > 0.005) {
         // No lighting configured: keep the original press flash on the cap.

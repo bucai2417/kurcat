@@ -140,6 +140,9 @@ pub struct KeyboardLightConfig {
     pub reactive: bool,
     pub underglow: bool,
     pub zone: String,
+    /// Opt-in dark backlit keycaps; off keeps the desk skin's own colours.
+    #[serde(default)]
+    pub backlit_caps: bool,
 }
 
 impl Default for KeyboardLightConfig {
@@ -157,6 +160,7 @@ impl Default for KeyboardLightConfig {
             reactive: true,
             underglow: true,
             zone: "all".to_string(),
+            backlit_caps: false,
         }
     }
 }

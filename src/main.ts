@@ -598,6 +598,9 @@ function renderLightColorControls(): void {
   document.querySelectorAll<HTMLButtonElement>('[data-edgelight]').forEach((b) => {
     b.classList.toggle('active', (b.dataset.edgelight === 'on') === cfg.edgeLight);
   });
+  document.querySelectorAll<HTMLButtonElement>('[data-backlit]').forEach((b) => {
+    b.classList.toggle('active', (b.dataset.backlit === 'on') === cfg.backlitCaps);
+  });
 }
 
 const KEYCAP_EMOJI_OPTIONS = [
@@ -1649,7 +1652,7 @@ async function bootstrap(): Promise<void> {
 
   menuEl.addEventListener('click', (e) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>(
-      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-rendermode], [data-collar], [data-headphone], [data-tailmode], [data-obstoggle], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
+      '[data-action], [data-scale], [data-breed], [data-kblayout], [data-kborient], [data-mouseorient], [data-rendermode], [data-collar], [data-headphone], [data-tailmode], [data-obstoggle], [data-lightfx], [data-lightcolor], [data-lightpreset], [data-lightmode], [data-palettecolor], [data-edgelight], [data-backlit], [data-deskskin], [data-propkind], [data-propside], [data-idleaction], [data-diy], [data-kcedit], [data-kcswatch], [data-kcclear], [data-kcemoji]',
     );
     if (!target) return;
 
@@ -1689,6 +1692,12 @@ async function bootstrap(): Promise<void> {
     const edgeLight = target.dataset.edgelight;
     if (edgeLight) {
       patchLight({ edgeLight: edgeLight === 'on', enabled: true });
+      return;
+    }
+
+    const backlit = target.dataset.backlit;
+    if (backlit) {
+      patchLight({ backlitCaps: backlit === 'on' });
       return;
     }
 
