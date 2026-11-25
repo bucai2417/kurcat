@@ -97,7 +97,7 @@ html.win7-ulw-mode .update-toast {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  /* Fill the window height so the two tabs get as much room as the screen allows. */
+  /* Fill the window height so the tabs get as much room as the screen allows. */
   max-height: calc(100vh - 16px);
 }
 
@@ -127,7 +127,7 @@ html.win7-ulw-mode .update-toast {
 
 .menu-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   padding: 3px;
   margin-bottom: 6px;
@@ -799,3 +799,11 @@ html.win7-ulw-mode .update-toast {
     transform: translate(-50%, 0) scale(1);
   }
 }
+
+/* Settings stay usable inside a work-area-clamped desktop window. */
+[data-model-only][hidden] { display: none !important; }
+.context-menu.tabbed .tab-body { min-height: 0; overscroll-behavior: contain; }
+.menu-section-note { margin: 8px 0 12px; color: #b7b9c4; font-size: 11px; line-height: 1.6; }
+.sound-profile-label { display: block; margin: 10px 0 6px; color: #c7c9d3; font-size: 12px; }
+.sound-profile { width: 100%; min-height: 32px; margin-bottom: 12px; padding: 4px 8px; color: #eceef4; background: #25272f; border: 1px solid #50535f; border-radius: 6px; font: inherit; color-scheme: dark; }
+.context-menu :is(button, input, select):focus-visible { outline: 2px solid #c8f538; outline-offset: 2px; }

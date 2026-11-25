@@ -325,6 +325,31 @@ impl PropConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct InputSoundConfig {
+    pub keyboard: bool,
+    pub mouse: bool,
+    pub profile: String,
+    pub volume: f64,
+}
+
+impl Default for InputSoundConfig {
+    fn default() -> Self {
+        Self { keyboard: false, mouse: false, profile: "linear".into(), volume: 0.35 }
+    }
+}
+
+impl InputSoundConfig {
+    pub fn normalized(mut self) -> Self {
+        if !matches!(self.profile.as_str(), "linear" | "tactile" | "clicky" | "silent") {
+            self.profile = "linear".into();
+        }
+        self.volume = if self.volume.is_finite() { self.volume.clamp(0.0, 1.0) } else { 0.35 };
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub x: Option<i32>,
@@ -340,6 +365,8 @@ pub struct AppSettings {
     pub click_through_locked: bool,
     pub show_key_bubbles: bool,
     pub sound_enabled: bool,
+    #[serde(default)]
+    pub input_sound: InputSoundConfig,
     pub autostart: bool,
     #[serde(default = "default_cat_breed")]
     pub cat_breed: String,
@@ -365,6 +392,9 @@ pub struct AppSettings {
     pub prop_config: PropConfig,
     #[serde(default)]
     pub keycap_overrides: std::collections::HashMap<String, KeycapOverride>,
+    /// None migrates older shared keycaps once; Some(empty) is an intentional reset.
+    #[serde(default)]
+    pub keycap_overrides3d: Option<std::collections::HashMap<String, KeycapOverride>>,
     #[serde(default = "default_idle_actions_enabled")]
     pub idle_actions_enabled: bool,
     /// Seconds of silence before the pet starts doing random idle actions.
@@ -493,6 +523,7 @@ impl Default for AppSettings {
             click_through_locked: false,
             show_key_bubbles: true,
             sound_enabled: true,
+            input_sound: InputSoundConfig::default(),
             autostart: false,
             cat_breed: default_cat_breed(),
             mcp_enabled: default_mcp_enabled(),
@@ -506,6 +537,7 @@ impl Default for AppSettings {
             desk_skin_id: default_desk_skin_id(),
             prop_config: PropConfig::default(),
             keycap_overrides: std::collections::HashMap::new(),
+            keycap_overrides3d: Some(std::collections::HashMap::new()),
             idle_actions_enabled: default_idle_actions_enabled(),
             idle_delay_sec: default_idle_delay_sec(),
             idle_action_request: default_idle_action_request(),
@@ -562,6 +594,10 @@ pub fn load_settings() -> AppSettings {
     if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(mut parsed) = serde_json::from_str::<AppSettings>(&content) {
             parsed.scale = parsed.scale.clamp(0.20, 1.50);
+            parsed.input_sound = parsed.input_sound.normalized();
+            if parsed.keycap_overrides3d.is_none() {
+                parsed.keycap_overrides3d = Some(parsed.keycap_overrides.clone());
+            }
             return parsed;
         }
     }

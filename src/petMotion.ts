@@ -1,3 +1,10 @@
+/** Extra native-window margins, in logical pixels. Shared by drawing and hit testing. */
+export const desktopPetInsets = { right: 0, bottom: 0 };
+export function setDesktopPetInsets(value: { right: number; bottom: number } | null): void {
+  desktopPetInsets.right = Number.isFinite(value?.right) ? value!.right : 0;
+  desktopPetInsets.bottom = Number.isFinite(value?.bottom) ? value!.bottom : 0;
+}
+
 /** Keep the desktop pet anchored while the native window grows for its menu. */
 export function petViewport(windowWidth: number, windowHeight: number, logicalWidth: number, logicalHeight: number, scale: number) {
   const w = Math.max(1, windowWidth);
@@ -5,7 +12,7 @@ export function petViewport(windowWidth: number, windowHeight: number, logicalWi
   const fit = Math.min(scale, w / logicalWidth, h / logicalHeight);
   const width = logicalWidth * fit;
   const height = logicalHeight * fit;
-  return { left: w - width, top: h - height, width, height };
+  return { left: w - width - desktopPetInsets.right, top: h - height - desktopPetInsets.bottom, width, height };
 }
 
 export const STRIKE_IMPACT = 0.19;

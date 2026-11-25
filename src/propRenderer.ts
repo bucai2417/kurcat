@@ -106,6 +106,9 @@ export function drawProp(ctx: CanvasRenderingContext2D, st: PropRenderState): vo
     case 'pudding':
       drawPudding(ctx, look, st);
       break;
+    case 'boba':
+      drawBoba(ctx, look, st);
+      break;
     case 'coffee':
       drawCoffee(ctx, look, st);
       break;
@@ -144,25 +147,17 @@ function drawCan(ctx: CanvasRenderingContext2D, look: PropLook, st: PropRenderSt
   ctx.ellipse(0, top + 0.6, w * 0.34, w * 0.1, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Liquid window showing the remaining level
-  const winH = h * 0.5;
-  const winTop = top + h * 0.28;
-  ctx.save();
-  roundRect(ctx, -w * 0.28, winTop, w * 0.56, winH, 2.5);
-  ctx.clip();
-  ctx.fillStyle = look.liquidDark;
-  ctx.fillRect(-w * 0.3, winTop, w * 0.6, winH);
-  const lvl = Math.max(0, Math.min(1, st.level));
-  const fillTop = winTop + winH * (1 - lvl);
-  ctx.fillStyle = look.liquid;
-  ctx.fillRect(-w * 0.3, fillTop, w * 0.6, winH * lvl);
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.moveTo(-w * 0.3, fillTop);
-  ctx.lineTo(w * 0.3, fillTop);
-  ctx.stroke();
-  ctx.restore();
+  // Recessed aluminium lid, drinking opening and ring pull.
+  ctx.fillStyle = '#353b3f';
+  ctx.beginPath(); ctx.ellipse(0, top + 1, w * 0.15, 1.3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#eef3f6'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.ellipse(0, top + 3.3, w * 0.13, 1.6, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = 'rgba(238,244,248,0.65)';
+  ctx.beginPath(); ctx.ellipse(0, -1.5, w * 0.45, 2, 0, 0, Math.PI); ctx.stroke();
+  // Printed sweep on the opaque can; remaining volume is shown in the prop settings.
+  ctx.strokeStyle = look.accent; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(-w * 0.4, top + h * 0.72);
+  ctx.bezierCurveTo(-w * 0.1, top + h * 0.83, w * 0.1, top + h * 0.64, w * 0.4, top + h * 0.72); ctx.stroke();
 
   // Label band
   if (look.label) {
@@ -170,7 +165,7 @@ function drawCan(ctx: CanvasRenderingContext2D, look: PropLook, st: PropRenderSt
     ctx.font = `800 ${Math.max(5, w * 0.36)}px "Segoe UI", system-ui, sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(look.label, 0, top + h * 0.17);
+    ctx.fillText(look.label, 0, top + h * 0.45);
   }
 
   // Outline
@@ -178,6 +173,31 @@ function drawCan(ctx: CanvasRenderingContext2D, look: PropLook, st: PropRenderSt
   ctx.lineWidth = 1;
   roundRect(ctx, -w / 2, top, w, h, w * 0.18);
   ctx.stroke();
+}
+
+function drawBoba(ctx: CanvasRenderingContext2D, look: PropLook, st: PropRenderState): void {
+  const w = look.width, h = look.height, top = -h;
+  const outline = () => {
+    ctx.beginPath(); ctx.moveTo(-w / 2, top + 3); ctx.lineTo(w / 2, top + 3);
+    ctx.lineTo(w * 0.36, 0); ctx.quadraticCurveTo(0, 3, -w * 0.36, 0); ctx.closePath();
+  };
+  ctx.save(); outline(); ctx.clip();
+  ctx.fillStyle = 'rgba(216,233,230,0.28)'; ctx.fillRect(-w / 2, top, w, h + 3);
+  const fillTop = -3 - (h - 9) * Math.max(0, Math.min(1, st.level));
+  const tea = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+  tea.addColorStop(0, '#a77f59'); tea.addColorStop(0.45, '#d8b58f'); tea.addColorStop(1, '#b28a64');
+  ctx.fillStyle = tea; ctx.fillRect(-w / 2, fillTop, w, -fillTop + 2);
+  ctx.fillStyle = '#e2c5a3'; ctx.beginPath(); ctx.ellipse(0, fillTop, w * 0.45, 2, 0, 0, Math.PI * 2); ctx.fill();
+  for (let i = 0; i < 9; i++) {
+    const x = ((i * 7) % 17 - 8) * 0.72, y = -3 - Math.floor(i / 3) * 3.6;
+    ctx.fillStyle = '#332019'; ctx.beginPath(); ctx.arc(x, y, 1.65, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,240,211,0.3)'; ctx.beginPath(); ctx.arc(x - 0.45, y - 0.6, 0.5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.32)'; ctx.fillRect(-w * 0.31, top + 6, 1.4, h - 10);
+  ctx.restore(); outline(); ctx.strokeStyle = 'rgba(201,217,213,0.85)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = '#f2eadc'; roundRect(ctx, -w / 2 - 1, top, w + 2, 4, 1.5); ctx.fill();
+  ctx.fillStyle = '#a95345'; ctx.fillRect(w * 0.1, top - 11, 3.1, 14);
+  ctx.fillStyle = '#512c29'; ctx.beginPath(); ctx.ellipse(w * 0.1 + 1.55, top - 11, 1.55, 0.7, 0, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawCoffee(ctx: CanvasRenderingContext2D, look: PropLook, st: PropRenderState): void {

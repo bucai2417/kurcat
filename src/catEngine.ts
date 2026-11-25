@@ -1,3 +1,4 @@
+import { desktopPetInsets } from './petMotion';
 import { clipAngryEyelid } from './petMotion';
 import {
   KEYBOARD_KEYS_65,
@@ -325,7 +326,8 @@ export class KuroCatEngine {
     const ch = this.canvas.height;
     const cssW = Math.max(1, this.embedded ? this.canvas.clientWidth || 420 : window.innerWidth);
     const cssH = Math.max(1, this.embedded ? this.canvas.clientHeight || 440 : window.innerHeight);
-    const toCss = cssW / Math.max(1, cw);
+    const toCssX = cssW / Math.max(1, cw);
+    const toCssY = cssH / Math.max(1, ch);
 
     let uniformScale: number;
     let offsetX: number;
@@ -341,14 +343,14 @@ export class KuroCatEngine {
       const dpr = cw / cssW;
       const fitScale = Math.min(cw / this.logicalW, ch / this.logicalH);
       uniformScale = Math.min(fitScale, this.renderScale * dpr);
-      offsetX = cw - this.logicalW * uniformScale;
-      offsetY = ch - this.logicalH * uniformScale;
+      offsetX = cw - this.logicalW * uniformScale - desktopPetInsets.right * dpr;
+      offsetY = ch - this.logicalH * uniformScale - desktopPetInsets.bottom * dpr;
     }
     return {
-      left: offsetX * toCss,
-      top: offsetY * toCss,
-      width: this.logicalW * uniformScale * toCss,
-      height: this.logicalH * uniformScale * toCss,
+      left: offsetX * toCssX,
+      top: offsetY * toCssY,
+      width: this.logicalW * uniformScale * toCssX,
+      height: this.logicalH * uniformScale * toCssY,
     };
   }
 
@@ -380,8 +382,8 @@ export class KuroCatEngine {
       const dpr = cw / cssW;
       const fitScale = Math.min(cw / this.logicalW, ch / this.logicalH);
       uniformScale = Math.min(fitScale, this.renderScale * dpr);
-      offsetX = cw - this.logicalW * uniformScale;
-      offsetY = ch - this.logicalH * uniformScale;
+      offsetX = cw - this.logicalW * uniformScale - desktopPetInsets.right * dpr;
+      offsetY = ch - this.logicalH * uniformScale - desktopPetInsets.bottom * dpr;
     }
     if (uniformScale <= 0.001) return { x: 0, y: 0 };
     return {
@@ -3033,8 +3035,8 @@ export class KuroCatEngine {
       const uniformScale = Math.min(fitScale, this.renderScale * dpr);
       const drawW = this.logicalW * uniformScale;
       const drawH = this.logicalH * uniformScale;
-      const offsetX = cw - drawW;
-      const offsetY = ch - drawH;
+      const offsetX = cw - drawW - desktopPetInsets.right * dpr;
+      const offsetY = ch - drawH - desktopPetInsets.bottom * dpr;
       ctx.translate(offsetX, offsetY);
       ctx.scale(uniformScale, uniformScale);
     }

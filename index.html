@@ -22,11 +22,12 @@
         <button class="menu-close-btn" id="btn-close-menu" type="button" title="关闭 (Esc)">×</button>
       </div>
       <div class="menu-tabs" role="tablist">
-        <button class="menu-tab-btn active" data-tab="appearance" type="button" role="tab">🐱 外观与互动</button>
-        <button class="menu-tab-btn" data-tab="system" type="button" role="tab">⚙️ 键盘·系统</button>
+        <button class="menu-tab-btn active" id="tab-appearance" data-tab="appearance" type="button" role="tab" aria-controls="panel-appearance" aria-selected="true">猫咪</button>
+        <button class="menu-tab-btn" id="tab-keyboard" data-tab="keyboard" type="button" role="tab" aria-controls="panel-keyboard" aria-selected="false" tabindex="-1">键盘</button>
+        <button class="menu-tab-btn" id="tab-common" data-tab="common" type="button" role="tab" aria-controls="panel-common" aria-selected="false" tabindex="-1">通用</button>
       </div>
       <div class="tab-body">
-      <div class="tab-panel active" data-tab-panel="appearance">
+      <div class="tab-panel active" id="panel-appearance" role="tabpanel" aria-labelledby="tab-appearance" data-tab-panel="appearance">
       <div class="menu-scale-row">
         <span class="menu-scale-label">角色外观（支持 MCP 定制）</span>
         <div class="breed-pills" id="breed-pills">
@@ -36,53 +37,19 @@
         </div>
       </div>
       <div class="menu-sep"></div>
-      <button class="menu-item" data-action="toggle-privacy" title="检测到输入密码时猫猫自动闭眼、大肥鱼双手捂眼并隐藏全部按键">
-        <span>输密码自动闭眼防偷窥</span>
-        <span class="menu-check" id="chk-privacy">✓</span>
-      </button>
-      <button class="menu-item" data-action="toggle-bubbles">
-        <span>悬浮按键气泡</span>
-        <span class="menu-check" id="chk-bubbles">✓</span>
-      </button>
-      <button class="menu-item" data-action="toggle-lock" title="开启后按住 Alt 键仍可拖动或右键解锁">
-        <span>锁定鼠标穿透（Alt 解锁）</span>
-        <span class="menu-check" id="chk-lock"></span>
-      </button>
-      <button class="menu-item" data-action="toggle-sound">
-        <span>摸头呼噜声</span>
-        <span class="menu-check" id="chk-sound">✓</span>
-      </button>
-      <button class="menu-item" data-action="toggle-top">
-        <span>始终置顶显示</span>
-        <span class="menu-check" id="chk-top">✓</span>
-      </button>
-      <button class="menu-item" data-action="toggle-autostart">
-        <span>开机自动启动</span>
-        <span class="menu-check" id="chk-autostart"></span>
-      </button>
-      <div class="menu-sep"></div>
-      <button class="menu-item" data-action="toggle-mcp">
-        <span>开启 MCP 扩展</span>
-        <span class="menu-check" id="chk-mcp">✓</span>
-      </button>
-      <button class="menu-item" data-action="copy-mcp" id="btn-copy-mcp">
-        <span>复制 MCP 配置</span>
-        <span class="menu-hint" id="mcp-copy-hint">AI 捏猫</span>
-      </button>
-      <div class="menu-sep"></div>
       <div class="menu-scale-row" id="render-mode-row">
         <span class="menu-scale-label">视觉模式</span>
         <div class="kb-pills">
           <button class="kb-pill active" data-rendermode="2d">2D 手绘</button>
           <button class="kb-pill" data-rendermode="3d">3D 实时</button>
         </div>
-        <div class="kb-pills" id="collar-row">
+        <div class="kb-pills" id="collar-row" data-model-only="3d" hidden aria-label="3D 项圈">
           <button class="kb-pill active" data-collar="none">无项圈</button>
           <button class="kb-pill" data-collar="red">红铃铛</button>
           <button class="kb-pill" data-collar="blue">蓝铃铛</button>
           <button class="kb-pill" data-collar="pink">粉铃铛</button>
         </div>
-        <div class="kb-pills" id="headphone-row">
+        <div class="kb-pills" id="headphone-row" data-model-only="3d" hidden aria-label="3D 耳机">
           <button class="kb-pill active" data-headphone="off">无耳机</button>
           <button class="kb-pill" data-headphone="auto">游戏时戴</button>
           <button class="kb-pill" data-headphone="on">常戴</button>
@@ -97,18 +64,53 @@
         </div>
       </div>
       <div class="menu-scale-row">
-        <span class="menu-scale-label">OBS 直播源</span>
-        <div class="kb-pills" id="obs-pills">
-          <button class="kb-pill" data-obstoggle="on">开启</button>
-          <button class="kb-pill active" data-obstoggle="off">关闭</button>
+        <span class="menu-scale-label">待机动作</span>
+        <div class="kb-pills" id="idle-action-pills">
+          <button class="kb-pill" data-idleaction="drink">🥤 喝一口</button>
+          <button class="kb-pill" data-idleaction="stretch">🙆 伸懒腰</button>
+          <button class="kb-pill" data-idleaction="wave">👋 挥手</button>
+          <button class="kb-pill" data-idleaction="tilt">🐾 歪头看你</button>
+          <button class="kb-pill" data-idleaction="slowBlink">😌 慢眨眼</button>
+          <button class="kb-pill" data-idleaction="groom">👅 洗脸</button>
+          <button class="kb-pill" data-idleaction="nap">😴 打盹</button>
+          <button class="kb-pill" data-idleaction="cuddle">💗 撒娇</button>
+          <button class="kb-pill" data-idleaction="roll" data-model-only="3d" hidden>地上打滚</button>
         </div>
-        <button class="menu-item" id="btn-copy-obs-url">
-          <span>复制 OBS 浏览器源地址</span>
-          <span class="menu-hint" id="obs-url-hint">未开启</span>
-        </button>
+        <label class="menu-toggle-row">
+          <span>空闲时随机待机</span>
+          <input type="checkbox" id="idle-auto" checked />
+        </label>
+        <div class="scale-header light-brightness-row">
+          <span class="menu-scale-label">静默多久后开始</span>
+          <span class="menu-hint" id="idle-delay-value">6 秒</span>
+        </div>
+        <div class="scale-slider-wrap">
+          <input
+            type="range"
+            id="idle-delay-slider"
+            class="scale-slider"
+            min="2"
+            max="60"
+            step="1"
+            value="6"
+          />
+        </div>
+      </div>
+      <div class="menu-scale-row">
+        <div class="scale-header">
+          <span class="menu-scale-label">小道具（互动饮品）</span>
+          <button class="scale-value-btn" id="prop-toggle-btn" type="button">关闭</button>
+        </div>
+        <div class="kb-pills" id="prop-kind-pills"></div>
+        <div class="kb-pills" id="prop-side-pills"></div>
+        <label class="menu-toggle-row">
+          <span>猫猫空闲时自动喝</span>
+          <input type="checkbox" id="prop-auto-sip" checked />
+        </label>
       </div>
       </div><!-- /appearance -->
-      <div class="tab-panel" data-tab-panel="system">
+      <div class="tab-panel" id="panel-keyboard" role="tabpanel" aria-labelledby="tab-keyboard" data-tab-panel="keyboard">
+      <p class="menu-section-note">键帽按 2D / 3D 独立保存；配列、灯光和键鼠外观共用。</p>
       <div class="menu-scale-row">
         <span class="menu-scale-label">键盘配列与方向</span>
         <div class="kb-pills">
@@ -152,13 +154,13 @@
         <div class="kb-pills" id="desk-skin-pills"></div>
       </div>
       <div class="menu-scale-row">
-        <span class="menu-scale-label">键帽 DIY</span>
+        <span class="menu-scale-label" id="keycap-mode-title">2D 键帽 DIY · 独立保存</span>
         <div class="kb-pills" id="keycap-diy-pills">
           <button class="kb-pill" data-diy="wasd">WASD 高亮</button>
           <button class="kb-pill" data-diy="numpad">数字区撞色</button>
           <button class="kb-pill" data-diy="esc">Esc 警示</button>
           <button class="kb-pill" data-diy="arrows">方向键</button>
-          <button class="kb-pill" data-diy="emoji">表情键帽</button>
+          <button class="kb-pill" data-diy="emoji" data-model-only="2d">表情键帽</button>
           <button class="kb-pill" id="btn-open-keycap-designer">🎨 打开设计器</button>
           <button class="kb-pill" data-diy="clear">清除 DIY</button>
         </div>
@@ -166,10 +168,10 @@
 
       <div id="keycap-designer" class="keycap-designer hidden">
         <div class="kce-head">
-          <span>🎨 键帽设计器</span>
+          <span id="keycap-designer-title">2D 键帽设计器</span>
           <button class="kce-close" id="kce-close" type="button">×</button>
         </div>
-        <div class="kce-hint">点选下方任意按键，再挑颜色 / 图标</div>
+        <div class="kce-hint" id="kce-hint">点选下方任意按键，再挑颜色 / 图标</div>
         <div class="kce-grid" id="kce-grid"></div>
         <div class="kce-panel">
           <div class="kce-selected" id="kce-selected">未选择按键</div>
@@ -177,12 +179,12 @@
             <span class="kce-label">顶面</span>
             <div class="light-swatches" id="kce-colors"></div>
           </div>
-          <div class="kce-row">
+          <div class="kce-row" data-model-only="2d">
             <span class="kce-label">图标</span>
             <div class="light-swatches" id="kce-emojis"></div>
           </div>
-          <div class="kce-row">
-            <input id="kce-label-input" class="kce-input" maxlength="4" placeholder="自定义文字（最多4字）" />
+          <div class="kce-row" data-model-only="2d">
+            <input id="kce-label-input" class="kce-input" aria-label="自定义键帽文字" maxlength="4" placeholder="自定义文字（最多4字）" />
             <button class="kb-pill" id="kce-apply-label" type="button">应用文字</button>
           </div>
           <div class="kce-row">
@@ -191,50 +193,6 @@
             <button class="kb-pill kce-done" id="kce-done" type="button">完成</button>
           </div>
         </div>
-      </div>
-      <div class="menu-scale-row">
-        <span class="menu-scale-label">待机动作</span>
-        <div class="kb-pills" id="idle-action-pills">
-          <button class="kb-pill" data-idleaction="drink">🥤 喝一口</button>
-          <button class="kb-pill" data-idleaction="stretch">🙆 伸懒腰</button>
-          <button class="kb-pill" data-idleaction="wave">👋 挥手</button>
-          <button class="kb-pill" data-idleaction="tilt">🐾 歪头看你</button>
-          <button class="kb-pill" data-idleaction="slowBlink">😌 慢眨眼</button>
-          <button class="kb-pill" data-idleaction="groom">👅 洗脸</button>
-          <button class="kb-pill" data-idleaction="nap">😴 打盹</button>
-          <button class="kb-pill" data-idleaction="cuddle">💗 撒娇</button>
-        </div>
-        <label class="menu-toggle-row">
-          <span>空闲时随机待机</span>
-          <input type="checkbox" id="idle-auto" checked />
-        </label>
-        <div class="scale-header light-brightness-row">
-          <span class="menu-scale-label">静默多久后开始</span>
-          <span class="menu-hint" id="idle-delay-value">6 秒</span>
-        </div>
-        <div class="scale-slider-wrap">
-          <input
-            type="range"
-            id="idle-delay-slider"
-            class="scale-slider"
-            min="2"
-            max="60"
-            step="1"
-            value="6"
-          />
-        </div>
-      </div>
-      <div class="menu-scale-row">
-        <div class="scale-header">
-          <span class="menu-scale-label">小道具（互动饮品）</span>
-          <button class="scale-value-btn" id="prop-toggle-btn" type="button">关闭</button>
-        </div>
-        <div class="kb-pills" id="prop-kind-pills"></div>
-        <div class="kb-pills" id="prop-side-pills"></div>
-        <label class="menu-toggle-row">
-          <span>猫猫空闲时自动喝</span>
-          <input type="checkbox" id="prop-auto-sip" checked />
-        </label>
       </div>
       <div class="menu-scale-row">
         <span class="menu-scale-label">键盘灯光</span>
@@ -312,7 +270,70 @@
           </div>
         </div>
       </div>
-      </div><!-- /system -->
+      </div><!-- /keyboard -->
+      <div class="tab-panel" id="panel-common" role="tabpanel" aria-labelledby="tab-common" data-tab-panel="common">
+      <div class="menu-scale-row">
+        <span class="menu-scale-label">键鼠音效 · 2D / 3D 共用</span>
+        <label class="menu-toggle-row"><span>键盘音效</span><input type="checkbox" id="sound-keyboard" /></label>
+        <label class="menu-toggle-row"><span>鼠标点击音效</span><input type="checkbox" id="sound-mouse" /></label>
+        <label class="sound-profile-label" for="sound-profile">键盘轴体音色</label>
+        <select id="sound-profile" class="sound-profile">
+          <option value="linear">红轴 · 低沉顺滑</option>
+          <option value="tactile">茶轴 · 轻段落</option>
+          <option value="clicky">青轴 · 清脆双响</option>
+          <option value="silent">静音轴 · 轻柔触底</option>
+        </select>
+        <div class="scale-header"><label class="menu-scale-label" for="sound-volume">音量</label><span class="menu-hint" id="sound-volume-value">35%</span></div>
+        <input type="range" class="scale-slider" id="sound-volume" min="0" max="100" value="35" />
+        <div class="kb-pills"><button class="kb-pill" id="preview-keyboard" type="button">试听键盘</button><button class="kb-pill" id="preview-mouse" type="button">试听鼠标</button></div>
+        <p class="menu-section-note">合成音色；长按不连响，密码保护期间静音。</p>
+      </div>
+      <button class="menu-item" data-action="toggle-privacy" title="检测到输入密码时猫猫自动闭眼、大肥鱼双手捂眼并隐藏全部按键">
+        <span>输密码自动闭眼防偷窥</span>
+        <span class="menu-check" id="chk-privacy">✓</span>
+      </button>
+      <button class="menu-item" data-action="toggle-bubbles">
+        <span>悬浮按键气泡</span>
+        <span class="menu-check" id="chk-bubbles">✓</span>
+      </button>
+      <button class="menu-item" data-action="toggle-lock" title="开启后按住 Alt 键仍可拖动或右键解锁">
+        <span>锁定鼠标穿透（Alt 解锁）</span>
+        <span class="menu-check" id="chk-lock"></span>
+      </button>
+      <button class="menu-item" data-action="toggle-sound">
+        <span>摸头呼噜声</span>
+        <span class="menu-check" id="chk-sound">✓</span>
+      </button>
+      <button class="menu-item" data-action="toggle-top">
+        <span>始终置顶显示</span>
+        <span class="menu-check" id="chk-top">✓</span>
+      </button>
+      <button class="menu-item" data-action="toggle-autostart">
+        <span>开机自动启动</span>
+        <span class="menu-check" id="chk-autostart"></span>
+      </button>
+      <div class="menu-sep"></div>
+      <button class="menu-item" data-action="toggle-mcp">
+        <span>开启 MCP 扩展</span>
+        <span class="menu-check" id="chk-mcp">✓</span>
+      </button>
+      <button class="menu-item" data-action="copy-mcp" id="btn-copy-mcp">
+        <span>复制 MCP 配置</span>
+        <span class="menu-hint" id="mcp-copy-hint">AI 捏猫</span>
+      </button>
+      <div class="menu-sep"></div>
+      <div class="menu-scale-row">
+        <span class="menu-scale-label">OBS 直播源</span>
+        <div class="kb-pills" id="obs-pills">
+          <button class="kb-pill" data-obstoggle="on">开启</button>
+          <button class="kb-pill active" data-obstoggle="off">关闭</button>
+        </div>
+        <button class="menu-item" id="btn-copy-obs-url">
+          <span>复制 OBS 浏览器源地址</span>
+          <span class="menu-hint" id="obs-url-hint">未开启</span>
+        </button>
+      </div>
+      </div><!-- /common -->
       </div><!-- /tab-body -->
       <div class="menu-sep"></div>
       <div class="menu-footer-bar">

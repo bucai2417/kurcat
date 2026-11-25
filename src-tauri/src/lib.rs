@@ -74,6 +74,22 @@ fn resize_window_anchored_bottom_right(
     kb_scale: f64,
 ) -> Option<(i32, i32)> {
     let (new_w, new_h) = window_dimensions(layout, scale, kb_scale);
+    // A settings change while the menu is open resizes the pet rectangle first,
+    // then reserves/clamps the menu again; the expanded window is never the anchor.
+    {
+        let state = win.state::<AppState>();
+        let mut saved = state.menu_window.lock().unwrap();
+        if let Some(base) = *saved {
+            let sf = win.scale_factor().unwrap_or(1.0);
+            let width = (new_w * sf).round() as i32;
+            let height = (new_h * sf).round() as i32;
+            let resized = MenuWindow { x: base.x + base.width - width,
+                y: base.y + base.height - height, width, height };
+            let (placed, _) = place_menu_window(win, resized);
+            *saved = Some(placed);
+            return Some((placed.x, placed.y));
+        }
+    }
     #[cfg(target_os = "macos")]
     if win
         .state::<AppState>()
@@ -234,6 +250,7 @@ pub fn run_mcp_stdio() {
 pub struct AppState {
     pub settings: Arc<Mutex<AppSettings>>,
     pub menu_open: Arc<AtomicBool>,
+    menu_window: Mutex<Option<MenuWindow>>,
     pub dragging: Arc<AtomicBool>,
     pub mcp_enabled: Arc<AtomicBool>,
     pub update_banner_open: Arc<AtomicBool>,
@@ -349,6 +366,10 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, mut patch: AppSet
     patch.mouse_orientation = normalize_mouse_orientation(&patch.mouse_orientation);
     patch.keyboard_light = patch.keyboard_light.normalized();
     patch.keycap_overrides = normalize_keycap_overrides(std::mem::take(&mut patch.keycap_overrides));
+    patch.keycap_overrides3d = Some(normalize_keycap_overrides(
+        patch.keycap_overrides3d.take().unwrap_or_else(|| patch.keycap_overrides.clone()),
+    ));
+    patch.input_sound = patch.input_sound.normalized();
     patch.desk_skin_id = desk_skins::sanitize_skin_id(&patch.desk_skin_id);
     patch.render_mode = normalize_render_mode(&patch.render_mode);
     patch.collar_color = normalize_collar_color(&patch.collar_color);
@@ -434,53 +455,90 @@ fn get_game_active() -> bool {
     game_detect::is_game_active()
 }
 
-/// Extra width reserved to the LEFT of the pet while the menu is open, so the
-/// menu never overlaps the model.
+/// Extra width reserved beside the pet while the menu is open. The side is
+/// selected from the available monitor work area.
 pub const MENU_RESERVE_W: f64 = 276.0;
 /// Extra height grown UPWARD while the menu is open, so the tabbed panel can be
 /// taller than the pet window itself without being cut off.
 pub const MENU_RESERVE_H: f64 = 200.0;
 
-/// Grows the window left and up when the menu opens (and shrinks back on close).
-/// The pet stays anchored bottom-right, so only its left/top margin changes and
-/// the model does not move on screen.
-#[tauri::command]
-fn set_menu_open(app: AppHandle, state: State<'_, AppState>, open: bool) {
-    state.menu_open.store(open, Ordering::Relaxed);
+#[derive(Clone, Copy)]
+struct MenuWindow {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
 
-    let Some(win) = app.get_webview_window("main") else {
-        return;
-    };
-    let (layout, scale, kb_scale) = {
-        let s = state.settings.lock().unwrap();
-        (s.keyboard_layout.clone(), s.scale, s.active_keyboard_scale())
-    };
-    let (_bw, _bh) = base_dimensions(&layout, kb_scale);
-    let (base_w, base_h) = window_dimensions(&layout, scale, kb_scale);
+#[derive(Clone, Copy, Default, Serialize)]
+struct MenuPlacement {
+    right: f64,
+    bottom: f64,
+}
 
+/// Reserve room on whichever side of the pet is inside this monitor's work area.
+/// Keep the original pet rectangle separately so closing never leaves it shifted.
+fn place_menu_window(win: &tauri::WebviewWindow, mut base: MenuWindow) -> (MenuWindow, MenuPlacement) {
     let sf = win.scale_factor().unwrap_or(1.0);
-    let old_pos = win.outer_position().ok();
-    let old_size = win.outer_size().ok();
-
-    let (target_w, target_h) = if open {
-        (
-            (base_w + MENU_RESERVE_W).max(MIN_WINDOW_WIDTH),
-            base_h + MENU_RESERVE_H,
-        )
-    } else {
-        (base_w, base_h)
+    let monitor = win.current_monitor().ok().flatten().or_else(|| win.primary_monitor().ok().flatten());
+    let (mut x, mut y) = (base.x - (MENU_RESERVE_W * sf).round() as i32,
+                          base.y - (MENU_RESERVE_H * sf).round() as i32);
+    let (mut width, mut height) = (base.width + (MENU_RESERVE_W * sf).round() as i32,
+                                  base.height + (MENU_RESERVE_H * sf).round() as i32);
+    if let Some(monitor) = monitor {
+        let work = monitor.work_area();
+        let (origin, size) = if work.size.width > 0 && work.size.height > 0 {
+            (work.position, work.size)
+        } else { (*monitor.position(), *monitor.size()) };
+        let pad = (8.0 * sf).round() as i32;
+        let left = origin.x + pad;
+        let top = origin.y + pad;
+        let right = origin.x + size.width as i32 - pad;
+        let bottom = origin.y + size.height as i32 - pad;
+        width = width.min((right - left).max(1));
+        height = height.min((bottom - top).max(1));
+        base.x = base.x.clamp(left, (right - base.width).max(left));
+        base.y = base.y.clamp(top, (bottom - base.height).max(top));
+        // Prefer the right when the pet is on the left half of the work area.
+        let on_left = base.x + base.width / 2 <= (left + right) / 2;
+        x = if on_left { base.x } else { base.x + base.width - width };
+        y = base.y + base.height - height;
+        x = x.clamp(left, (right - width).max(left));
+        y = y.clamp(top, (bottom - height).max(top));
+    }
+    let _ = win.set_size(tauri::PhysicalSize::new(width.max(1) as u32, height.max(1) as u32));
+    let _ = win.set_position(PhysicalPosition::new(x, y));
+    let placement = MenuPlacement {
+        right: (x + width - base.x - base.width) as f64 / sf,
+        bottom: (y + height - base.y - base.height) as f64 / sf,
     };
-    let _ = win.set_size(Size::Logical(LogicalSize::new(target_w, target_h)));
+    let _ = win.emit("kuro-menu-layout", placement);
+    (base, placement)
+}
 
-    // Keep the bottom-right corner pinned: shift left/up by exactly the size we added.
-    if let (Some(pos), Some(sz)) = (old_pos, old_size) {
-        let new_pw = (target_w * sf).round() as i32;
-        let new_ph = (target_h * sf).round() as i32;
-        let new_x = pos.x + sz.width as i32 - new_pw;
-        let new_y = pos.y + sz.height as i32 - new_ph;
-        if new_x != pos.x || new_y != pos.y {
-            let _ = win.set_position(PhysicalPosition::new(new_x, new_y));
+#[tauri::command]
+fn set_menu_open(app: AppHandle, state: State<'_, AppState>, open: bool) -> MenuPlacement {
+    let Some(win) = app.get_webview_window("main") else { return MenuPlacement::default(); };
+    let mut saved = state.menu_window.lock().unwrap();
+    if open {
+        let base = saved.unwrap_or_else(|| {
+            let pos = win.outer_position().unwrap_or_default();
+            let size = win.outer_size().unwrap_or_default();
+            MenuWindow { x: pos.x, y: pos.y, width: size.width as i32, height: size.height as i32 }
+        });
+        let (base, placement) = place_menu_window(&win, base);
+        *saved = Some(base);
+        state.menu_open.store(true, Ordering::Relaxed);
+        placement
+    } else {
+        if let Some(base) = saved.take() {
+            let _ = win.set_size(tauri::PhysicalSize::new(base.width.max(1) as u32, base.height.max(1) as u32));
+            let _ = win.set_position(PhysicalPosition::new(base.x, base.y));
         }
+        state.menu_open.store(false, Ordering::Relaxed);
+        let placement = MenuPlacement::default();
+        let _ = win.emit("kuro-menu-layout", placement);
+        placement
     }
 }
 
@@ -1886,6 +1944,7 @@ pub fn run() {
         .manage(AppState {
             settings: settings_arc,
             menu_open,
+            menu_window: Mutex::new(None),
             dragging,
             mcp_enabled,
             update_banner_open,

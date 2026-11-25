@@ -13,6 +13,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { KuroCatEngine, type KeyboardOrientation, type TailKeyMode, DEFAULT_TAIL_KEY_IDS } from './catEngine';
 import type { CollarColorId, KuroCatEngine3D } from './catEngine3d';
 import { catAudio } from './audio';
+import { InputSounds, DEFAULT_INPUT_SOUND, normalizeInputSound, type InputSoundConfig } from './inputSounds';
+import { setDesktopPetInsets } from './petMotion';
 import { DEFAULT_BUILTIN_CATS, type CatSkinConfig } from './catSkins';
 import type { KeyboardLayoutId } from './keyboardLayout';
 import { getKeyboardLayout } from './keyboardLayout';
@@ -50,6 +52,9 @@ import {
   type PropKind,
   type PropSide,
 } from './prop';
+
+const inputSounds = new InputSounds(() => catAudio.getContext());
+
 interface AppSettings {
   x: number | null;
   y: number | null;
@@ -58,6 +63,7 @@ interface AppSettings {
   clickThroughLocked: boolean;
   showKeyBubbles: boolean;
   soundEnabled: boolean;
+  inputSound: InputSoundConfig;
   autostart: boolean;
   catBreed: string;
   mcpEnabled: boolean;
@@ -72,6 +78,7 @@ interface AppSettings {
   deskSkins: DeskSkinConfig[];
   propConfig: PropConfig;
   keycapOverrides: Record<string, KeycapOverride>;
+  keycapOverrides3d: Record<string, KeycapOverride> | null;
   idleActionsEnabled: boolean;
   idleDelaySec: number;
   idleActionRequest: string;
@@ -145,6 +152,7 @@ let settings: AppSettings = {
   clickThroughLocked: false,
   showKeyBubbles: true,
   soundEnabled: true,
+  inputSound: { ...DEFAULT_INPUT_SOUND },
   autostart: false,
   catBreed: 'black',
   mcpEnabled: true,
@@ -159,6 +167,7 @@ let settings: AppSettings = {
   deskSkins: [...BUILTIN_DESK_SKINS],
   propConfig: { ...DEFAULT_PROP },
   keycapOverrides: {},
+  keycapOverrides3d: {},
   idleActionsEnabled: true,
   idleDelaySec: 6,
   idleActionRequest: '',
@@ -258,7 +267,7 @@ function syncEngine3DState(): void {
   engine3d.setTailKeyConfig(tailMode, tailIds);
   engine3d.setPropConfig(settings.propConfig);
   engine3d.setLightConfig(settings.keyboardLight);
-  engine3d.setKeycapOverrides(settings.keycapOverrides);
+  engine3d.setKeycapOverrides(settings.keycapOverrides3d ?? settings.keycapOverrides);
   engine3d.setPrivacyMode(privacyActive);
   engine3d.resize();
 }
@@ -626,26 +635,39 @@ function activeLayoutId(): KeyboardLayoutId {
   return settings.keyboardLayout === '108' ? '108' : '65';
 }
 
+function activeKeycaps(): Record<string, KeycapOverride> {
+  return (settings.renderMode === '3d' ? settings.keycapOverrides3d ?? settings.keycapOverrides : settings.keycapOverrides) ?? {};
+}
+
+function saveActiveKeycaps(next: Record<string, KeycapOverride>): void {
+  if (settings.renderMode === '3d') {
+    engine3d?.setKeycapOverrides(next);
+    void applySettingsPatch({ keycapOverrides3d: next });
+  } else {
+    engine.setKeycapOverrides(next);
+    void applySettingsPatch({ keycapOverrides: next, keycapOverrides3d: settings.keycapOverrides3d ?? { ...settings.keycapOverrides } });
+  }
+}
+
 function currentKeycap(id: string): KeycapOverride {
-  return settings.keycapOverrides?.[id] ?? {};
+  return activeKeycaps()[id] ?? {};
 }
 
 function setKeycap(id: string, patch: KeycapOverride | null): void {
-  const next = { ...(settings.keycapOverrides ?? {}) };
+  const next = { ...activeKeycaps() };
   if (patch === null) {
     delete next[id];
   } else {
     next[id] = { ...next[id], ...patch };
   }
-  engine.setKeycapOverrides(next);
-  void applySettingsPatch({ keycapOverrides: next });
+  saveActiveKeycaps(next);
   renderKeycapGrid();
 }
 
 function renderKeycapGrid(): void {
   if (!kceGridEl) return;
   const layout = getKeyboardLayout(activeLayoutId());
-  const overrides = settings.keycapOverrides ?? {};
+  const overrides = activeKeycaps();
   const parts: string[] = [];
   for (const key of layout.keys) {
     const rY = key.rowY ?? key.row;
@@ -656,8 +678,8 @@ function renderKeycapGrid(): void {
     const height = (rSpan / layout.totalRows) * 100;
     const ov = overrides[key.id];
     const bg = ov?.top ?? '#e8e9e4';
-    const fg = ov?.text ?? '#2c2f36';
-    const glyph = ov?.emoji || ov?.label || key.label;
+    const fg = settings.renderMode === '3d' ? '#2c2f36' : ov?.text ?? '#2c2f36';
+    const glyph = settings.renderMode === '3d' ? key.label : ov?.emoji || ov?.label || key.label;
     const sel = kcSelectedKeyId === key.id ? ' selected' : '';
     parts.push(
       `<button class="kce-key${sel}" data-kcekey="${key.id}" style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${width.toFixed(2)}%;height:${height.toFixed(2)}%;background:${bg};color:${fg}" title="${key.id}">${glyph}</button>`,
@@ -671,8 +693,10 @@ function renderKeycapGrid(): void {
       const ov = currentKeycap(kcSelectedKeyId);
       const bits = [key?.label || kcSelectedKeyId];
       if (ov.top) bits.push(ov.top);
-      if (ov.emoji) bits.push(ov.emoji);
-      if (ov.label) bits.push(`“${ov.label}”`);
+      if (settings.renderMode !== '3d') {
+        if (ov.emoji) bits.push(ov.emoji);
+        if (ov.label) bits.push(`“${ov.label}”`);
+      }
       kceSelectedEl.textContent = `已选中：${bits.join(' · ')}`;
     } else {
       kceSelectedEl.textContent = '未选择按键（点上方键盘）';
@@ -707,10 +731,12 @@ function openKeycapDesigner(): void {
   kcSelectedKeyId = null;
   renderKeycapGrid();
   kceEl.classList.remove('hidden');
+  repositionMenu();
 }
 
 function closeKeycapDesigner(): void {
   kceEl?.classList.add('hidden');
+  repositionMenu();
 }
 
 function syncLightUI(): void {  const cfg = currentLight();
@@ -816,7 +842,7 @@ function syncMenuUI(): void {
   engine3d?.setLightConfig(settings.keyboardLight);
   engine.setDeskSkin(activeDeskSkin());
   engine.setKeycapOverrides(settings.keycapOverrides);
-  engine3d?.setKeycapOverrides(settings.keycapOverrides);
+  engine3d?.setKeycapOverrides(settings.keycapOverrides3d ?? settings.keycapOverrides);
   engine.setPropConfig(settings.propConfig);
   engine3d?.setPropConfig(settings.propConfig);
   engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
@@ -836,8 +862,33 @@ function syncMenuUI(): void {
     engine.setRenderScale(settings.scale);
   }
   catAudio.setEnabled(settings.soundEnabled);
-  pushHitRegions();
+  settings.inputSound = normalizeInputSound(settings.inputSound);
+  inputSounds.configure(settings.inputSound);
+  for (const kind of ['keyboard', 'mouse'] as const) {
+    const el = document.getElementById('sound-' + kind) as HTMLInputElement | null;
+    if (el) el.checked = settings.inputSound[kind];
+  }
+  const profile = document.getElementById('sound-profile') as HTMLSelectElement | null;
+  if (profile) profile.value = settings.inputSound.profile;
+  const volume = document.getElementById('sound-volume') as HTMLInputElement | null;
+  if (volume) volume.value = String(Math.round(settings.inputSound.volume * 100));
+  const volumeText = document.getElementById('sound-volume-value');
+  if (volumeText) volumeText.textContent = Math.round(settings.inputSound.volume * 100) + '%';
+  const modeName = settings.renderMode === '3d' ? '3D' : '2D';
+  for (const id of ['keycap-mode-title', 'keycap-designer-title']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = modeName + (id === 'keycap-mode-title' ? ' 键帽 DIY · 独立保存' : ' 键帽设计器');
+  }
+  document.querySelectorAll<HTMLElement>('[data-model-only]').forEach((el) => {
+    el.hidden = el.dataset.modelOnly !== settings.renderMode;
+  });
+  const keycapHint = document.getElementById('kce-hint');
+  if (keycapHint) keycapHint.textContent = settings.renderMode === '3d'
+    ? '点选下方任意按键，再挑颜色；3D 当前支持顶面配色'
+    : '点选下方任意按键，再挑颜色 / 图标';
   if (kceEl && !kceEl.classList.contains('hidden')) renderKeycapGrid();
+  repositionMenu();
+  pushHitRegions();
 }
 
 let lastHitRegionsJson = '';
@@ -896,23 +947,36 @@ function pushHitRegions(): void {
   }
 }
 
-function closeContextMenu(): void {
+let menuWindowQueue: Promise<unknown> = Promise.resolve();
+function applyMenuPlacement(placement: { right: number; bottom: number } | null): void {
+  setDesktopPetInsets(placement);
+  engine.resize();
+  engine3d?.resize();
+  requestAnimationFrame(() => { repositionMenu(); pushHitRegions(); });
+}
+function requestMenuWindow(open: boolean): Promise<unknown> {
+  menuWindowQueue = menuWindowQueue.catch(() => {}).then(async () => {
+    const placement = await invoke<{ right: number; bottom: number } | null>('set_menu_open', { open });
+    applyMenuPlacement(placement);
+  });
+  return menuWindowQueue;
+}
+function closeContextMenu(): Promise<void> {
   if (!menuEl.classList.contains('hidden')) {
     menuEl.classList.add('hidden');
-    void invoke('set_menu_open', { open: false });
+    const closed = requestMenuWindow(false).catch(() => applyMenuPlacement(null));
     syncWin7OverlayFn?.(false);
-    // Drop the menu rect so Rust stops treating that margin as clickable.
     pushHitRegions();
+    return closed.then(() => {});
   }
+  return menuWindowQueue.then(() => {}, () => {});
 }
 
 /**
  * Places the menu beside the pet rather than on top of it.
  *
- * The pet is anchored to the bottom-right of the window, so there is usually room
- * to its left; if not, we fall back to the right edge and finally above it. The
- * pet box comes straight from the engine's render transform, so the menu cannot
- * drift onto the model when the window size or display scale changes.
+ * Native placement reserves room on the side that fits the monitor work area.
+ * Shared viewport insets keep the pet fixed; the panel is clamped to that window.
  */
 function repositionMenu(): void {
   if (menuEl.classList.contains('hidden')) return;
@@ -935,8 +999,7 @@ function repositionMenu(): void {
   const leftOfPet = petLeft - rect.width - gap;
   const rightOfPet = petRight + gap;
 
-  // Rust widens the window to the left when the menu opens, so `leftOfPet` is
-  // normally positive and the menu lands in that reserved margin.
+  // Native layout reserves whichever margin fits inside the monitor work area.
   if (leftOfPet >= pad) {
     left = leftOfPet;
   } else if (rightOfPet + rect.width <= vw - pad) {
@@ -947,6 +1010,7 @@ function repositionMenu(): void {
     left = clampX(petLeft + pet.width - rect.width);
     menuEl.style.left = `${left}px`;
     menuEl.style.top = `${clampY(above >= pad ? above : vh - rect.height - pad)}px`;
+    pushHitRegions();
     return;
   }
 
@@ -958,34 +1022,18 @@ function repositionMenu(): void {
   pushHitRegions();
 }
 
-function openContextMenu(clientX: number, clientY: number): void {
+function openContextMenu(_clientX: number, _clientY: number): void {
+  if (!menuEl.classList.contains('hidden')) { repositionMenu(); return; }
   syncMenuUI();
+  menuEl.style.visibility = 'hidden';
   menuEl.classList.remove('hidden');
-
-  // Place beside the pet first so the reserved margin is computed for a menu that
-  // is already where it belongs; the window resize then lands around it.
-  const rect = menuEl.getBoundingClientRect();
-  if (rect.width < 40) {
-    // Layout not settled yet (first open): place off the click, refine next frame.
-    menuEl.style.left = `${Math.max(8, clientX)}px`;
-    menuEl.style.top = `${Math.max(8, clientY)}px`;
-    requestAnimationFrame(repositionMenu);
-  } else {
-    repositionMenu();
-  }
-
-  // Widening the window is async, and the resize re-lays the canvas out — so the
-  // menu has to be re-anchored once the new viewport size actually lands.
-  void invoke('set_menu_open', { open: true })
-    .then(() => {
-      requestAnimationFrame(() => {
-        repositionMenu();
-        requestAnimationFrame(repositionMenu);
-      });
-    })
-    .catch(() => {
-      // Browser preview: nothing to widen, the first placement already stands.
+  void requestMenuWindow(true).catch(() => applyMenuPlacement(null)).finally(() => {
+    requestAnimationFrame(() => {
+      repositionMenu();
+      menuEl.style.visibility = '';
+      pushHitRegions();
     });
+  });
   syncWin7OverlayFn?.(true);
 }
 
@@ -1430,15 +1478,50 @@ async function bootstrap(): Promise<void> {
     });
   }
 
+  // WebView audio unlock needs a trusted gesture; global hooks must not queue old clicks.
+  document.addEventListener('pointerdown', () => inputSoundsEnabled() && catAudio.unlock(), { capture: true });
+  document.addEventListener('keydown', () => inputSoundsEnabled() && catAudio.unlock(), { capture: true });
+  function inputSoundsEnabled(): boolean {
+    return settings.soundEnabled || settings.inputSound?.keyboard || settings.inputSound?.mouse;
+  }
+  for (const kind of ['keyboard', 'mouse'] as const) {
+    document.getElementById('sound-' + kind)?.addEventListener('change', (event) => {
+      void applySettingsPatch({ inputSound: { ...normalizeInputSound(settings.inputSound), [kind]: (event.target as HTMLInputElement).checked } });
+    });
+    document.getElementById('preview-' + kind)?.addEventListener('click', () => void inputSounds.preview(kind));
+  }
+  document.getElementById('sound-profile')?.addEventListener('change', (event) => {
+    const profile = (event.target as HTMLSelectElement).value as InputSoundConfig['profile'];
+    void applySettingsPatch({ inputSound: { ...normalizeInputSound(settings.inputSound), profile } });
+  });
+  const soundVolume = document.getElementById('sound-volume') as HTMLInputElement | null;
+  soundVolume?.addEventListener('input', () => {
+    settings.inputSound = { ...normalizeInputSound(settings.inputSound), volume: Number(soundVolume.value) / 100 };
+    inputSounds.configure(settings.inputSound);
+    document.getElementById('sound-volume-value')!.textContent = soundVolume.value + '%';
+  });
+  soundVolume?.addEventListener('change', () => void applySettingsPatch({ inputSound: settings.inputSound }));
+
   // ---- Keycap designer ----
   // Tab switching (menu stays a single scroll-free panel per tab).
   document.querySelectorAll<HTMLButtonElement>('.menu-tab-btn').forEach((btn) => {
+    btn.addEventListener('keydown', (event) => {
+      const tabs = [...document.querySelectorAll<HTMLButtonElement>('.menu-tab-btn')];
+      const index = tabs.indexOf(btn);
+      const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+        : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+        : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      tabs[next].click(); tabs[next].focus();
+    });
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const tab = btn.dataset.tab ?? 'appearance';
       document.querySelectorAll('.menu-tab-btn').forEach((b) => {
         b.classList.toggle('active', b === btn);
         b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+        (b as HTMLButtonElement).tabIndex = b === btn ? 0 : -1;
       });
       document.querySelectorAll<HTMLElement>('[data-tab-panel]').forEach((p) => {
         p.classList.toggle('active', p.dataset.tabPanel === tab);
@@ -1503,8 +1586,7 @@ async function bootstrap(): Promise<void> {
   });
   document.getElementById('kce-clear-all')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    engine.setKeycapOverrides({});
-    void applySettingsPatch({ keycapOverrides: {} });
+    saveActiveKeycaps({});
     renderKeycapGrid();
   });
 
@@ -1540,10 +1622,15 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  await safeListen<{ right: number; bottom: number }>('kuro-menu-layout', (ev) => applyMenuPlacement(ev.payload));
+
   await safeListen<InputEvent>('kuro-input', (ev) => {
     const p = ev.payload;
-    // Both engines stay in sync: the hidden one costs nothing and keeps its state
-    // warm, so switching render mode never replays a burst of stale input.
+    if (!privacyActive) {
+      if (p.kind === 'keyDown') inputSounds.keyDown(p.repeat);
+      if (p.kind === 'mouseDown') inputSounds.mouseDown(p.button);
+    }
+    // Only the visible engine receives input. Audio plays once per hook event.
     const targets = active3d && engine3d ? [engine3d] : [engine];
     for (const eng of targets) {
       switch (p.kind) {
@@ -1580,6 +1667,7 @@ async function bootstrap(): Promise<void> {
 
   await safeListen<boolean>('kuro-privacy', (ev) => {
     privacyActive = Boolean(ev.payload);
+    inputSounds.setPrivacy(privacyActive);
     engine.setPrivacyMode(privacyActive);
     engine3d?.setPrivacyMode(privacyActive);
   });
@@ -1602,7 +1690,7 @@ async function bootstrap(): Promise<void> {
   // swallow every pointer event, leaving the 3D pet undraggable and unselectable.
   const onCanvasPointerDown = async (e: MouseEvent, source: HTMLCanvasElement): Promise<void> => {
     if (e.button !== 0) return;
-    closeContextMenu();
+    const menuClosed = closeContextMenu();
     if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
     // Clicking the drink refills an empty cup instead of dragging the window.
     if (active3d && engine3d) {
@@ -1611,7 +1699,7 @@ async function bootstrap(): Promise<void> {
         if (result === 'refilled') {
           showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
         } else if (result === 'sipped') {
-          showUpdateToast('🐾 猫猫喝了一口', { autoHideMs: 1800 });
+          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
         }
         return;
       }
@@ -1622,11 +1710,12 @@ async function bootstrap(): Promise<void> {
         if (result === 'refilled') {
           showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
         } else if (result === 'sipped') {
-          showUpdateToast('🐾 猫猫喝了一口', { autoHideMs: 1800 });
+          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
         }
         return;
       }
     }
+    await menuClosed; // Restore the pet window before the native drag loop starts.
     source.classList.add('pet-dragging');
     void invoke('set_dragging', { dragging: true });
     try {
@@ -1634,6 +1723,7 @@ async function bootstrap(): Promise<void> {
     } finally {
       source.classList.remove('pet-dragging');
       engine.onMouseUp('left');
+      engine3d?.onMouseUp('left');
       void invoke('set_dragging', { dragging: false });
       void invoke('save_window_pos');
     }
@@ -1749,14 +1839,12 @@ async function bootstrap(): Promise<void> {
     const diy = target.dataset.diy;
     if (diy) {
       if (diy === 'clear') {
-        engine.setKeycapOverrides({});
-        void applySettingsPatch({ keycapOverrides: {} });
+        saveActiveKeycaps({});
       } else {
         const preset = KEYCAP_DIY_PRESETS[diy];
         if (preset) {
-          const merged = { ...settings.keycapOverrides, ...preset };
-          engine.setKeycapOverrides(merged);
-          void applySettingsPatch({ keycapOverrides: merged });
+          const merged = { ...activeKeycaps(), ...preset };
+          saveActiveKeycaps(merged);
         }
       }
       renderKeycapGrid();

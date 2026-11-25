@@ -61,6 +61,8 @@ const DEFAULT_SETTINGS = {
     sipIntervalMax: 110,
   },
   keycapOverrides: {},
+  keycapOverrides3d: null,
+  inputSound: { keyboard: false, mouse: false, profile: 'linear', volume: 0.35 },
   idleActionsEnabled: true,
   idleDelaySec: 6,
   idleActionRequest: '',
@@ -92,6 +94,7 @@ export function installTauriPreviewShim(): boolean {
     store = {};
   }
   store.settings = { ...DEFAULT_SETTINGS, ...(store.settings || {}) };
+  store.settings.keycapOverrides3d ??= { ...(store.settings.keycapOverrides as Record<string, unknown> ?? {}) };
   store.cats ??= [];
   store.deskSkins ??= [];
 

@@ -89,7 +89,8 @@ const { KuroCatEngine3D } = await import('../src/catEngine3d.ts');
 const { KuroCatEngine } = await import('../src/catEngine.ts');
 const { DEFAULT_PROP } = await import('../src/prop.ts');
 const { DEFAULT_BUILTIN_CATS, resolveCustomSkin } = await import('../src/catSkins.ts');
-const { clipAngryEyelid, STRIKE_DURATION } = await import('../src/petMotion.ts');
+const { clipAngryEyelid, STRIKE_DURATION, setDesktopPetInsets } = await import('../src/petMotion.ts');
+const { InputSounds, normalizeInputSound } = await import('../src/inputSounds.ts');
 
 function engine3d() {
   window.innerWidth = 420;
@@ -449,4 +450,156 @@ test('new gestures work in both modes and yield to drinks/privacy', () => {
   spatial.triggerIdleAction('wave');
   assert.equal(spatial.idleAct, null);
   spatial.stop();
+});
+
+
+test('passive cursor events do not cancel drinks, but typing and privacy return the prop', () => {
+  for (const kind of ['coffee', 'cola', 'energy', 'boba', 'pudding']) {
+    const e = engine3d();
+    e.setPropConfig(propConfig(kind));
+    e.clickProp();
+    for (let i = 0; i < 250; i++) {
+      e.onGlobalMouseMove(0.25 + 0.06 * Math.sin(i * 0.3), 0.35);
+      e.onWindowCursor(0.4, 0.5, true);
+      if (i === 4) e.onMouseDown('left');
+      if (i === 5) e.onMouseUp('left');
+      tick(e, 1 / 60);
+    }
+    near(e.propLevel, 0.9, 1e-6, kind + ' consumed once');
+    assert.equal(e.propPhase, 'rest');
+    e.clickProp(); tick(e, 0.7); e.onKeyDown(65); e.onKeyUp(65); tick(e, 2);
+    near(e.propLevel, 0.9, 1e-6, 'interrupted sip is not consumed');
+    e.clickProp(); tick(e, 0.7); e.setPrivacyMode(true); tick(e, 2);
+    assert.equal(e.propPhase, 'rest');
+    near(e.propLevel, 0.9);
+  }
+});
+
+test('left/right menu margins preserve desktop anchors and 2D hit mapping', () => {
+  try {
+    for (const layout of ['65', '108']) for (const scale of [0.7, 1, 1.5]) {
+      setDesktopPetInsets(null);
+      const e = engine3d();
+      e.setKeyboardConfig(layout, 'cat');
+      const logical = layout === '65' ? { w: 420, h: 440 } : { w: 530, h: 446 };
+      e.setLogicalSize(logical); e.setRenderScale(scale);
+      window.innerWidth = logical.w * scale; window.innerHeight = logical.h * scale; e.resize();
+      const before = e.getPetScreenRect();
+      for (const right of [0, 276]) for (const bottom of [0, 140]) {
+        window.innerWidth = logical.w * scale + 276;
+        window.innerHeight = logical.h * scale + 200;
+        setDesktopPetInsets({ right, bottom }); e.resize();
+        const after = e.getPetScreenRect();
+        near(after.width, before.width); near(after.height, before.height);
+        near(after.left - before.left, 276 - right);
+        near(after.top - before.top, 200 - bottom);
+        const canvas2 = makeCanvas();
+        canvas2.getBoundingClientRect = () => ({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+        const e2 = new KuroCatEngine(canvas2); e2.setRenderScale(scale); e2.setKeyboardConfig(layout, 'cat'); e2.resize();
+        const pt = { x: 125, y: 185 };
+        // clientToLogical must invert exactly the same shifted draw transform.
+        const r2 = e2.getPetScreenRect();
+        const local = e2.clientToLogical(r2.left + pt.x * r2.width / e2.getLogicalSize().w, r2.top + pt.y * r2.height / e2.getLogicalSize().h);
+        near(local.x, pt.x); near(local.y, pt.y);
+      }
+    }
+  } finally { setDesktopPetInsets(null); }
+});
+
+test('ground roll turns belly upward, keeps limbs attached, clears the floor and recovers at 30/60 FPS', () => {
+  for (const dt of [1 / 30, 1 / 60]) for (const side of [-1, 1]) {
+    const e = engine3d(); e.setPropConfig(propConfig()); e.setHeadphones(true); e.triggerIdleAction('roll'); e.idleAct.side = side;
+    const q = e.rollRoot.quaternion.clone();
+    let bellyUp = false;
+    for (let i = 0; i < Math.ceil(5.2 / dt); i++) {
+      tick(e, dt, dt);
+      assert.ok(e.rollRoot.position.toArray().every(Number.isFinite));
+      assert.ok(q.angleTo(e.rollRoot.quaternion) < 0.22, 'no rotation jump'); q.copy(e.rollRoot.quaternion);
+      if (new Vector3(0, 0, 1).applyQuaternion(q).y > 0.85) bellyUp = true;
+      assert.equal(e.catShadow.parent, e.scene, 'shadow stays on floor');
+      for (const arm of e.arms) {
+        assert.equal(arm.paw.parent, e.rollRoot);
+        const actual = arm.paw.getWorldPosition(new Vector3());
+        const wrist = arm.limb.caps[1].getWorldPosition(new Vector3());
+        assert.ok(actual.distanceTo(wrist) < 0.025, 'paw remains connected to the arm endpoint');
+        const shoulder = arm.limb.caps[0].getWorldPosition(new Vector3());
+        const bodyAnchor = arm.shoulder.clone().applyMatrix4(e.rollRoot.matrixWorld);
+        nearVector(shoulder, bodyAnchor);
+      }
+      if (e.rollPose.tuck > 0.2) {
+        let minY = Infinity;
+        e.rollRoot.traverseVisible((o) => {
+          if (!o.isMesh || o === e.bodyMesh) return;
+          const positions = o.geometry.getAttribute('position');
+          for (let k = 0; k < positions.count; k++) {
+            minY = Math.min(minY, new Vector3().fromBufferAttribute(positions, k).applyMatrix4(o.matrixWorld).y);
+          }
+        });
+        assert.ok(minY >= -0.002, 'ears, paws, tail and accessories above the floor: ' + minY);
+        assert.equal(e.clickProp(), 'busy');
+      }
+    }
+    assert.ok(bellyUp, 'must actually roll onto its back');
+    near(e.rollRoot.quaternion.angleTo(q.identity()), 0); near(e.rollRoot.position.length(), 0);
+    assert.equal(e.idleAct, null);
+    e.triggerIdleAction('roll'); tick(e, 2.35, dt);
+    const previous = e.rollRoot.quaternion.clone();
+    e.onKeyDown(65); e.onKeyUp(65); tick(e, dt, dt);
+    assert.ok(previous.angleTo(e.rollRoot.quaternion) < 0.15, 'interruption preserves current pose');
+    tick(e, 1.5, dt);
+    near(e.rollRoot.quaternion.angleTo(q.identity()), 0); near(e.rollRoot.position.length(), 0);
+    e.setPropConfig(propConfig()); assert.equal(e.clickProp(), 'sipped');
+    e.triggerIdleAction('roll'); assert.notEqual(e.idleAct?.kind, 'roll', 'cannot roll with a cup');
+  }
+});
+
+function audioContext() {
+  return {
+    state: 'running', currentTime: 0, sampleRate: 12000, destination: {}, sources: [], gains: [],
+    async resume() { this.state = 'running'; },
+    createBuffer(_channels, length) { const data = new Float32Array(length); return { getChannelData: () => data }; },
+    createGain() {
+      const gain = { gain: { value: 1 }, connect() {}, disconnect() { this.disconnected = true; } };
+      this.gains.push(gain); return gain;
+    },
+    createBufferSource() {
+      const source = { playbackRate: { value: 1 }, onended: null, connect() {},
+        start() { this.started = true; }, stop() { this.stopped = true; }, disconnect() { this.disconnected = true; } };
+      this.sources.push(source); return source;
+    },
+  };
+}
+test('input sound toggles, repeats, privacy, voice limits and suspended audio do not leak or replay', async () => {
+  const ctx = audioContext(); const sound = new InputSounds(() => ctx);
+  sound.keyDown(); sound.mouseDown('left'); assert.equal(ctx.sources.length, 0);
+  sound.configure({ keyboard: true, mouse: true, profile: 'linear', volume: 0.4 });
+  sound.keyDown(true); assert.equal(ctx.sources.length, 0);
+  sound.keyDown(); sound.mouseDown('left'); assert.equal(ctx.sources.length, 2);
+  for (let i = 0; i < 30; i++) { ctx.currentTime += 0.01; sound.keyDown(); }
+  assert.equal(sound.voices.size, 12); assert.ok(ctx.sources[0].stopped);
+  sound.setPrivacy(true); assert.equal(sound.voices.size, 0);
+  assert.ok(ctx.sources.every(s => s.disconnected)); assert.ok(ctx.gains.every(g => g.disconnected));
+  await sound.preview('keyboard'); sound.keyDown(); assert.equal(sound.voices.size, 0);
+  sound.setPrivacy(false); ctx.state = 'suspended'; ctx.currentTime += 1; sound.keyDown();
+  assert.equal(sound.voices.size, 0);
+  await sound.preview('mouse'); assert.equal(sound.voices.size, 1);
+  const final = ctx.sources.at(-1); final.onended(); assert.equal(sound.voices.size, 0); assert.ok(final.disconnected);
+  sound.configure({ keyboard: true, mouse: false, volume: 0.4 }); ctx.currentTime += 1;
+  sound.mouseDown('left'); assert.equal(sound.voices.size, 0); sound.keyDown(); assert.equal(sound.voices.size, 1);
+  sound.configure({ volume: 0 }); assert.equal(sound.voices.size, 0);
+  assert.equal(normalizeInputSound({ volume: NaN, profile: 'invalid' }).profile, 'linear');
+  assert.equal(normalizeInputSound({ volume: 10 }).volume, 1);
+});
+
+test('all synthesized switch profiles produce different bounded, finite, short samples', async () => {
+  const ctx = audioContext(); const sound = new InputSounds(() => ctx); const samples = [];
+  for (const profile of ['linear', 'tactile', 'clicky', 'silent']) {
+    sound.configure({ profile, volume: 0.4 }); ctx.currentTime += 1;
+    await sound.preview('keyboard');
+    const data = ctx.sources.at(-1).buffer.getChannelData(0);
+    assert.ok(data.every(v => Number.isFinite(v) && Math.abs(v) <= 1));
+    near(data[0], 0); assert.ok(Math.abs(data.at(-1)) < 0.001);
+    for (const previous of samples) assert.notDeepEqual(data, previous);
+    samples.push(data);
+  }
 });

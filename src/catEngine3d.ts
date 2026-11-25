@@ -1,5 +1,6 @@
 import { petViewport, strikeHeight, STRIKE_IMPACT, STRIKE_RELEASE, STRIKE_DURATION } from './petMotion';
 import * as THREE from 'three';
+import { GROUND_ROLL_DURATION, groundRollPose, recoverGroundRoll, type GroundRollPose } from './groundRoll3d';
 import type { CatSkinConfig } from './catSkins';
 import type { KeyboardLayoutId } from './keyboardLayout';
 import type { KeyboardOrientation, TailKeyMode } from './catEngine';
@@ -80,7 +81,7 @@ interface Fx3D {
 }
 
 interface IdleAct3D {
-  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk' | 'wave' | 'cuddle';
+  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk' | 'wave' | 'cuddle' | 'roll';
   t0: number;
   dur: number;
   side: -1 | 1;
@@ -517,7 +518,16 @@ export class KuroCatEngine3D {
   private readonly desk: KeyboardAndMouse3D;
   private readonly furSystem = new FurShaderSystem();
 
+  private readonly rollRoot = new THREE.Group();
   private readonly catRoot = new THREE.Group();
+  private catShadow!: THREE.Mesh;
+  private rollPose: GroundRollPose = { lean: 0, twist: 0, tuck: 0, retreat: 0 };
+  private rollRecovery: { from: GroundRollPose; t0: number } | null = null;
+  private readonly rollPoint = new THREE.Vector3();
+  private readonly rollHeadEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  private readonly rollTwist = new THREE.Quaternion();
+  private readonly rollAxisY = new THREE.Vector3(0, 1, 0);
+  private readonly rollAxisZ = new THREE.Vector3(0, 0, 1);
   private readonly homePos = new THREE.Vector3(0.02, 0, -0.02);
   private readonly bodyGeo: THREE.LatheGeometry;
   private readonly bodyMesh: THREE.Mesh;
@@ -746,6 +756,8 @@ export class KuroCatEngine3D {
   private propSipMin = 45;
   private propSipMax = 110;
   private readonly propReturnFrom = new THREE.Vector3();
+  private readonly propReturnRotation = new THREE.Quaternion();
+  private readonly propRestRotation = new THREE.Quaternion();
   private readonly propMouthTarget = new THREE.Vector3();
   private readonly propHome = new THREE.Vector3();
   /** Seconds of silence before random idle fidgets start (user setting). */
@@ -811,13 +823,18 @@ export class KuroCatEngine3D {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.camera = new THREE.PerspectiveCamera(22, 1.35, 0.1, 100);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x73685c, 2.0));
+    const propLight = new THREE.DirectionalLight(0xffffff, 2.2);
+    propLight.position.set(-3, 6, 4);
+    this.scene.add(propLight);
     this.desk = new KeyboardAndMouse3D(this.scene);
     this.pawMat = this.furSystem.createMaterial('PAW');
 
     // 1) Original KuroCat Continuous One-Piece Mochi-Pear Silhouette (exact BODY_SLICES proportions!)
     this.catRoot.position.copy(this.homePos);
     this.catRoot.scale.setScalar(0.90);
-    this.scene.add(this.catRoot);
+    this.scene.add(this.rollRoot);
+    this.rollRoot.add(this.catRoot);
 
     // Soft studio contact shadow underneath the plush sitting body
     const catShadow = new THREE.Mesh(
@@ -831,7 +848,10 @@ export class KuroCatEngine3D {
     );
     catShadow.rotation.x = -Math.PI / 2;
     catShadow.position.set(0, 0.003, 0.02);
-    this.catRoot.add(catShadow);
+    catShadow.position.add(this.homePos);
+    catShadow.scale.setScalar(0.90);
+    this.catShadow = catShadow;
+    this.scene.add(catShadow);
 
     // Exact measured KuroCat BODY_SLICES (forehead 49 -> cheeks 60 -> plush neck 52 -> chest 62 -> belly 70 -> thighs 73 -> base 46)
     const bodyCurve = new THREE.CatmullRomCurve3(
@@ -1089,7 +1109,7 @@ export class KuroCatEngine3D {
       'catmullrom',
       0.5,
     );
-    this.tailLimb = createCleanLimb(this.scene, {
+    this.tailLimb = createCleanLimb(this.rollRoot, {
       segments: 22,
       radial: 10,
       fill: this.furSystem.createMaterial('TAIL'),
@@ -1106,7 +1126,7 @@ export class KuroCatEngine3D {
     singleToeGeo.dispose();
 
     for (const s of [-1, 1] as const) {
-      const limb = createCleanLimb(this.scene, {
+      const limb = createCleanLimb(this.rollRoot, {
         segments: 16,
         radial: 10,
         fill: this.furSystem.createMaterial('ARM', s),
@@ -1120,7 +1140,7 @@ export class KuroCatEngine3D {
 
       const tuckArc = new THREE.Mesh();
       tuckArc.visible = false;
-      this.scene.add(paw);
+      this.rollRoot.add(paw);
       this.arms.push({
         s,
         limb,
@@ -1501,6 +1521,10 @@ export class KuroCatEngine3D {
   public stop(): void {
     this.releaseInputs();
     this.idleAct = null;
+    this.rollPose = { lean: 0, twist: 0, tuck: 0, retreat: 0 };
+    this.rollRecovery = null;
+    this.rollRoot.quaternion.identity();
+    this.rollRoot.position.set(0, 0, 0);
     this.propPhase = 'rest';
     this.placeProp();
     if (this.rafId !== null) {
@@ -1548,6 +1572,7 @@ export class KuroCatEngine3D {
       this.elapsed - this.cursorActiveAt < 2.4 ||
       this.isCross ||
       this.idleAct !== null ||
+      this.rollPose.tuck > 0 ||
       this.propPhase !== 'rest' ||
       this.tailTap.synthetic ||
       this.petting ||
@@ -1795,7 +1820,7 @@ export class KuroCatEngine3D {
 
   /** Clicking the cup refills it, or drinks from it if it still has liquid. */
   public clickProp(): 'refilled' | 'sipped' | 'busy' {
-    if (!this.propHandle || this.privacyMode) return 'busy';
+    if (!this.propHandle || this.privacyMode || this.rollPose.tuck > 0 || this.idleAct?.kind === 'roll') return 'busy';
     if (this.propPhase !== 'rest') return 'busy';
     this.wake();
     this.finishTailStrike();
@@ -1880,6 +1905,7 @@ export class KuroCatEngine3D {
   private returnProp(): void {
     if (!this.propHandle || this.propPhase === 'rest' || this.propPhase === 'return') return;
     this.propReturnFrom.copy(this.propHandle.group.position);
+    this.propReturnRotation.copy(this.propHandle.group.quaternion);
     this.propPhase = 'return';
     this.propPhaseT = 0;
   }
@@ -1918,6 +1944,16 @@ export class KuroCatEngine3D {
     if (!handle) return;
     const cup = handle.group;
     const home = this.getPropHome(this.propHome);
+    const yaw = this.propSide === 'left' ? 0.30 : -0.30;
+    this.propRestRotation.setFromEuler(new THREE.Euler(0, yaw, 0));
+    const tilt = this.propKind === 'boba' ? 0.06 : this.propKind === 'pudding' ? 0.12 : 0.65;
+    const lift = this.propPhase === 'sip' ? 1 : this.propPhase === 'lift'
+      ? smoothstep(0, 1, clamp(this.propPhaseT / this.propPhaseDur.lift, 0, 1)) : 0;
+    cup.rotation.set(-tilt * lift, yaw, 0);
+    if (this.propPhase === 'return') {
+      cup.quaternion.copy(this.propReturnRotation).slerp(this.propRestRotation,
+        smoothstep(0, 1, clamp(this.propPhaseT / this.propPhaseDur.return, 0, 1)));
+    }
     this.headMount.updateWorldMatrix(true, false);
     this.propMouthTarget.set(0, -0.08, this.surfaceZ(0, -0.08) + 0.04).applyMatrix4(this.headMount.matrixWorld);
     this.tmpV1.copy(handle.mouthAnchor).applyQuaternion(cup.quaternion);
@@ -2014,12 +2050,12 @@ export class KuroCatEngine3D {
   }
 
   public triggerIdleAction(rawKind: string): void {
-    if (this.privacyMode || this.propPhase !== 'rest') return;
-    const kind = rawKind === 'sleep' ? 'nap' : rawKind === 'roll' ? 'cuddle' : rawKind;
+    if (this.privacyMode || this.propPhase !== 'rest' || this.rollPose.tuck > 0) return;
+    const kind = rawKind === 'sleep' ? 'nap' : rawKind;
     if (kind === 'drink') { this.clickProp(); return; }
     if (kind === 'nap') { this.triggerSleepDemo(); return; }
     const durations: Partial<Record<IdleAct3D['kind'], number>> = {
-      stretch: 2.8, wave: 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4,
+      stretch: 2.8, wave: 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION,
     };
     const dur = durations[kind as IdleAct3D['kind']];
     if (!dur) return;
@@ -2062,6 +2098,7 @@ export class KuroCatEngine3D {
     const k = this.desk.resolveKey(vk);
     if (!k) return;
     this.wake();
+    this.returnProp(); // Real typing yields the paw; passive cursor motion must not cancel a sip.
     this.heldKeys.add(k.spec.id);
     if (repeat) return;
 
@@ -2156,7 +2193,7 @@ export class KuroCatEngine3D {
       return;
     }
 
-    this.wake();
+    this.wake(false);
     const gap = this.elapsed - this.lastSampleT;
     if (this.lastSampleX !== null && this.lastSampleY !== null && gap > 0 && gap <= 0.14) {
       const dist = Math.hypot(nx - this.lastSampleX, ny - this.lastSampleY);
@@ -2186,12 +2223,13 @@ export class KuroCatEngine3D {
       this.petting = true;
       this.petUntil = this.elapsed + 0.36;
       this.petX = clamp(this.cursorNdc.x * 2.0, -1, 1);
-      this.wake();
+      this.wake(false);
     }
   }
 
   public onMouseDown(btn: string): void {
-    this.wake();
+    // The global hook may report the same menu click after it starts a roll.
+    this.wake(this.idleAct?.kind !== 'roll' || this.elapsed - this.idleAct.t0 > 0.20);
     this.lastMouse = this.elapsed;
     this.paws.L.lastActive = this.elapsed;
     if (btn === 'left') this.leftMouseDown = true;
@@ -2301,11 +2339,10 @@ export class KuroCatEngine3D {
     this.rafId = requestAnimationFrame(this.renderFrame);
   }
 
-  private wake(): void {
+  private wake(interruptRoll = true): void {
     this.lastInput = this.elapsed;
-    this.idleAct = null;
+    if (interruptRoll || this.idleAct?.kind !== 'roll') this.idleAct = null;
     this.nextIdleAct = this.elapsed + this.idleDelaySec;
-    this.returnProp();
     this.wakeRendering();
     if (this.asleep) {
       this.asleep = false;
@@ -2463,9 +2500,77 @@ export class KuroCatEngine3D {
     }
   }
 
+  private updateGroundRollPose(): void {
+    if (this.idleAct?.kind === 'roll') {
+      this.rollRecovery = null;
+      this.rollPose = groundRollPose(this.elapsed - this.idleAct.t0, this.idleAct.side);
+    } else if (this.rollPose.tuck > 0) {
+      this.rollRecovery ??= { from: { ...this.rollPose }, t0: this.elapsed };
+      this.rollPose = recoverGroundRoll(this.rollRecovery.from, this.elapsed - this.rollRecovery.t0);
+      if (this.rollPose.tuck === 0) this.rollRecovery = null;
+    }
+  }
+
+  /** CPU counterpart of CAT_BODY deformation, used only for ground support while rolling. */
+  private deformGroundPoint(p: THREE.Vector3): void {
+    const y = p.y;
+    const headW = smoothstep(1.14, 1.44, y);
+    const w = mix(this.spineWeight(y), 0.8226517, headW);
+    const swell = 1 + this.bend.bellySwell * smoothstep(1.30, 0.65, y) * smoothstep(0, 0.25, y);
+    p.x *= swell;
+    p.z *= swell;
+    if (headW > 0.001) {
+      this.rollHeadEuler.set(this.headRot.pitch * headW, this.headRot.yaw * headW, this.headRot.roll * headW, 'YXZ');
+      p.y -= HEAD_CY;
+      p.applyEuler(this.rollHeadEuler);
+      p.y += HEAD_CY;
+    }
+    const torsoY = p.y * (1 - this.bend.squash * this.sinkWeight(y));
+    const headY = p.y - HEAD_CY * this.bend.squash * 0.8588995;
+    p.set(p.x + this.bend.x * w, mix(torsoY, headY, headW), p.z + this.bend.z * w);
+  }
+
+  private applyGroundRoll(): void {
+    const pose = this.rollPose;
+    this.catShadow.position.z = this.homePos.z + 0.02 - pose.retreat;
+    this.catShadow.scale.set(0.90 + 0.32 * Math.abs(Math.sin(pose.lean)), 0.90, 0.90);
+    if (pose.tuck <= 0) return;
+
+    this.rollRoot.updateMatrixWorld(true);
+    // Keep the torso centred while its long axis changes from vertical to horizontal.
+    this.rollRoot.quaternion.setFromAxisAngle(this.rollAxisZ, pose.lean)
+      .multiply(this.rollTwist.setFromAxisAngle(this.rollAxisY, pose.twist));
+    this.rollPoint.set(this.homePos.x, 0.82, this.homePos.z).applyQuaternion(this.rollRoot.quaternion);
+    this.rollRoot.position.set(this.homePos.x - this.rollPoint.x, 0.82 - this.rollPoint.y,
+      this.homePos.z - this.rollPoint.z - pose.retreat);
+
+    // matrixWorld still contains the upright pose here. Include ears, accessories,
+    // paws and tail so a roll cannot bury them in the floor. No geometry upload.
+    let lowest = Infinity;
+    this.rollRoot.traverseVisible((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const positions = object.geometry.getAttribute('position');
+      if (!positions) return;
+      for (let i = 0; i < positions.count; i++) {
+        const p = this.rollPoint.fromBufferAttribute(positions, i);
+        if (object === this.bodyMesh) this.deformGroundPoint(p);
+        p.applyMatrix4(object.matrixWorld).applyQuaternion(this.rollRoot.quaternion).add(this.rollRoot.position);
+        lowest = Math.min(lowest, p.y);
+      }
+    });
+    if (Number.isFinite(lowest)) {
+      this.rollRoot.position.y += (0.004 - lowest) * smoothstep(0, 0.15, pose.tuck);
+    }
+    this.rollRoot.updateMatrixWorld(true);
+  }
+
   private update(dt: number): void {
     this.elapsed += dt;
     const t = this.elapsed;
+    // Limb solvers use upright coordinates; the shared parent applies the final roll once.
+    this.rollRoot.quaternion.identity();
+    this.rollRoot.position.set(0, 0, 0);
+    this.rollRoot.updateMatrixWorld(true);
 
     // 1) Camera smooth 360° turntable framing (skip redundant lookAt matrix rebuild when static)
     const az = (this.sOrbitAz.step(this.orbitAzimuthTarget, dt) * Math.PI) / 180;
@@ -2494,7 +2599,7 @@ export class KuroCatEngine3D {
 
     const sleepAfterSec = this.embedded ? 18 : 28;
     const idleSec = t - this.lastInput;
-    if (!this.asleep && !this.privacyMode && !this.petting && this.propPhase === 'rest' && !this.idleAct && idleSec > sleepAfterSec) {
+    if (!this.asleep && !this.privacyMode && !this.petting && this.propPhase === 'rest' && !this.idleAct && this.rollPose.tuck === 0 && idleSec > sleepAfterSec) {
       this.asleep = true;
       this.isCross = false;
       this.idleAct = null;
@@ -2567,6 +2672,7 @@ export class KuroCatEngine3D {
       this.idleAutoEnabled &&
       this.propPhase === 'rest' &&
       !this.idleAct &&
+      this.rollPose.tuck === 0 &&
       t >= this.nextIdleAct &&
       idleSec > this.idleDelaySec &&
       !this.asleep &&
@@ -2591,10 +2697,13 @@ export class KuroCatEngine3D {
         perk: 1.5,
         wave: 2.6,
         cuddle: 3.2,
+        roll: GROUND_ROLL_DURATION,
       };
       this.idleAct = { kind, t0: t, dur: durMap[kind], side: Math.random() < 0.5 ? -1 : 1 };
       this.nextIdleAct = t + 3.4 + Math.random() * 4.0;
     }
+    this.updateGroundRollPose();
+    const rolling = this.rollPose.tuck > 0;
     const act = this.idleAct;
     const actU = act ? clamp((t - act.t0) / act.dur, 0, 1) : 0;
     const actEnv = act ? smoothstep(0, 0.25, actU) * (1 - smoothstep(0.7, 1, actU)) : 0;
@@ -2606,7 +2715,7 @@ export class KuroCatEngine3D {
     this.updateProp(dt);
 
     // 4) Spine lean, hunch, squash & breathing on continuous one-piece body
-    const mousing = this.isMousing();
+    const mousing = !rolling && this.isMousing();
     const typingActive = t - this.lastKey < 0.65 || this.paws.L.down || this.paws.R.down;
     const striking =
       this.paws.L.down && (!this.paws.R.down || this.paws.L.t0 >= this.paws.R.t0)
@@ -2652,8 +2761,9 @@ export class KuroCatEngine3D {
     }
 
     if (act?.kind === 'cuddle') targetLean += act.side * 0.13 * Math.sin(actU * Math.PI) * actEnv;
-    this.bend.x = this.sShift.step(targetShift + targetLean, dt);
-    this.bend.z = this.sHunch.step(targetHunch, dt);
+    targetSquash += 0.10 * this.rollPose.tuck;
+    this.bend.x = this.sShift.step(rolling ? 0 : targetShift + targetLean, dt);
+    this.bend.z = this.sHunch.step(rolling ? 0 : targetHunch, dt);
     this.bend.squash = this.sSquash.step(targetSquash, dt);
     this.bend.bellySwell = this.sleepAmt * 0.095 + (typingActive ? 0.035 : 0);
 
@@ -2868,12 +2978,16 @@ export class KuroCatEngine3D {
       }
       pt.x += Math.sin(this.tailPhase * 1.5 + i * 0.68) * 0.045 * w * tailSway;
       pt.y += Math.sin(this.tailPhase * 1.25 + i * 0.85) * 0.05 * w * w * tailSway;
+      if (rolling) {
+        tmpTail.set(0.56 + 0.08 * Math.sin(w * Math.PI), 0.24 + w * 0.65, -0.14 - 0.25 * Math.sin(w * Math.PI));
+        pt.lerp(tmpTail, this.rollPose.tuck);
+      }
       this.attachLocal(pt, attached);
       loose.copy(pt).add(this.homePos);
       pt.lerpVectors(attached, loose, smoothstep(0.1, 0.7, w));
     }
 
-    if (this.tailTap.reach > 0.01 && this.tailTap.keyId) {
+    if (!rolling && this.tailTap.reach > 0.01 && this.tailTap.keyId) {
       const tipWorld = this.desk.keyTopWorld(this.tailTap.keyId, this.tailTap.tip);
       tipWorld.y += this.tailTap.hover + 0.045;
       const root = this.tailCurve.points[0];
@@ -2910,6 +3024,16 @@ export class KuroCatEngine3D {
       this.tmpPawLocal.set(paw.side * 0.24, 0.16 - this.sleepAmt * 0.06, 0.54);
       const tuckHome = this.attachLocal(this.tmpPawLocal, this.tmpV3);
 
+      if (rolling) {
+        this.tmpPawLocal.set(paw.side * 0.28, 0.73 + 0.045 * Math.sin(t * 5 + paw.side), 0.62);
+        this.attachLocal(this.tmpPawLocal, this.tmpV2);
+        this.tmpV2.lerpVectors(tuckHome, this.tmpV2, this.rollPose.tuck);
+        paw.pos.copy(paw.spring.step(this.tmpV2, dt));
+        // A pending input starts from the recovered hand position, never its old desk target.
+        paw.from.copy(paw.pos);
+        paw.last.copy(paw.pos);
+        return;
+      }
       if (activeForMouse) {
         const mt = this.desk.mouseTopWorld(this.tmpV1);
         mt.y -= (this.leftMouseDown || this.rightMouseDown) ? 0.012 : 0;
@@ -3028,6 +3152,8 @@ export class KuroCatEngine3D {
       arm.paw.scale.set(0.126 * pawScale, 0.080 * pawScale, 0.118 * pawScale);
       arm.paw.rotation.y = Math.atan2(arm.hand.x - arm.c2.x, Math.max(0.1, arm.hand.z - arm.c2.z)) * 0.42;
     }
+
+    this.applyGroundRoll();
 
     // 10) Floating Key Bubbles, Anger Mark 💢 & Sleep Zzz FX
     for (let i = this.popups.length - 1; i >= 0; i--) {

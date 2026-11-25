@@ -225,14 +225,14 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "trigger_idle_action",
-            "description": "Play one of the pet's idle behaviours right now: drink (uses the drink prop), stretch (both paws up and out), wave (raises a paw and waves), groom (paw wipes the muzzle), nap (head down, eyes closed, Zzz), or cuddle (leans over, paw up, tail swishing). The whale girl supports drink / stretch / wave. Also re-enables automatic idle actions.",
+            "description": "Play one of the pet's idle behaviours right now: drink (uses the drink prop), stretch (both paws up and out), wave (raises a paw and waves), groom (paw wipes the muzzle), nap (head down, eyes closed, Zzz), cuddle (leans over, paw up, tail swishing), or roll (3D ground roll; 2D uses cuddle). The whale girl supports drink / stretch / wave. Also re-enables automatic idle actions.",
             "inputSchema": {
                 "type": "object",
                 "required": ["kind"],
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["drink", "stretch", "wave", "groom", "nap", "cuddle"]
+                        "enum": ["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll"]
                     }
                 }
             }
@@ -594,7 +594,7 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 "delaySec": s.idle_delay_sec,
                 "lastRequest": s.idle_action_request,
                 "seq": s.idle_action_seq,
-                "available": ["drink", "stretch", "wave", "groom", "nap", "cuddle"]
+                "available": ["drink", "stretch", "wave", "groom", "nap", "cuddle", "roll"]
             }))
         }
         "trigger_idle_action" => {
@@ -607,10 +607,11 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 "wave" => "wave",
                 "groom" => "groom",
                 "nap" | "sleep" => "nap",
-                "cuddle" | "roll" => "cuddle",
+                "cuddle" => "cuddle",
+                "roll" => "roll",
                 other => {
                     return err_text(&format!(
-                        "Unknown idle action '{}'. Use drink | stretch | wave | groom | nap | cuddle.",
+                        "Unknown idle action '{}'. Use drink | stretch | wave | groom | nap | cuddle | roll.",
                         other
                     ))
                 }
