@@ -151,6 +151,20 @@ export function installTauriPreviewShim(): boolean {
         queueMicrotask(() => emit('kuro-cats', [...DEFAULT_BUILTIN_CATS, ...store.cats!]));
         return pack.skin;
       }
+      case 'delete_model_pack': {
+        const id = String(args.id ?? '');
+        if (DEFAULT_BUILTIN_CATS.some(c => c.id === id)) throw Error('内置模型不能删除');
+        const cats = (store.cats ?? []) as CatSkinConfig[];
+        if (!cats.some(c => c.id === id)) throw Error('模型不存在或已被删除');
+        store.cats = cats.filter(c => c.id !== id);
+        if (settings().catBreed === id) store.settings = { ...settings(), catBreed: 'black' };
+        persist();
+        const result = [...DEFAULT_BUILTIN_CATS, ...store.cats];
+        queueMicrotask(() => { emit('kuro-cats', result); emit('kuro-settings', { ...settings() }); });
+        return result;
+      }
+      case 'open_model_exports':
+        throw Error('浏览器预览会将模型保存到下载目录，请从浏览器下载记录中打开；桌面版可直接打开导出文件夹');
       case 'export_model_pack': {
         const cat = [...DEFAULT_BUILTIN_CATS, ...((store.cats ?? []) as CatSkinConfig[])].find(c => c.id === args.id);
         if (!cat) throw Error('模型不存在');
@@ -196,7 +210,13 @@ export function installTauriPreviewShim(): boolean {
         listeners.get(String(args.event ?? ''))?.delete(Number(args.id ?? 0));
         return null;
       }
-      // Window / shell / update side effects are all no-ops in the preview.
+      case 'open_release_page': {
+        const url = new URL(String(args.url ?? ''));
+        if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.username || url.password) throw new Error('只支持 GitHub HTTPS 页面');
+        window.open(url.href, '_blank', 'noopener,noreferrer');
+        return null;
+      }
+      // Native window / shell / update operations remain no-ops in the preview.
       case 'set_hit_regions':
       case 'set_menu_open':
       case 'set_dragging':
@@ -204,7 +224,6 @@ export function installTauriPreviewShim(): boolean {
       case 'save_window_pos':
       case 'reset_position':
       case 'quit_app':
-      case 'open_release_page':
       case 'create_desktop_shortcut':
       case 'install_update':
       case 'win7_present_frame':

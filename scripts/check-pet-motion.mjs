@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { registerHooks } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
@@ -1147,13 +1147,13 @@ test('the normal 2D render path draws tail impacts and one readable caption by p
 });
 
 
-test('the shipped model-store catalog and standalone model import with identical capabilities', () => {
-  const raw = readFileSync(new URL('../model-store/mint-cloud.kurocat.json', import.meta.url), 'utf8');
-  const cat = parseModelPack(raw);
+test('every shipped catalog package matches its standalone file after normalization', () => {
   const catalog = parseModelCatalog(readFileSync(new URL('../model-store/catalog.json', import.meta.url), 'utf8'));
-  assert.deepEqual(catalog, [cat]);
-  assert.equal(cat.skin.name, '薄荷云朵');
-  assert.ok(modelActions(cat.skin, '2d').includes('tailGround'));
-  assert.ok(modelActions(cat.skin, '3d').includes('roll'));
-  assert.equal(parseModelPack(exportModelPack(cat.skin)).profile.author, 'KuroCat 示例');
+  const files = readdirSync(new URL('../model-store/', import.meta.url)).filter(name => name.endsWith('.kurocat.json'));
+  const standalone = files.map(name => parseModelPack(readFileSync(new URL('../model-store/' + encodeURIComponent(name), import.meta.url), 'utf8')));
+  assert.equal(catalog.length, standalone.length);
+  for (const cat of standalone) {
+    assert.deepEqual(catalog.find(p => p.skin.id === cat.skin.id), parseModelPack(exportModelPack(cat.skin)));
+    for (const mode of modelModes(cat.skin)) assert.ok(modelActions(cat.skin, mode).includes('tailGround'));
+  }
 });

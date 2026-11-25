@@ -34,7 +34,7 @@ fn tool_definitions() -> Value {
     json!([
         {
             "name": "get_model_contract",
-            "description": "Get model package version, renderer adapters, supported reactions, action labels, and skin validation rules. Packages customize built-in procedural cats; raw GLB/VRM/Live2D rigs are not supported.",
+            "description": "Get model package version, renderer adapters, supported reactions, action labels, metadata/revision rules, default GitHub catalog, publishing links and explicit-update policy. Packages customize built-in procedural cats; raw GLB/VRM/Live2D rigs are not supported.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -43,7 +43,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "import_model_pack",
-            "description": "Validate and install a version 1 data-only cat model package. Existing IDs require replace:true; built-in IDs are protected. Optionally activate with a compatible render mode.",
+            "description": "Validate and install a version 1 data-only cat model package. Optional profile.revision and description are preserved. Existing IDs require replace:true, including downgrades; built-in IDs are protected. Optionally activate with a compatible render mode.",
             "inputSchema": {
                 "type": "object",
                 "required": [
@@ -188,7 +188,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "delete_cat",
-            "description": "Delete a custom cat skin (or reset a customized built-in cat back to default).",
+            "description": "Delete a local custom model/skin and switch to the black cat if the active model was removed; also supports resetting a customized built-in skin. GitHub packages and exported files are retained.",
             "inputSchema": {
                 "type": "object",
                 "required": ["id"],
@@ -942,7 +942,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
                     "name": SERVER_NAME,
                     "version": SERVER_VERSION
                 },
-                "instructions": "Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
+                "instructions": "Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
             }))
         }
         "ping" => Ok(json!({})),

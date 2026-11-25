@@ -28,6 +28,11 @@ export function parseModelPack(value: unknown): ModelPack {
       new Set(p.adapters).size !== p.adapters.length || p.adapters.some(a => typeof a !== 'string' || !Object.hasOwn(contract.adapters, a))) throw Error('不支持的模型适配器或行为版本');
   const profile: ModelProfile = { adapters: [...p.adapters], behaviorContract: 'cat-v1' };
   for (const k of ['author', 'license'] as const) if (p[k] != null) profile[k] = text(p[k], k, 100);
+  if (p.revision != null) {
+    if (!Number.isSafeInteger(p.revision) || Number(p.revision) < 1 || Number(p.revision) > 2147483647) throw Error('模型修订号需要 1–2147483647 的整数');
+    profile.revision = Number(p.revision);
+  }
+  if (p.description != null) profile.description = text(p.description, '模型简介', 240);
   const s = value.skin;
   if (!record(s)) throw Error('缺少 skin 外观数据');
   const id = text(s.id, '模型 ID', 36);
@@ -84,19 +89,20 @@ export function exportModelPack(cat: CatSkinConfig): ModelPack {
 }
 export function parseModelCatalog(raw: string): ModelPack[] {
   if (new TextEncoder().encode(raw).length > contract.maxBytes) throw Error('目录不能超过 256 KB');
-  const data: unknown = JSON.parse(raw);
+  let data: unknown;
+  try { data = JSON.parse(raw); } catch { throw Error('目录不是有效的 JSON，请确认选择的是 catalog.json'); }
   if (!record(data) || data.format !== 'kurocat-catalog' || data.version !== 1 || !Array.isArray(data.models) || data.models.length > 50) throw Error('需要版本 1 的模型目录，最多 50 个模型');
   const packs = data.models.map(parseModelPack);
   if (new Set(packs.map(p => p.skin.id)).size !== packs.length) throw Error('目录中有重复的模型 ID');
   return packs;
 }
 export async function fetchModelCatalog(rawUrl: string): Promise<ModelPack[]> {
-  const url = new URL(rawUrl);
-  if (url.protocol !== 'https:' || url.hostname !== 'raw.githubusercontent.com' || url.username || url.password || url.port) throw Error('请填写 GitHub 文件的 raw.githubusercontent.com HTTPS 地址');
+  const url = new URL(normalizeCatalogUrl(rawUrl));
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 10000);
   try {
     const res = await fetch(url, { signal: controller.signal, credentials: 'omit', redirect: 'error', cache: 'no-store' });
-    if (!res.ok || !res.body) throw Error('目录读取失败：HTTP ' + res.status);
+    if (res.status === 404) throw Error('找不到模型目录：请检查仓库、分支和路径，或等待 GitHub 模型目录工作流完成后刷新');
+    if (!res.ok || !res.body) throw Error('目录读取失败：HTTP ' + res.status + '，请稍后重试');
     const reader = res.body.getReader(); const chunks: Uint8Array[] = []; let size = 0;
     try { while (true) {
       const { value, done } = await reader.read(); if (done) break;
@@ -105,5 +111,44 @@ export async function fetchModelCatalog(rawUrl: string): Promise<ModelPack[]> {
     const bytes = new Uint8Array(size); let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
     return parseModelCatalog(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch (e) {
+    if (controller.signal.aborted) throw Error('读取 GitHub 超时，请检查网络后重试');
+    if (e instanceof TypeError) throw Error('无法读取模型目录，请检查网络、UTF-8 文件编码和 GitHub 地址');
+    throw e;
   } finally { clearTimeout(timer); }
+}
+
+/** Public catalog only; no GitHub token is needed or stored by the pet. */
+export const DEFAULT_MODEL_CATALOG = contract.library.defaultCatalog;
+export const MODEL_PUBLISH_PAGE = contract.library.publishPage;
+export const MODEL_GUIDE_PAGE = contract.library.guidePage;
+export function normalizeCatalogUrl(input: string): string {
+  let url: URL;
+  try { url = new URL(input.trim()); } catch { throw Error('请填写完整的 GitHub 模型目录地址'); }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash) throw Error('目录地址需要 HTTPS，不能包含登录信息、查询参数或片段');
+  if (url.hostname === 'github.com') {
+    const match = /^\/([^/]+)\/([^/]+)\/blob\/(.+)$/.exec(url.pathname);
+    if (!match) throw Error('请复制 GitHub 中 catalog.json 的文件地址或 Raw 地址');
+    url = new URL('https://raw.githubusercontent.com/' + match[1] + '/' + match[2] + '/' + match[3]);
+  }
+  if (url.hostname !== 'raw.githubusercontent.com' || !/^\/[^/]+\/[^/]+\/.+\/.+\.json$/.test(url.pathname)) throw Error('请填写 GitHub 文件的 raw.githubusercontent.com HTTPS 地址');
+  return url.href;
+}
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  if (record(value)) return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + canonical(value[k])).join(',') + '}';
+  return JSON.stringify(value);
+}
+export type ModelInstallState = 'new' | 'installed' | 'update' | 'local-newer' | 'different';
+export function modelInstallState(pack: ModelPack, installed: CatSkinConfig[]): ModelInstallState {
+  const local = installed.find(c => c.id === pack.skin.id);
+  if (!local) return 'new';
+  try {
+    const a = parseModelPack(exportModelPack(local)); const b = parseModelPack(pack);
+    a.profile.revision ??= 1; b.profile.revision ??= 1;
+    if (canonical(a) === canonical(b)) return 'installed';
+    if (b.profile.revision > a.profile.revision) return 'update';
+    if (b.profile.revision < a.profile.revision) return 'local-newer';
+  } catch { /* Legacy custom skins can be replaced explicitly. */ }
+  return 'different';
 }

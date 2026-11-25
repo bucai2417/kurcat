@@ -158,5 +158,21 @@
       "siamese"
     ],
     "maxSpots": 64
+  },
+  "profileFields": {
+    "author": "Optional author (1–100 characters)",
+    "license": "Optional license (1–100 characters)",
+    "revision": "Optional integer revision, 1–2147483647; default 1. Increment when publishing updates.",
+    "description": "Optional single-line description (1–240 characters)"
+  },
+  "library": {
+    "defaultCatalog": "https://raw.githubusercontent.com/bucai2417/kurcat/main/model-store/catalog.json",
+    "publishPage": "https://github.com/bucai2417/kurcat/upload/main/model-store",
+    "guidePage": "https://github.com/bucai2417/kurcat/blob/main/docs/model-packs.md",
+    "catalogFormat": "kurocat-catalog",
+    "catalogVersion": 1,
+    "maxModels": 50,
+    "deleteTool": "delete_cat",
+    "updatePolicy": "Explicit replace required; compare revision and normalized content; never update automatically."
   }
 }

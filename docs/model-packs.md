@@ -10,11 +10,14 @@
 
 ## 在 UI 中操作
 
-1. 右键猫咪，打开“模型库”页签。顶部显示当前模型的模式与可用动作。
-2. 点击文件选择器，选中 UTF-8 `.kurocat.json`。系统先验证版本、颜色、适配器和大小，再显示作者、许可与动作。
-3. 点击“导入并使用”。若相同 ID 已存在，需要明确勾选“替换同 ID 的已有模型”；内置 ID 不允许被模型包覆盖。导入只包含外观与能力声明，不会替换全局键帽、音效或隐私设置。
-4. 点击“导出当前模型包”。桌面版将文件保存到应用配置目录的 `exports/`，并显示完整路径；同名文件自动加序号。浏览器预览使用浏览器下载。
-5. 也可以在 GitHub 目录输入框填写 Raw 地址，加载后选择一个模型，再执行相同的预览、导入步骤。加载目录本身不会安装或切换模型。
+1. 右键猫咪，打开“模型库”。顶部显示当前模型的模式与可用动作。
+2. “本机模型”支持按名称、ID、作者搜索，并筛选支持 2D、支持 3D 或仅自定义模型。点击“使用”会自动选择模型兼容的模式；每行都能导出，专用大肥鱼绘制器除外。
+3. 在“从文件导入”选择 UTF-8 `.kurocat.json`。验证通过后查看作者、许可、简介、修订与动作，点击“导入并使用”。同 ID 内容不同、更新或回退均需勾选确认替换；内容完全一致时直接使用已安装模型。建议替换前导出备份。
+4. “导出当前模型”或列表中的“导出”把文件保存到应用配置目录的 `exports/`，并显示完整路径；同名文件自动加序号，不覆盖旧导出。“打开导出文件夹”可在桌面版中定位文件。浏览器预览使用浏览器下载目录。
+5. 自定义模型可点“删除”，再在该行确认。删除当前模型会切回内置黑猫，并同步设置与模型列表。删除只影响本机副本，GitHub 和已导出的文件会保留；内置模型不可在此删除。
+6. “GitHub 模型库”默认读取 `bucai2417/kurcat` 的公开目录。点击“加载 / 刷新”后可筛选、查看详情并导入；也可以填写其他仓库的 catalog.json 文件页面地址或 Raw 地址。“恢复默认来源”用于回到本项目，最近一次成功加载的来源会被记住。
+
+目录标识“未安装”“内容一致”“有新修订”“本机修订较新”或“同 ID 内容不同”。加载目录不会安装、覆盖或切换模型，也不会在启动时自动联网。导入不会替换全局键帽、音效或隐私设置。
 
 内置猫导出时 ID 自动追加 `-custom`，便于制作自己的版本。自定义模型保留自己的 ID。模型包的元数据和外观保存在 `cats.json`，不需要独立模型数据库。
 
@@ -35,7 +38,9 @@
     ],
     "behaviorContract": "cat-v1",
     "author": "KuroCat 示例",
-    "license": "MIT"
+    "license": "MIT",
+    "revision": 1,
+    "description": "我的第一只猫咪，支持 2D / 3D 互动。"
   },
   "skin": {
     "id": "my-cat",
@@ -52,6 +57,8 @@
 | `profile.behaviorContract` | 固定为 `cat-v1` |
 | `profile.adapters` | 非空且不重复；可选 `canvas-cat-v1`、`three-cat-v1` |
 | `profile.author` / `license` | 可选文本，各最多 100 个字符 |
+| `profile.revision` | 模型修订号，可选，1–2147483647 的整数；省略按 1 比较，发布更新时递增 |
+| `profile.description` | 可选简介，最多 240 个字符 |
 | `skin.id` | 1–36 位小写字母、数字、下划线、短横线；首位为字母或数字；不能占用内置 ID |
 | `skin.name` / `emoji` | 名称必填、最多 48 字符；图标可选、最多 12 字符 |
 | `skin.furColor` / `eyeColorTop` | 必填颜色；支持 `#RRGGBB`、`rgb(...)`、`rgba(...)` |
@@ -92,31 +99,50 @@ UI、MCP 和 OBS 读取同一个 [modelContract.json](../src/modelContract.json)
 
 ## 发布 GitHub 模型目录
 
-仓库内 [model-store/catalog.json](../model-store/catalog.json) 是可复制的示例目录。目录格式为：
-
-```json
-{
-  "format": "kurocat-catalog",
-  "version": 1,
-  "models": []
-}
-```
-
-上面是合法的空目录；向 `models` 数组中添加完整模型包对象即可发布，不能只放文件名或 URL。含一个模型的完整目录见仓库示例。目录最多 50 个包，总大小不超过 256 KiB，同一目录内 ID 不得重复。内嵌包减少了额外网络请求，也避免目录与单个下载文件不同步。
-
-将文件提交并推送到自己的 GitHub 仓库后，复制它的 Raw 地址：
+默认源是本项目的 `main` 分支：
 
 ```text
-https://raw.githubusercontent.com/<owner>/<repo>/<branch-or-commit>/model-store/catalog.json
+https://raw.githubusercontent.com/bucai2417/kurcat/main/model-store/catalog.json
 ```
 
-推荐用提交 SHA 固定目录版本。读取仅接受 `raw.githubusercontent.com` 的 HTTPS 地址，禁止跳转和身份凭据，超时 10 秒，按流限制大小并严格检查 UTF-8。私有仓库认证、付费购买、自动更新、卸载管理、搜索与分类尚未实现。本地示例在推送前没有可用的线上 Raw 地址。
+### 直接在 GitHub 网页上传
+
+1. 在模型库导出模型包。首次发布时检查 `skin.id` 和名称，补充作者、许可、简介与 `profile.revision: 1`；这些字段目前通过文本编辑器或 GitHub 编辑文件填写。
+2. 展开“发布自己的模型”，点“打开上传页面”，登录 GitHub 后上传到仓库 `main` 分支的 `model-store/` 文件夹，保留 `.kurocat.json` 后缀。无需手写目录，也不需要本地安装依赖。
+3. 等待 Actions 的 **Publish model catalog** 完成。它检查 UTF-8、包格式、重复 ID、数量与大小，自动生成并提交 `catalog.json`。
+4. 回到模型库点击“加载 / 刷新”，选择已发布模型，确认导入。已安装相同内容会显示“内容一致”。
+5. 发布更新时保持模型 ID 不变，提高 `profile.revision`，并替换原文件；不要同时保留两个相同 ID 的模型包。包格式 `version` 仍为 1，它不是模型修订号。
+6. 从 GitHub 删除模型包并等待目录更新即可下架；已安装到其他电脑的副本会继续保留。卸载本机副本请在 UI 的本机列表操作。
+
+仓库当前附带 [薄荷云朵](../model-store/mint-cloud.kurocat.json) 示例。只有 `model-store/` 顶层的 `*.kurocat.json` 普通文件参与索引。目录最多 50 个包，总大小不超过 256 KiB；生成顺序按文件名固定。目录中内嵌完整包，减少请求并保证目录与下载内容一致。
+
+### 自动发布失败时
+
+在 Actions 查看失败步骤。模型校验失败时旧目录保留，修正模型文件后重试。工作流用仓库自带 `GITHUB_TOKEN` 提交，仅发布任务请求 `contents: write`；不需要在桌宠中保存令牌。若仓库组织策略或分支保护禁止 bot 写入，可下载校验任务的 `model-catalog` artifact，将里面的 `catalog.json` 通过正常提交或 PR 更新。PR 只校验并生成 artifact，不直接发布。推送采用普通快进推送；遇到并发更新失败，可在 Actions 重新运行发布流程。
+
+也可在已有 Node 22.15+ 的环境运行下面两个无 npm 依赖的命令，生成目录后一起提交。不会构建桌宠：
+
+```sh
+node scripts/build-model-catalog.mjs
+node scripts/build-model-catalog.mjs --check
+```
+
+### 其他模型源
+
+UI 接受 GitHub 的 `blob/.../catalog.json` 文件链接并转换为 Raw，也接受其他公开仓库的 Raw 地址。可以把分支名替换为提交 SHA 固定版本。普通仓库首页不作为目录地址。
+
+```json
+{ "format": "kurocat-catalog", "version": 1, "models": [] }
+```
+
+上面是合法空目录；`models` 元素必须是完整模型包对象，不能只是文件名或 URL。最终下载仅访问 `raw.githubusercontent.com` 的 HTTPS 地址，禁止重定向、凭据、查询参数与片段；超时 10 秒，按流限制大小并严格检查 UTF-8。私有仓库认证、付费购买、后台自动更新、缩略图预览和任意骨架资源下载暂未实现。
 
 ## MCP 使用
 
-- `get_model_contract`：读取版本、适配器、动作与反应清单。
+- `get_model_contract`：读取版本、适配器、动作与反应清单，以及修订/简介字段规则、默认目录、上传页面与更新策略。
 - `import_model_pack`：参数 `package` 为完整包对象；`replace`、`activate` 默认 `false`。已有 ID 必须显式替换，激活时自动选兼容模式。
 - `export_model_pack`：传入 `id`，返回 JSON，由调用端保存为 UTF-8；不会直接写桌面文件。
+- `list_cats`：读取本机模型与元数据；`switch_cat` 选择兼容模式；`delete_cat` 删除自定义模型，删除当前模型时回退到黑猫。该 MCP 工具同时保留“重置被修改的内置外观”的既有能力。
 - `get_idle_actions`：返回当前模型、模式、可用动作和自动待机设置。
 - `trigger_idle_action`：按 `kind` 请求动作，例如 `nap`、`tailGround`、`calm`；不修改自动待机开关。请求可能因隐私或冲突中的互动被忽略，返回成功表示请求已保存，并非动画已播完。
 - `get_mood`：返回保存的情绪请求与序号，不代表实时渲染状态。起床气安抚用 `calm`，不是把烦躁表清零。
@@ -127,7 +153,7 @@ https://raw.githubusercontent.com/<owner>/<repo>/<branch-or-commit>/model-store/
 
 1. **统一运行时接口。** 从目前两套引擎抽出 `load/dispose`、`resize`、`update`、`handleInput`、`triggerAction`、`setPrivacy`、`getHitRegions`。行为层负责状态转换、计时、优先级；渲染层负责姿态与特效，UI 只读能力表。
 2. **资源与骨架映射。** 为 GLB/VRM 增加网格、骨骼、动画片段和材质资源；为 Live2D/Spine 增加参数映射。需要映射头、耳、身体、双臂、爪、尾巴各节和眼皮，明确单位、朝向与地面高度。模型须声明缺失动作及降级策略，不能承诺自动兼容任意骨架。
-3. **编辑与分发工具。** 在 UI 增加骨架映射、挂点调整、动作预览、碰撞范围预览、批量反应验收、缩略图与版本迁移。模型库再加入标签、搜索、许可筛选和明确确认后的更新。
+3. **编辑与分发工具。** 在 UI 增加骨架映射、挂点调整、动作预览、碰撞范围预览、批量反应验收、缩略图与版本迁移。后续可继续加入标签、许可筛选、缩略图、收藏和批量操作；本机搜索、模式筛选、删除和明确确认后的更新已经实现。
 
 | 接入部件 | 外部模型需要提供的信息 | 验收要求 |
 | --- | --- | --- |
@@ -148,6 +174,8 @@ https://raw.githubusercontent.com/<owner>/<repo>/<branch-or-commit>/model-store/
 ```sh
 node node_modules/typescript/bin/tsc --noEmit
 node scripts/check-pet-motion.mjs
+node scripts/check-model-library.mjs
+node scripts/build-model-catalog.mjs --check
 ```
 
-回归脚本需要 Node 22.15+，覆盖状态时序、动作中断、尾尖接地、完整 2D 特效绘制路径、包格式、中文与目录下载校验。它模拟 Canvas/WebGL 绘制，不替代安装包中的视觉与原生窗口测试。Rust 模型校验单元测试和安装包构建交给 GitHub Actions。
+回归脚本需要 Node 22.15+，覆盖状态时序、动作中断、尾尖接地、完整 2D 特效绘制路径、包格式、中文与目录下载校验。模型库回归另外覆盖修订比较、目录生成、过期索引、错误下载、删除后的设置持久化与事件广播，不依赖 npm 包。检查模拟 Canvas/WebGL 绘制与浏览器环境，不替代安装包中的视觉与原生窗口测试。Rust 模型校验单元测试和安装包构建交给 GitHub Actions。

@@ -817,7 +817,28 @@ html.win7-ulw-mode .update-toast {
 .model-library :focus-visible { outline: 2px solid #d2f244; outline-offset: 3px; }
 .model-library button:disabled { opacity: .5; cursor: default; }
 .model-library .model-error { color: #ffbbb3; }
-.model-catalog-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.model-catalog-list button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 
 #model-preview-text { white-space: pre-line; }
+
+.model-library [hidden] { display: none !important; }
+.model-library .menu-scale-row + .menu-scale-row { border-top: 1px solid #454e40; margin-top: 12px; padding-top: 14px; }
+.model-library .menu-scale-label { color: #e5ede0; font-size: 13px; font-weight: 600; }
+.model-library input[type="search"] { box-sizing: border-box; width: 100%; min-width: 0; min-height: 34px; padding: 8px; border: 1px solid #66705d; border-radius: 6px; background: #20261e; color: #e5ede0; font: inherit; font-size: 12px; }
+.model-library .model-filter-label { color: #c7d2bf; font-size: 12px; }
+.model-library .sound-profile { margin-bottom: 0; }
+.model-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-actions .kb-pill { min-height: 32px; white-space: normal; overflow-wrap: anywhere; }
+.model-list { display: flex; flex-direction: column; min-width: 0; max-height: 236px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; color: #d0d8cf; font-size: 12px; line-height: 1.65; }
+.model-entry { padding: 10px 0; border-bottom: 1px solid #454e40; overflow-wrap: anywhere; }
+.model-entry:last-child { border-bottom: 0; }
+.model-entry strong { color: #eef3e8; font-size: 13px; }
+.model-entry .model-copy { margin: 4px 0 8px; }
+.model-preview { border: 1px solid #66705d; border-radius: 8px; padding: 10px; }
+.model-delete-confirm { margin-top: 8px; padding: 10px; background: #392c28; border-radius: 6px; }
+.model-delete-confirm .kb-pill { margin-right: 6px; min-height: 32px; }
+.model-delete-confirm button[data-model-key^="confirm-"] { color: #ffd2ca; border-color: #ac796e; }
+.model-publish { margin-top: 10px; }
+.model-publish summary { cursor: pointer; color: #d2f244; font-size: 12px; line-height: 2; }
+.model-publish summary:focus-visible { outline: 2px solid #d2f244; outline-offset: 2px; }
+#model-catalog-summary { white-space: pre-line; }
+#model-status { margin: 10px; padding: 10px; border-top: 1px solid #66705d; }

@@ -16,6 +16,8 @@ export interface ModelProfile {
   behaviorContract: 'cat-v1';
   author?: string;
   license?: string;
+  revision?: number;
+  description?: string;
 }
 
 export interface CatSkinConfig {

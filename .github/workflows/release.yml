@@ -43,6 +43,10 @@ jobs:
         run: node node_modules/typescript/bin/tsc --noEmit
       - name: Check pet motions and model packages
         run: node scripts/check-pet-motion.mjs
+      - name: Check model library behavior
+        run: node scripts/check-model-library.mjs
+      - name: Check public model catalog
+        run: node scripts/build-model-catalog.mjs --check
 
   build-windows:
     needs: validate-frontend

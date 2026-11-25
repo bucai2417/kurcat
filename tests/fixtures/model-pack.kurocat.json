@@ -1,0 +1,35 @@
+{
+  "format": "kurocat-model",
+  "version": 1,
+  "profile": {
+    "adapters": [
+      "canvas-cat-v1",
+      "three-cat-v1"
+    ],
+    "behaviorContract": "cat-v1",
+    "author": "KuroCat 示例",
+    "license": "MIT",
+    "revision": 1,
+    "description": "薄荷绿与奶白双色猫咪，支持 2D / 3D 的道具互动、打盹惊醒与输入反应。"
+  },
+  "skin": {
+    "id": "mint-cloud",
+    "name": "薄荷云朵",
+    "emoji": "🌿",
+    "pattern": "bicolor",
+    "furColor": "#c9e9dc",
+    "furSecondaryColor": "#f4fff9",
+    "outlineColor": "#304c47",
+    "earInnerColor": "#e7bfc6",
+    "tailColor": "#b5dccc",
+    "tailTipColor": "#f4fff9",
+    "eyeColorTop": "#558b79",
+    "eyeColorBottom": "#b5db9f",
+    "noseColor": "#c48192",
+    "pawColor": "#f4fff9",
+    "tailFluffy": true,
+    "eyeCatchlight": true,
+    "accentColor": "#4eac92",
+    "accentSideColor": "#326c5d"
+  }
+}

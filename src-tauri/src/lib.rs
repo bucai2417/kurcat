@@ -336,6 +336,23 @@ fn import_model_pack(app: AppHandle, package: serde_json::Value, replace: bool) 
 fn export_model_pack(id: String) -> Result<String, String> { models::export_file(&id) }
 
 #[tauri::command]
+fn open_model_exports() -> Result<(), String> { models::open_exports() }
+
+#[tauri::command]
+fn delete_model_pack(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<CatSkinConfig>, String> {
+    models::remove(&id)?;
+    {
+        let mut settings = state.settings.lock().unwrap();
+        if settings.cat_breed == id {
+            settings.cat_breed = "black".into();
+            save_settings(&settings);
+        }
+    }
+    reload_and_emit_all(&app);
+    Ok(all_cats())
+}
+
+#[tauri::command]
 fn get_mcp_config(state: State<'_, AppState>) -> String {
     let port = state.settings.lock().unwrap().mcp_port;
     let exe = std::env::current_exe()
@@ -2111,6 +2128,8 @@ pub fn run() {
             get_cats,
             import_model_pack,
             export_model_pack,
+            delete_model_pack,
+            open_model_exports,
             get_desk_skins,
             get_obs_url,
             get_game_active,

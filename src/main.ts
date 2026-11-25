@@ -1597,6 +1597,19 @@ async function bootstrap(): Promise<void> {
 
   syncModelLibrary = setupModelLibrary({
     current: () => ({ cat: catList.find(c => c.id === settings.catBreed), mode: webgl3dUnavailable ? '2d' : effectiveMode() }),
+    models: () => catList,
+    activate: async id => {
+      const cat = catList.find(c => c.id === id);
+      if (!cat) throw Error('模型已被删除，请重新选择');
+      await settingsSync.update({ catBreed: cat.id, renderMode: modelMode(cat, effectiveMode()) });
+    },
+    remove: async id => {
+      catList = await invoke<CatSkinConfig[]>('delete_model_pack', { id });
+      await settingsSync.refresh();
+      syncMenuUI();
+    },
+    openExports: async () => { await invoke('open_model_exports'); },
+    openPage: async url => { await invoke('open_release_page', { url }); },
     install: async (packageValue, replace) => {
       const cat = await invoke<CatSkinConfig>('import_model_pack', { package: packageValue, replace });
       catList = catList.filter(c => c.id !== cat.id).concat(cat);

@@ -8,7 +8,9 @@
     ],
     "behaviorContract": "cat-v1",
     "author": "KuroCat 示例",
-    "license": "MIT"
+    "license": "MIT",
+    "revision": 1,
+    "description": "薄荷绿与奶白双色猫咪，支持 2D / 3D 的道具互动、打盹惊醒与输入反应。"
   },
   "skin": {
     "id": "mint-cloud",

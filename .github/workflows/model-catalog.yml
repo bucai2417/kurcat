@@ -1,0 +1,87 @@
+name: Publish model catalog
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'model-store/**'
+      - 'src/modelPack.ts'
+      - 'src/catSkins.ts'
+      - 'src/modelContract.json'
+      - 'scripts/build-model-catalog.mjs'
+      - 'scripts/check-model-library.mjs'
+      - 'src/tauriPreview.ts'
+      - 'tests/fixtures/**'
+      - '.github/workflows/model-catalog.yml'
+  pull_request:
+    paths:
+      - 'model-store/**'
+      - 'src/modelPack.ts'
+      - 'src/catSkins.ts'
+      - 'src/modelContract.json'
+      - 'scripts/build-model-catalog.mjs'
+      - 'scripts/check-model-library.mjs'
+      - 'src/tauriPreview.ts'
+      - 'tests/fixtures/**'
+      - '.github/workflows/model-catalog.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-catalog-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check model library behavior without npm dependencies
+        run: node scripts/check-model-library.mjs
+      - name: Validate packages and generate UTF-8 catalog
+        run: node scripts/build-model-catalog.mjs
+      - name: Verify generated catalog
+        run: node scripts/build-model-catalog.mjs --check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: model-catalog
+          path: model-store/catalog.json
+          retention-days: 7
+
+  publish:
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Re-read main so a queued run never publishes an older catalog artifact.
+      - name: Regenerate from current main
+        run: node scripts/build-model-catalog.mjs
+      - name: Verify catalog
+        run: node scripts/build-model-catalog.mjs --check
+      - name: Commit catalog when changed
+        shell: bash
+        run: |
+          git add -- model-store/catalog.json
+          if git diff --cached --quiet; then
+            echo "Catalog already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(models): refresh public catalog"
+          git push origin HEAD:main

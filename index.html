@@ -118,29 +118,55 @@
       </div><!-- /appearance -->
       <div class="tab-panel model-library" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-tab-panel="models">
         <div class="menu-scale-row">
-          <span class="menu-scale-label">当前模型</span>
+          <span class="menu-scale-label">正在陪伴你</span>
           <p id="model-current" class="model-copy"></p>
           <p id="model-capabilities" class="model-copy"></p>
-          <button type="button" class="kb-pill" id="model-export">导出当前模型包</button>
-        </div>
-        <div class="menu-scale-row">
-          <label class="menu-scale-label" for="model-file">导入模型包</label>
-          <p class="model-copy">支持现有猫咪绘制器的外观与行为配置（.kurocat.json）。GLB / VRM / Live2D 骨架文件暂不支持。</p>
-          <input type="file" id="model-file" accept=".json,application/json" aria-describedby="model-status" />
-          <div id="model-preview" hidden>
-            <p id="model-preview-text" class="model-copy"></p>
-            <label class="menu-toggle-row"><span>替换同 ID 的已有模型</span><input type="checkbox" id="model-replace" /></label>
-            <button type="button" class="kb-pill" id="model-install">导入并使用</button>
+          <div class="model-actions">
+            <button type="button" class="kb-pill" id="model-export">导出当前模型</button>
+            <button type="button" class="kb-pill" id="model-export-folder">打开导出文件夹</button>
           </div>
         </div>
         <div class="menu-scale-row">
-          <label class="menu-scale-label" for="model-catalog-url">GitHub 模型目录</label>
-          <p class="model-copy">填写作者提供的 raw.githubusercontent.com 目录地址，加载后选择模型预览。</p>
-          <input type="url" id="model-catalog-url" placeholder="https://raw.githubusercontent.com/…/catalog.json" spellcheck="false" autocomplete="off" />
-          <button type="button" class="kb-pill" id="model-catalog-load">加载目录</button>
-          <div id="model-catalog-list" class="model-catalog-list"></div>
+          <label class="menu-scale-label" for="model-search">本机模型</label>
+          <input type="search" id="model-search" placeholder="搜索名称、ID 或作者" aria-label="搜索本机与 GitHub 模型" />
+          <label class="model-filter-label" for="model-filter">适用模式</label>
+          <select id="model-filter" class="sound-profile"><option value="all">全部模型</option><option value="2d">支持 2D</option><option value="3d">支持 3D</option><option value="custom">仅自定义模型</option></select>
+          <p id="model-installed-count" class="model-copy"></p>
+          <div id="model-installed-list" class="model-list" role="list" aria-label="已安装模型"></div>
         </div>
-        <p id="model-status" class="model-copy" role="status" aria-live="polite">模型包继承所选绘制器的打字、抚摸、道具和起床气反应。</p>
+        <div class="menu-scale-row">
+          <label class="menu-scale-label" for="model-file">从文件导入</label>
+          <p class="model-copy">.kurocat.json 包含猫咪外观、模式与行为能力，继承打字、抚摸、道具和起床气互动。暂不支持 GLB / VRM / Live2D 骨架文件。</p>
+          <input type="file" id="model-file" accept=".json,application/json" aria-describedby="model-status" />
+          <div id="model-preview" class="model-preview" hidden>
+            <p id="model-preview-text" class="model-copy"></p>
+            <label id="model-replace-row" class="menu-toggle-row"><span>确认替换本机同 ID 模型</span><input type="checkbox" id="model-replace" /></label>
+            <div class="model-actions">
+              <button type="button" class="kb-pill" id="model-install">导入并使用</button>
+              <button type="button" class="kb-pill" id="model-preview-cancel">取消</button>
+            </div>
+          </div>
+        </div>
+        <div class="menu-scale-row">
+          <label class="menu-scale-label" for="model-catalog-url">GitHub 模型库</label>
+          <p class="model-copy">默认读取 bucai2417/kurcat。也可粘贴其他公开仓库的 catalog.json 文件地址或 Raw 地址。加载目录不会自动安装或覆盖模型。</p>
+          <input type="url" id="model-catalog-url" spellcheck="false" autocomplete="off" aria-label="GitHub 模型目录地址" />
+          <div class="model-actions">
+            <button type="button" class="kb-pill" id="model-catalog-load">加载 / 刷新</button>
+            <button type="button" class="kb-pill" id="model-catalog-reset">恢复默认来源</button>
+          </div>
+          <p id="model-catalog-summary" class="model-copy">尚未读取目录，点击“加载 / 刷新”获取已发布模型。</p>
+          <div id="model-catalog-list" class="model-list" role="list" aria-label="GitHub 模型"></div>
+          <details class="model-publish">
+            <summary>把我的模型发布到 GitHub</summary>
+            <p class="model-copy">先导出模型，再将文件上传到仓库的 model-store 文件夹。GitHub 会校验并生成目录，完成后刷新即可看到。更新同 ID 模型时，请提高 profile.revision 修订号。</p>
+            <div class="model-actions">
+              <button type="button" class="kb-pill" id="model-publish">打开上传页面</button>
+              <button type="button" class="kb-pill" id="model-guide">查看发布说明</button>
+            </div>
+          </details>
+        </div>
+        <p id="model-status" class="model-copy" role="status" aria-live="polite">内置模型会保留；删除自定义模型前可以先导出备份。</p>
       </div><!-- /models -->
       <div class="tab-panel" id="panel-keyboard" role="tabpanel" aria-labelledby="tab-keyboard" data-tab-panel="keyboard">
       <p class="menu-section-note">键帽按 2D / 3D 独立保存；配列、灯光和键鼠外观共用。</p>

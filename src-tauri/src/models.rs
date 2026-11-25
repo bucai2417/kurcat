@@ -13,6 +13,10 @@ pub struct ModelProfile {
     pub author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 pub fn contract() -> Value { serde_json::from_str(include_str!("../../src/modelContract.json")).expect("bundled model contract") }
 fn text<'a>(v: &'a Value, max: usize) -> Result<&'a str, String> {
@@ -36,6 +40,10 @@ pub fn validate_profile(profile: &ModelProfile) -> Result<(), String> {
         profile.adapters.iter().any(|a| c["adapters"].get(a.as_str()).is_none()) ||
         (profile.adapters.len() == 2 && profile.adapters[0] == profile.adapters[1]) { return Err("Unsupported adapter or behavior contract".into()); }
     for field in [&profile.author, &profile.license].into_iter().flatten() { text(&json!(field), 100)?; }
+    if let Some(revision) = profile.revision {
+        if revision == 0 || revision > 2147483647 { return Err("模型修订号需要 1–2147483647 的整数".into()); }
+    }
+    if let Some(description) = &profile.description { text(&json!(description), 240)?; }
     Ok(())
 }
 pub fn validate(value: Value) -> Result<CatSkinConfig, String> {
@@ -94,7 +102,7 @@ pub fn install(value: Value, replace: bool) -> Result<CatSkinConfig, String> {
 pub fn export(id: &str) -> Result<Value, String> {
     let cat = cats::all_cats().into_iter().find(|c| c.id == id).ok_or("Model not found")?;
     if id == "dafeiyu" { return Err("大肥鱼使用专用绘制器，暂不支持导出为猫咪模型包".into()); }
-    let profile = cat.model_profile.clone().unwrap_or(ModelProfile { adapters: vec!["canvas-cat-v1".into(), "three-cat-v1".into()], behavior_contract: "cat-v1".into(), author: None, license: None });
+    let profile = cat.model_profile.clone().unwrap_or(ModelProfile { adapters: vec!["canvas-cat-v1".into(), "three-cat-v1".into()], behavior_contract: "cat-v1".into(), author: None, license: None, revision: None, description: None });
     let copy_id = if cat.builtin { format!("{}-custom", id) } else { id.to_string() };
     let mut skin = serde_json::to_value(cat).map_err(|e| e.to_string())?;
     skin.as_object_mut().unwrap().remove("modelProfile");
@@ -102,6 +110,26 @@ pub fn export(id: &str) -> Result<Value, String> {
     let package = json!({ "format": "kurocat-model", "version": 1, "profile": profile, "skin": skin });
     validate(package.clone())?;
     Ok(package)
+}
+pub fn remove(id: &str) -> Result<(), String> {
+    if cats::builtin_cats().iter().any(|c| c.id == id) { return Err("内置模型不能删除".into()); }
+    if !cats::all_cats().iter().any(|c| c.id == id) { return Err("模型不存在或已被删除".into()); }
+    if !cats::delete_custom_cat(id)? { return Err("模型不存在或已被删除".into()); }
+    Ok(())
+}
+pub fn open_exports() -> Result<(), String> {
+    let dir = crate::config::app_data_dir().join("exports");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("explorer.exe").arg(&dir).creation_flags(0x08000000).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    { std::process::Command::new("/usr/bin/open").arg(&dir).spawn().map_err(|e| e.to_string())?; }
+    #[cfg(target_os = "linux")]
+    { std::process::Command::new("xdg-open").arg(&dir).spawn().map_err(|e| e.to_string())?; }
+    Ok(())
 }
 pub fn export_file(id: &str) -> Result<String, String> {
     let package = export(id)?;
@@ -141,7 +169,7 @@ mod tests {
     use super::*;
 
     fn example() -> Value {
-        serde_json::from_str(include_str!("../../model-store/mint-cloud.kurocat.json"))
+        serde_json::from_str(include_str!("../../tests/fixtures/model-pack.kurocat.json"))
             .expect("bundled UTF-8 model example")
     }
 
@@ -153,6 +181,12 @@ mod tests {
         assert_eq!(mode(&cat, "2d"), "2d");
         assert_eq!(mode(&cat, "3d"), "3d");
         assert_eq!(cat.model_profile.as_ref().unwrap().author.as_deref(), Some("KuroCat 示例"));
+        assert_eq!(cat.model_profile.as_ref().unwrap().revision, Some(1));
+        assert!(cat.model_profile.as_ref().unwrap().description.as_ref().unwrap().contains("打盹惊醒"));
+        let mut legacy = example();
+        legacy["profile"].as_object_mut().unwrap().remove("revision");
+        legacy["profile"].as_object_mut().unwrap().remove("description");
+        assert!(validate(legacy).is_ok());
         let mut only_three = example();
         only_three["profile"]["adapters"] = json!(["three-cat-v1"]);
         assert_eq!(mode(&validate(only_three).unwrap(), "2d"), "3d");
@@ -163,6 +197,12 @@ mod tests {
         for (path, bad) in [
             ("/version", json!(2)),
             ("/profile/behaviorContract", json!("unknown")),
+            ("/profile/revision", json!(0)),
+            ("/profile/revision", json!(-1)),
+            ("/profile/revision", json!(1.5)),
+            ("/profile/revision", json!(2147483648_u64)),
+            ("/profile/description", json!("猫".repeat(241))),
+            ("/profile/description", json!("")),
             ("/profile/adapters", json!([])),
             ("/profile/adapters", json!(["three-cat-v1", "three-cat-v1"])),
             ("/profile/adapters", json!(["unknown"])),
