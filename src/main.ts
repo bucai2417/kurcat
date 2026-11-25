@@ -248,6 +248,7 @@ function syncEngine3DState(): void {
   engine3d.setGameActive(gameActive);
   engine3d.setKeyboardConfig(kbLayout, kbOrient);
   engine3d.setTailKeyConfig(tailMode, tailIds);
+  engine3d.setPropConfig(settings.propConfig);
   engine3d.setPrivacyMode(privacyActive);
   engine3d.resize();
 }
@@ -795,6 +796,7 @@ function syncMenuUI(): void {
   engine.setDeskSkin(activeDeskSkin());
   engine.setKeycapOverrides(settings.keycapOverrides);
   engine.setPropConfig(settings.propConfig);
+  engine3d?.setPropConfig(settings.propConfig);
   engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
   engine.setMoodTrackingEnabled(settings.moodTrackingEnabled !== false);
   engine.setTailKeyConfig(settings.tailKeyMode ?? 'smart', settings.tailKeyIds ?? [...DEFAULT_TAIL_KEY_IDS]);
@@ -821,10 +823,10 @@ function consumeMoodRequest(): void {
   lastMoodSeq = seq;
   const a = settings.moodAnnoyanceRequest;
   const d = settings.moodDizzyRequest;
-  engine.setMoodMeter(
-    typeof a === 'number' && a >= 0 ? a : undefined,
-    typeof d === 'number' && d >= 0 ? d : undefined,
-  );
+  const ann = typeof a === 'number' && a >= 0 ? a : undefined;
+  const dz = typeof d === 'number' && d >= 0 ? d : undefined;
+  engine.setMoodMeter(ann, dz);
+  engine3d?.setMoodMeter(ann, dz);
 }
 
 /** MCP writes a request + seq; play it once when the counter advances. */
@@ -833,7 +835,9 @@ function consumeIdleRequest(): void {
   if (seq <= lastIdleSeq) return;
   lastIdleSeq = seq;
   const kind = settings.idleActionRequest;
-  if (kind) engine.triggerIdleAction(kind);
+  if (!kind) return;
+  engine.triggerIdleAction(kind);
+  engine3d?.triggerIdleAction(kind);
 }
 function pushHitRegions(): void {
   const regions = engine.getHitRegions();
@@ -1545,12 +1549,25 @@ async function bootstrap(): Promise<void> {
     canvas3d?.classList.toggle('pet-hover', c.overCat && interactive);
   });
 
-  // Left-click drag to reposition transparent window
-  canvas.addEventListener('mousedown', async (e) => {
-    if (e.button === 0) {
-      closeContextMenu();
-      if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
-      // Clicking the drink refills an empty cup instead of dragging the window.
+  // Left-click drag to reposition the transparent window.
+  // Bound to BOTH canvases: the 3D canvas is stacked on top and would otherwise
+  // swallow every pointer event, leaving the 3D pet undraggable and unselectable.
+  const onCanvasPointerDown = async (e: MouseEvent, source: HTMLCanvasElement): Promise<void> => {
+    if (e.button !== 0) return;
+    closeContextMenu();
+    if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
+    // Clicking the drink refills an empty cup instead of dragging the window.
+    if (active3d && engine3d) {
+      if (engine3d.hitTestProp(e.clientX, e.clientY)) {
+        const result = engine3d.clickProp();
+        if (result === 'refilled') {
+          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
+        } else if (result === 'sipped') {
+          showUpdateToast('🐾 猫猫喝了一口', { autoHideMs: 1800 });
+        }
+        return;
+      }
+    } else {
       const logicalPt = engine.clientToLogical(e.clientX, e.clientY);
       if (engine.hitTestProp(logicalPt.x, logicalPt.y)) {
         const result = engine.clickProp();
@@ -1561,25 +1578,29 @@ async function bootstrap(): Promise<void> {
         }
         return;
       }
-      canvas.classList.add('pet-dragging');
-      void invoke('set_dragging', { dragging: true });
-      try {
-        await getCurrentWindow().startDragging();
-      } finally {
-        canvas.classList.remove('pet-dragging');
-        engine.onMouseUp('left');
-        void invoke('set_dragging', { dragging: false });
-        void invoke('save_window_pos');
-      }
     }
-  });
+    source.classList.add('pet-dragging');
+    void invoke('set_dragging', { dragging: true });
+    try {
+      await getCurrentWindow().startDragging();
+    } finally {
+      source.classList.remove('pet-dragging');
+      engine.onMouseUp('left');
+      void invoke('set_dragging', { dragging: false });
+      void invoke('save_window_pos');
+    }
+  };
+  canvas.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas));
+  canvas3d?.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas3d));
 
   // Right-click opens sleek dark glass settings menu
-  canvas.addEventListener('contextmenu', (e) => {
+  const onCanvasContextMenu = (e: MouseEvent): void => {
     e.preventDefault();
     if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
     openContextMenu(e.clientX, e.clientY);
-  });
+  };
+  canvas.addEventListener('contextmenu', onCanvasContextMenu);
+  canvas3d?.addEventListener('contextmenu', onCanvasContextMenu);
 
   window.addEventListener('blur', () => closeContextMenu());
   // The window grows/shrinks when the menu opens or the user changes scale, so the
@@ -1666,6 +1687,7 @@ async function bootstrap(): Promise<void> {
       }
       engine.setIdleAutoEnabled(true);
       engine.triggerIdleAction(idleAction);
+      engine3d?.triggerIdleAction(idleAction);
       closeContextMenu();
       return;
     }

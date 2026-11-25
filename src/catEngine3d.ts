@@ -21,6 +21,8 @@ import {
   mix,
   smoothstep,
 } from './keyboard3d';
+import { createProp3D, type Prop3DHandle } from './prop3d';
+import type { PropConfig, PropKind } from './prop';
 
 export type CollarColorId = 'none' | 'red' | 'blue' | 'pink' | 'green';
 
@@ -72,7 +74,7 @@ interface Fx3D {
 }
 
 interface IdleAct3D {
-  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail';
+  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance';
   t0: number;
   dur: number;
   side: -1 | 1;
@@ -641,6 +643,7 @@ export class KuroCatEngine3D {
   private readonly fxList: Fx3D[] = [];
   private readonly petMeshes: THREE.Object3D[] = [];
   private readonly raycaster = new THREE.Raycaster();
+  private readonly tmpNdc = new THREE.Vector2();
 
   // 240Hz Springs
   private readonly sShift = new Spring1D(0, 1.85, 0.72);
@@ -713,6 +716,20 @@ export class KuroCatEngine3D {
   private lastSampleX: number | null = null;
   private lastSampleY: number | null = null;
   private lastSampleT = -100;
+
+  // Drink prop: a real 3D cup beside the keyboard the cat reaches for and sips.
+  private propHandle: Prop3DHandle | null = null;
+  private propKind: PropKind = 'coffee';
+  private propEnabled = false;
+  private propSide: 'left' | 'right' = 'right';
+  private propAutoSip = true;
+  private propLevel = 1;
+  private propPhase: 'rest' | 'reach' | 'lift' | 'sip' | 'return' = 'rest';
+  private propPhaseT = 0;
+  private propNextSipIn = 40;
+  private propMoodT = 0;
+  private propMood: PropKind | null = null;
+  private propLift = 0;
 
   private petting = false;
   private petUntil = -100;
@@ -1616,6 +1633,165 @@ export class KuroCatEngine3D {
     this.renderScale = clamp(scale, 0.2, 2.0);
   }
 
+  /** Mirrors the 2D prop config so both render modes show the same drink. */
+  public setPropConfig(cfg: PropConfig): void {
+    this.propEnabled = Boolean(cfg.enabled);
+    this.propAutoSip = Boolean(cfg.autoSip);
+    const side = cfg.side === 'left' ? 'left' : 'right';
+    const kindChanged = cfg.kind !== this.propKind;
+    this.propSide = side;
+    this.propKind = cfg.kind;
+    if (!this.propEnabled) {
+      this.clearProp();
+      return;
+    }
+    if (!this.propHandle || kindChanged) {
+      this.rebuildProp();
+    } else {
+      this.placeProp();
+    }
+    this.wakeRendering();
+  }
+
+  /** Clicking the cup refills it, or drinks from it if it still has liquid. */
+  public clickProp(): 'refilled' | 'sipped' | 'busy' {
+    if (!this.propHandle) return 'busy';
+    if (this.propPhase !== 'rest') return 'busy';
+    if (this.propLevel <= 0.02) {
+      this.propLevel = 1;
+      return 'refilled';
+    }
+    this.propPhase = 'reach';
+    this.propPhaseT = 0;
+    this.propNextSipIn = 60;
+    this.wakeRendering();
+    return 'sipped';
+  }
+
+  /**
+   * True when the click landed on the drink cup. Uses the same camera the frame
+   * was rendered with, so it stays accurate at any window size or pet scale.
+   */
+  public hitTestProp(clientX: number, clientY: number): boolean {
+    if (!this.propHandle || !this.propEnabled) return false;
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return false;
+    this.tmpNdc.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -(((clientY - rect.top) / rect.height) * 2 - 1),
+    );
+    this.raycaster.setFromCamera(this.tmpNdc, this.camera);
+    const hits = this.raycaster.intersectObject(this.propHandle.group, true);
+    return hits.length > 0;
+  }
+
+  private clearProp(): void {
+    if (this.propHandle) {
+      this.scene.remove(this.propHandle.group);
+      this.propHandle.dispose();
+      this.propHandle = null;
+    }
+    this.propPhase = 'rest';
+    this.propLift = 0;
+  }
+
+  private rebuildProp(): void {
+    this.clearProp();
+    this.propHandle = createProp3D(this.propKind);
+    this.scene.add(this.propHandle.group);
+    this.propLevel = 1;
+    this.propPhase = 'rest';
+    this.propPhaseT = 0;
+    this.placeProp();
+  }
+
+  /** Sits the cup on the desk aisle on the configured side, clear of the mouse. */
+  private placeProp(): void {
+    if (!this.propHandle) return;
+    const is108 = this.desk.getLayoutId() === '108';
+    // Tuck it just outside the keyboard bezel, on the opposite side from the mouse.
+    const x = this.propSide === 'left' ? (is108 ? -1.34 : -1.10) : is108 ? 1.58 : 1.32;
+    this.propHandle.group.position.set(x, 0, 1.06);
+    this.propHandle.group.rotation.y = this.propSide === 'left' ? 0.28 : -0.28;
+  }
+
+  private readonly propPhaseDur: Record<'reach' | 'lift' | 'sip' | 'return', number> = {
+    reach: 0.42,
+    lift: 0.34,
+    sip: 0.8,
+    return: 0.36,
+  };
+
+  /**
+   * Advances the drink state machine and positions the cup. When a sip lands the
+   * cup lifts to the mouth, so the whole gesture reads as "pick up and drink".
+   */
+  private updateProp(dt: number): void {
+    if (!this.propHandle) return;
+    const t = this.elapsed;
+
+    if (this.propMoodT > 0) this.propMoodT = Math.max(0, this.propMoodT - dt);
+
+    if (this.propPhase === 'rest') {
+      this.propLift += (0 - this.propLift) * approach(10, dt);
+      const idleSec = t - this.lastInput;
+      if (this.propEnabled && this.propAutoSip && idleSec > 20 && !this.asleep) {
+        this.propNextSipIn -= dt;
+        if (this.propNextSipIn <= 0) {
+          if (this.propLevel <= 0.02) {
+            this.propLevel = 1;
+            this.propNextSipIn = 45 + Math.random() * 40;
+          } else {
+            this.propPhase = 'reach';
+            this.propPhaseT = 0;
+          }
+        }
+      }
+      this.propHandle.update(this.propKind, this.propLevel, this.propLift, performance.now());
+      return;
+    }
+
+    this.propPhaseT += dt;
+    const dur = this.propPhaseDur[this.propPhase as 'reach' | 'lift' | 'sip' | 'return'];
+    const u = clamp(this.propPhaseT / dur, 0, 1);
+
+    // Lift the cup from the desk toward the mouth, peaking during the sip.
+    let targetLift = 0;
+    if (this.propPhase === 'lift') targetLift = 0.5 * smoothstep(0, 1, u);
+    else if (this.propPhase === 'sip') targetLift = 0.5 + 0.12 * Math.sin(u * Math.PI);
+    else if (this.propPhase === 'return') targetLift = 0.5 * (1 - smoothstep(0, 1, u));
+    this.propLift += (targetLift - this.propLift) * approach(14, dt);
+
+    // Nudge the cup toward the mouth as it rises.
+    const base = this.propHandle.group;
+    const homeX = this.propSide === 'left' ? (this.desk.getLayoutId() === '108' ? -1.34 : -1.10) : this.desk.getLayoutId() === '108' ? 1.58 : 1.32;
+    base.position.x += (mix(homeX, -0.06, clamp(this.propLift / 0.62, 0, 1)) - base.position.x) * approach(10, dt);
+
+    this.propHandle.update(this.propKind, this.propLevel, this.propLift, performance.now());
+
+    if (this.propPhaseT >= dur) {
+      this.propPhaseT = 0;
+      switch (this.propPhase) {
+        case 'reach':
+          this.propPhase = 'lift';
+          break;
+        case 'lift':
+          this.propPhase = 'sip';
+          break;
+        case 'sip':
+          this.propLevel = Math.max(0, this.propLevel - 0.1);
+          this.propMood = this.propKind;
+          this.propMoodT = 3.2;
+          this.propPhase = 'return';
+          break;
+        default:
+          this.propPhase = 'rest';
+          this.propNextSipIn = 45 + Math.random() * 40;
+          break;
+      }
+    }
+  }
+
   public onPrivacyTyping(): void {
     if (this.privacyMode) {
       this.sSquash.kick(0.22);
@@ -1694,6 +1870,58 @@ export class KuroCatEngine3D {
     window.setTimeout(() => {
       if (this.tailTap.keyId === targetId) this.tailTap.down = false;
     }, 180);
+  }
+
+  /**
+   * Idle-action entry point matching the 2D engine's vocabulary, so the menu and
+   * MCP can drive the 3D cat the same way. Kinds without a bespoke 3D animation
+   * fall back to the closest existing demo.
+   */
+  public triggerIdleAction(kind: string): void {
+    switch (kind) {
+      case 'drink':
+        if (this.propHandle && this.propPhase === 'rest') {
+          this.propPhase = 'reach';
+          this.propPhaseT = 0;
+          this.wakeRendering();
+        }
+        break;
+      case 'stretch':
+      case 'wave':
+      case 'cuddle':
+        this.triggerCuriousDemo(3.2);
+        break;
+      case 'groom':
+        this.triggerCrossDemo();
+        break;
+      case 'nap':
+        this.triggerSleepDemo();
+        break;
+      default:
+        this.triggerCuriousDemo(2.6);
+        break;
+    }
+  }
+
+  /** MCP mood override: 0..1 annoyance and 0..1 dizzy, mirroring the 2D engine. */
+  public setMoodMeter(annoyance?: number, dizzy?: number): void {
+    if (typeof annoyance === 'number' && Number.isFinite(annoyance)) {
+      this.annoy = Math.min(1, Math.max(0, annoyance));
+      if (this.annoy >= 0.62 && !this.isCross) {
+        this.isCross = true;
+        this.crossSince = this.elapsed;
+        this.crossHuffDir = this.cursorNdc.x >= 0 ? -1 : 1;
+        this.thumpPhase = 0;
+      }
+    }
+    if (typeof dizzy === 'number' && Number.isFinite(dizzy)) {
+      // The 3D cat has no dizzy spiral; high dizzy just reads as extra cross.
+      if (dizzy > 0.5) {
+        this.annoy = Math.max(this.annoy, 0.9);
+        this.isCross = true;
+      }
+    }
+    this.wakeRendering();
   }
 
   public onKeyDown(vk: number, repeat = false): void {
@@ -2119,7 +2347,7 @@ export class KuroCatEngine3D {
       !this.isCross &&
       !curiousNow
     ) {
-      const kinds: IdleAct3D['kind'][] = ['tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail'];
+      const kinds: IdleAct3D['kind'][] = ['tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail', 'stretch', 'glance'];
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const durMap: Record<IdleAct3D['kind'], number> = {
         tilt: 1.9,
@@ -2127,9 +2355,11 @@ export class KuroCatEngine3D {
         slowBlink: 1.45,
         look: 2.1,
         tail: 1.1,
+        stretch: 2.8,
+        glance: 2.4,
       };
       this.idleAct = { kind, t0: t, dur: durMap[kind], side: Math.random() < 0.5 ? -1 : 1 };
-      this.nextIdleAct = t + 3.8 + Math.random() * 4.5;
+      this.nextIdleAct = t + 3.4 + Math.random() * 4.0;
     }
     const act = this.idleAct;
     const actU = act ? clamp((t - act.t0) / act.dur, 0, 1) : 0;
@@ -2138,6 +2368,8 @@ export class KuroCatEngine3D {
     // 3) Keyboard & cordless mouse update
     const deskHopY = this.sDeskHop.step(0, dt);
     this.desk.update(dt, this.leftMouseDown, this.rightMouseDown, deskHopY, this.privacyClose);
+    // Drink prop state machine (only runs when a cup exists).
+    this.updateProp(dt);
 
     // 4) Spine lean, hunch, squash & breathing on continuous one-piece body
     const mousing = this.isMousing();
@@ -2161,13 +2393,24 @@ export class KuroCatEngine3D {
     const targetHunch = typingActive
       ? 0.09 + 0.08 * this.excite
       : curious * 0.07 + (petActive ? -0.05 : 0);
-    const targetSquash =
+    let targetSquash =
       this.sleepAmt * 0.20 +
       (petActive ? 0.06 : 0) -
       curious * 0.04 +
       Math.sin(t * 2.0) * 0.014;
+    let targetLean = 0;
 
-    this.bend.x = this.sShift.step(targetShift, dt);
+    // Expressive idle acts: a full stretch (body rises and lengthens) and a
+    // slow side-to-side glance that turns the whole head, not just the eyes.
+    if (act && act.kind === 'stretch') {
+      targetSquash -= 0.12 * actEnv;
+      targetLean = 0.05 * actEnv;
+    }
+    if (act && act.kind === 'glance') {
+      targetLean = act.side * 0.10 * actEnv;
+    }
+
+    this.bend.x = this.sShift.step(targetShift + targetLean, dt);
     this.bend.z = this.sHunch.step(targetHunch, dt);
     this.bend.squash = this.sSquash.step(targetSquash, dt);
     this.bend.bellySwell = this.sleepAmt * 0.095 + (typingActive ? 0.035 : 0);
@@ -2212,6 +2455,16 @@ export class KuroCatEngine3D {
       if (act.kind === 'look') {
         targetYaw += act.side * 0.22 * actEnv;
         targetGazeX = mix(targetGazeX, act.side * 0.85, actEnv);
+      }
+      if (act.kind === 'glance') {
+        // Turn the whole head to look around, eyes leading the turn.
+        targetYaw += act.side * 0.34 * actEnv;
+        targetRoll += act.side * 0.06 * actEnv;
+        targetGazeX = mix(targetGazeX, act.side * 0.95, actEnv);
+      }
+      if (act.kind === 'stretch') {
+        // Chin up, head tilts back slightly during the stretch.
+        targetPitch -= 0.10 * actEnv;
       }
     }
     if (cross > 0.05) {
@@ -2401,10 +2654,13 @@ export class KuroCatEngine3D {
     );
 
     // 9) Sleek Unified KuroCat Arms + Cozy Tucked Idle Belly Paws!
+    const propReaching = this.propPhase !== 'rest' && this.propHandle !== null;
+    const propArmSide = this.propSide === 'left' ? -1 : 1;
     const updatePaw = (paw: PawTrack3D, isLeft: boolean) => {
       const activeForMouse = isLeft && mousing;
       const activeForKey = Boolean(paw.keyId && (paw.down || t - paw.t0 < 0.52)) && !this.asleep && !this.privacyMode;
-      const wantTuck = !activeForMouse && !activeForKey ? 1 : 0;
+      const activeForProp = propReaching && paw.side === propArmSide;
+      const wantTuck = !activeForMouse && !activeForKey && !activeForProp ? 1 : 0;
       paw.tuckWeight += (wantTuck - paw.tuckWeight) * approach(wantTuck ? 6.5 : 22, dt);
 
       this.tmpPawLocal.set(paw.side * 0.24, 0.16 - this.sleepAmt * 0.06, 0.54);
@@ -2413,6 +2669,16 @@ export class KuroCatEngine3D {
       if (activeForMouse) {
         const mt = this.desk.mouseTopWorld(this.tmpV1);
         paw.pos.copy(paw.spring.step(mt, dt));
+        paw.last.copy(paw.pos);
+        return;
+      }
+      if (activeForProp && this.propHandle) {
+        // Reach to the cup, then ride its rim up to the mouth as it lifts.
+        const cup = this.propHandle.group.position;
+        const grab = this.propPhase === 'reach' || this.propPhase === 'lift';
+        const targetY = grab ? 0.16 : this.propHandle.mouthAnchor.y + this.propLift - 0.04;
+        this.tmpV2.set(cup.x, targetY, cup.z - 0.06);
+        paw.pos.copy(paw.spring.step(this.tmpV2, dt));
         paw.last.copy(paw.pos);
         return;
       }

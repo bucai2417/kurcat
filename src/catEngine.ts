@@ -804,6 +804,13 @@ export class KuroCatEngine {
   private annoyance = 0;
   /** 0..1 how dizzy the pet is once it has lost patience. */
   private dizzy = 0;
+  /**
+   * 0..1 "fierceness" derived from annoyance: drives the narrowing pupils and the
+   * angry brows, so the stare turns hostile gradually rather than popping on.
+   */
+  private get fierce(): number {
+    return Math.max(0, Math.min(1, (this.annoyance - 0.22) / 0.62));
+  }
 
   /** Current mood meter (0..1 annoyance, 0..1 dizzy) — used by MCP/tests. */
   public get moodMeter(): { annoyance: number; dizzy: number } {
@@ -2291,10 +2298,11 @@ export class KuroCatEngine {
    */
   private updateAnnoyance(dt: number, now: number, typingEnergy: number): void {
     const typingHot =
-      this.moodTrackingEnabled && typingEnergy > 0.62 && now - this.lastAnyKeyAt < 400;
+      this.moodTrackingEnabled && typingEnergy > 0.5 && now - this.lastAnyKeyAt < 450;
     if (typingHot) {
-      // Rises over roughly 6-8 seconds of relentless typing.
-      this.annoyance = Math.min(1, this.annoyance + dt * 0.16);
+      // Rises over roughly 4-5 seconds of relentless typing, so the reaction is
+      // visible within a normal burst instead of only after a long grind.
+      this.annoyance = Math.min(1, this.annoyance + dt * 0.24);
     } else {
       this.annoyance = Math.max(0, this.annoyance - dt * (now - this.lastAnyKeyAt > 1500 ? 0.42 : 0.12));
     }
@@ -2361,24 +2369,32 @@ export class KuroCatEngine {
       ctx.restore();
     }
 
-    // 2) Anger cross (💢) once it is really annoyed
-    if (this.annoyance > 0.55 && this.dizzy < 0.4) {
-      const pulse = 0.75 + Math.sin(this.elapsed * 9) * 0.25;
-      const alpha = Math.min(1, (this.annoyance - 0.55) / 0.35) * pulse;
+    // 2) Anger cross (💢) once it is really annoyed — bigger, bolder, with a dark
+    //    halo pass so it stays legible against both the black cat and light walls.
+    if (this.annoyance > 0.42 && this.dizzy < 0.4) {
+      const grow = Math.min(1, (this.annoyance - 0.42) / 0.5);
+      const pulse = 0.82 + Math.sin(this.elapsed * 9) * 0.18;
+      const alpha = Math.min(1, (this.annoyance - 0.42) / 0.3) * pulse;
+      const bx = headX + 31;
+      const by = headY + 12;
+      const arm = 6.0 + grow * 5.0;
+      const gap = 3.0 + grow * 1.2;
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.strokeStyle = '#e8404f';
-      ctx.lineWidth = 1.9;
       ctx.lineCap = 'round';
-      const bx = headX + 30;
-      const by = headY + 14;
-      const arm = 5.5;
-      for (let i = 0; i < 4; i++) {
-        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-        ctx.beginPath();
-        ctx.moveTo(bx + Math.cos(a) * 2.6, by + Math.sin(a) * 2.6);
-        ctx.lineTo(bx + Math.cos(a) * (2.6 + arm), by + Math.sin(a) * (2.6 + arm));
-        ctx.stroke();
+      for (const pass of [
+        { color: 'rgba(16, 18, 24, 0.72)', width: 5.4 + grow * 2.4 },
+        { color: '#e8404f', width: 2.6 + grow * 1.8 },
+      ]) {
+        ctx.strokeStyle = pass.color;
+        ctx.lineWidth = pass.width;
+        for (let i = 0; i < 4; i++) {
+          const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+          ctx.beginPath();
+          ctx.moveTo(bx + Math.cos(a) * gap, by + Math.sin(a) * gap);
+          ctx.lineTo(bx + Math.cos(a) * (gap + arm), by + Math.sin(a) * (gap + arm));
+          ctx.stroke();
+        }
       }
       ctx.restore();
     }
@@ -2828,8 +2844,8 @@ export class KuroCatEngine {
     if (this.dizzy > 0.05) {
       const orbit = Math.min(1, this.dizzy);
       const a = this.elapsed * 3.1;
-      this.eyeLookX = Math.cos(a) * 5.2 * orbit;
-      this.eyeLookY = Math.sin(a) * 3.4 * orbit;
+      this.eyeLookX = Math.cos(a) * 5.6 * orbit;
+      this.eyeLookY = Math.sin(a) * 3.8 * orbit;
     }
 
     const targetFaceTurn = dx * 4.0 + this.spineLean * 8.0 + this.typingSway * 8.5 + pureTypingGlance * 1.5;
@@ -3777,13 +3793,41 @@ export class KuroCatEngine {
         // Expressive pupil hugging lower rim when looking down at keyboard!
         const px = this.eyeLookX;
         const py = this.eyeLookY;
-        const pupilRx = 6.2;
-        const pupilRy = 8.8;
+        // As it gets angry the pupil pinches inward and rides up, which reads as a
+        // narrowing, hostile stare long before the dizzy spiral appears.
+        const fierce = this.fierce;
+        const pupilRx = 6.2 * (1 - fierce * 0.36);
+        const pupilRy = 8.8 * (1 - fierce * 0.22);
 
         ctx.fillStyle = isRagdoll ? '#101624' : '#0e0e10';
         ctx.beginPath();
-        ctx.ellipse(px, py, pupilRx, pupilRy, 0, 0, Math.PI * 2);
+        ctx.ellipse(px, py - fierce * 2.2, pupilRx, pupilRy, 0, 0, Math.PI * 2);
         ctx.fill();
+
+        // Dizzy: a tiny spinning ring inside the pupil makes the "eyes are rolling"
+        // read unmistakable, even at the default pet size.
+        if (this.dizzy > 0.25) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, (this.dizzy - 0.25) / 0.5);
+          ctx.strokeStyle = '#ffd166';
+          ctx.lineWidth = 1.5;
+          ctx.lineCap = 'round';
+          const spin = this.elapsed * 7.5;
+          const rIn = Math.min(pupilRx, pupilRy) * 0.28;
+          const rOut = Math.min(pupilRx, pupilRy) * 0.86;
+          ctx.beginPath();
+          for (let k = 0; k <= 26; k++) {
+            const u = k / 26;
+            const ang = spin + u * Math.PI * 2.6;
+            const rad = rIn + u * (rOut - rIn);
+            const sx = px + Math.cos(ang) * rad;
+            const sy = py - fierce * 2.2 + Math.sin(ang) * rad;
+            if (k === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
 
         if (isRagdoll) {
           // Crisp glossy twin starlight catchlights for dreamy Ragdoll doll eyes!
@@ -3808,6 +3852,28 @@ export class KuroCatEngine {
         ctx.beginPath();
         ctx.ellipse(0, 0, rx, openRy, 0, 0, Math.PI * 2);
         ctx.stroke();
+      }
+
+      // Angry brow: an inward-slanting slab over the top of the eye. Drawn last so it
+      // clips visually against the iris and turns a neutral stare into a glare.
+      // It fades out as the pet goes dizzy — a glare would hide the spinning eyes.
+      const fierce = this.fierce * (1 - Math.min(1, this.dizzy * 1.4));
+      if (fierce > 0.04 && openRy > 3.0) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, fierce * 1.25);
+        // Dark stroke: the iris is bright (lemon / sapphire), so a same-colour brow
+        // would vanish. A dark slab reads on both breeds.
+        ctx.strokeStyle = 'rgba(16, 18, 24, 0.92)';
+        ctx.lineWidth = 2.6 + fierce * 1.6;
+        ctx.lineCap = 'round';
+        // Inner (toward nose) end sits low, outer end high — mirrored per eye.
+        const innerSign = idx === 0 ? 1 : -1;
+        const lift = 3.0 + fierce * 4.2;
+        ctx.beginPath();
+        ctx.moveTo(-innerSign * (rx * 0.92), -lift);
+        ctx.lineTo(innerSign * (rx * 0.62), -lift * 0.28);
+        ctx.stroke();
+        ctx.restore();
       }
 
       ctx.restore();
@@ -5403,10 +5469,46 @@ export class KuroCatEngine {
       if (openRy > 3.2) {
         const px = this.eyeLookX;
         const py = this.eyeLookY;
+        // Same narrowing glare as the built-in cats.
+        const fierce = this.fierce;
         ctx.fillStyle = s.pupilColor;
         ctx.beginPath();
-        ctx.ellipse(px, py, 6.2, 8.8, 0, 0, Math.PI * 2);
+        ctx.ellipse(
+          px,
+          py - fierce * 2.2,
+          6.2 * (1 - fierce * 0.36),
+          8.8 * (1 - fierce * 0.22),
+          0,
+          0,
+          Math.PI * 2,
+        );
         ctx.fill();
+
+        // Dizzy spinning pupil ring, same as the built-in cats.
+        if (this.dizzy > 0.25) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, (this.dizzy - 0.25) / 0.5);
+          ctx.strokeStyle = '#ffd166';
+          ctx.lineWidth = 1.5;
+          ctx.lineCap = 'round';
+          const spin = this.elapsed * 7.5;
+          const pRx = 6.2 * (1 - fierce * 0.36);
+          const pRy = 8.8 * (1 - fierce * 0.22);
+          const rIn = Math.min(pRx, pRy) * 0.28;
+          const rOut = Math.min(pRx, pRy) * 0.86;
+          ctx.beginPath();
+          for (let k = 0; k <= 26; k++) {
+            const u = k / 26;
+            const ang = spin + u * Math.PI * 2.6;
+            const rad = rIn + u * (rOut - rIn);
+            const sx = px + Math.cos(ang) * rad;
+            const sy = py - fierce * 2.2 + Math.sin(ang) * rad;
+            if (k === 0) ctx.moveTo(sx, sy);
+            else ctx.lineTo(sx, sy);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
 
         if (s.eyeCatchlight) {
           ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
@@ -5427,6 +5529,24 @@ export class KuroCatEngine {
         ctx.beginPath();
         ctx.ellipse(0, 0, rx, openRy, 0, 0, Math.PI * 2);
         ctx.stroke();
+      }
+
+      // Angry brow, matching the built-in cats' glare (dark, since the iris is bright).
+      // Fades out while dizzy so the spinning pupils stay visible.
+      const fierce = this.fierce * (1 - Math.min(1, this.dizzy * 1.4));
+      if (fierce > 0.04 && openRy > 3.0) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, fierce * 1.25);
+        ctx.strokeStyle = 'rgba(16, 18, 24, 0.92)';
+        ctx.lineWidth = 2.6 + fierce * 1.6;
+        ctx.lineCap = 'round';
+        const innerSign = idx === 0 ? 1 : -1;
+        const lift = 3.0 + fierce * 4.2;
+        ctx.beginPath();
+        ctx.moveTo(-innerSign * (rx * 0.92), -lift);
+        ctx.lineTo(innerSign * (rx * 0.62), -lift * 0.28);
+        ctx.stroke();
+        ctx.restore();
       }
 
       ctx.restore();
