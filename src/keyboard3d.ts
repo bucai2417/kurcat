@@ -6,6 +6,24 @@ import {
   type KeySpec,
 } from './keyboardLayout';
 import type { KeyboardOrientation } from './catEngine';
+import { DEFAULT_LIGHT_PALETTE, type KeyboardLightConfig } from './keyboardLight';
+
+/** HSL (h in degrees) to a THREE.Color, for the rainbow/aurora effects. */
+function hslToColor(h: number, s: number, l: number, out: THREE.Color): THREE.Color {
+  const hh = (((h % 360) + 360) % 360) / 360;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const hue = (tIn: number): number => {
+    let t = tIn;
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return out.setRGB(hue(hh + 1 / 3), hue(hh), hue(hh - 1 / 3));
+}
 
 export class Spring1D {
   public x: number;
@@ -537,6 +555,19 @@ export class KeyboardAndMouse3D {
   private topTintArray: Float32Array | null = null;
   private boardDisposables: Array<{ dispose(): void }> = [];
 
+  // ---- Keycap DIY + RGB lighting -------------------------------------------
+  /** Per-key colour override from the keycap designer, keyed by key id. */
+  private keyOverrides: Record<string, string> = {};
+  private lightCfg: KeyboardLightConfig | null = null;
+  private lightT = 0;
+  /** Ripples in board-local key coordinates: origin + spawn time + colour. */
+  private ripples: Array<{ x: number; z: number; bornAt: number; color: THREE.Color }> = [];
+  private rippleSeq = 0;
+  /** Last press time per key id, for the "typing afterglow" effect. */
+  private keyHitAt = new Map<string, number>();
+  private lightEdgeMat: THREE.MeshBasicMaterial | null = null;
+  private readonly tmpLightCol = new THREE.Color();
+
   private layoutId: KeyboardLayoutId = '65';
   private orientation: KeyboardOrientation = 'cat';
   private hitColor = new THREE.Color('#d4f044');
@@ -942,8 +973,28 @@ export class KeyboardAndMouse3D {
     this.privacyPlate.visible = false;
     this.boardGroup.add(this.privacyPlate);
 
+    // RGB edge light strip: a thin emissive band hugging the chassis underside.
+    if (!this.lightEdgeMat) {
+      this.lightEdgeMat = new THREE.MeshBasicMaterial({
+        color: '#d4f044',
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      });
+    }
+    const edgeGeo = new THREE.PlaneGeometry(W * 1.02, D * 1.02);
+    this.boardDisposables.push(edgeGeo);
+    const edgeMesh = new THREE.Mesh(edgeGeo, this.lightEdgeMat);
+    edgeMesh.rotation.x = -Math.PI / 2;
+    edgeMesh.position.set(0, 0.004, 0.01);
+    edgeMesh.renderOrder = 1;
+    edgeMesh.visible = false;
+    this.boardGroup.add(edgeMesh);
+
     this.deskGroup.updateMatrixWorld(false);
     this.boardGroup.updateMatrixWorld(false);
+    // Re-apply overrides/lighting to the freshly built key instances.
+    this.applyLighting(0, true);
   }
 
   public getLayoutId(): KeyboardLayoutId {
@@ -976,6 +1027,194 @@ export class KeyboardAndMouse3D {
       this.activeKeys.add(k);
     } else if (down) {
       this.activeKeys.add(k);
+    }
+    if (down) {
+      this.keyHitAt.set(id, this.lightT);
+      this.spawnKeyRipple(k);
+    }
+  }
+
+  /** Keycap designer colours (top colour per key id); empty clears them. */
+  public setKeycapOverrides(map: Record<string, string>): void {
+    this.keyOverrides = { ...map };
+    this.applyLighting(0, true);
+  }
+
+  /** RGB lighting config; pass null / disabled to fall back to plain caps. */
+  public setLightConfig(cfg: KeyboardLightConfig | null): void {
+    this.lightCfg = cfg && cfg.enabled && cfg.effect !== 'off' ? cfg : null;
+    this.ripples.length = 0;
+    this.applyLighting(0, true);
+  }
+
+  private spawnKeyRipple(k: KeyEntry3D): void {
+    const cfg = this.lightCfg;
+    if (!cfg || cfg.effect !== 'ripple' || !cfg.reactive) return;
+    const palette = cfg.palette.length >= 2 ? cfg.palette : DEFAULT_LIGHT_PALETTE;
+    this.rippleSeq = (this.rippleSeq + 1) % palette.length;
+    const hex = cfg.colorMode === 'solid' ? cfg.color : palette[this.rippleSeq];
+    this.ripples.push({ x: k.x, z: k.z, bornAt: this.lightT, color: new THREE.Color(hex) });
+    if (this.ripples.length > 16) this.ripples.splice(0, this.ripples.length - 16);
+  }
+
+  /**
+   * Recomputes every keycap tint from the keycap overrides and the active light
+   * effect. Cheap: one pass over 67-108 keys writing 3 floats each.
+   */
+  private applyLighting(dt: number, force = false): void {
+    const tints = this.topTintArray;
+    const attr = this.topTintAttr;
+    if (!tints || !attr) return;
+    const cfg = this.lightCfg;
+    const hasOverride = Object.keys(this.keyOverrides).length > 0;
+    if (!cfg && !hasOverride && !force && this.activeKeys.size === 0) return;
+
+    this.lightT += dt;
+    const now = this.lightT;
+    const palette = cfg && cfg.palette.length >= 2 ? cfg.palette : DEFAULT_LIGHT_PALETTE;
+    const halfW = Math.max(0.3, this.boardWidth * 0.5);
+    const col = this.tmpLightCol;
+    const white = this.whiteColor;
+
+    if (this.ripples.length > 16) this.ripples.splice(0, this.ripples.length - 16);
+
+    for (const k of this.keys.values()) {
+      // Base: keycap override colour, else white.
+      const ov = this.keyOverrides[k.spec.id];
+      let r = 1;
+      let g = 1;
+      let b = 1;
+      if (ov) {
+        col.set(ov);
+        r = col.r;
+        g = col.g;
+        b = col.b;
+      }
+
+      if (cfg) {
+        const nx = (k.x / halfW + 1) * 0.5; // 0..1 across the deck
+        const nz = k.z;
+        let intensity = 0;
+        let lr = 1;
+        let lg = 1;
+        let lb = 1;
+
+        switch (cfg.effect) {
+          case 'static':
+            intensity = cfg.brightness;
+            col.set(cfg.color);
+            break;
+          case 'breath':
+            intensity = cfg.brightness * (0.55 + 0.45 * Math.sin(now * 1.6));
+            col.set(cfg.color);
+            break;
+          case 'rainbow':
+            hslToColor(nx * 300 + now * 70, 0.85, 0.58, col);
+            intensity = cfg.brightness;
+            break;
+          case 'wave': {
+            const phase = nx * 3.4 + nz * 2.2 - now * 1.5;
+            intensity = cfg.brightness * Math.pow(Math.max(0, Math.sin(phase)), 1.6);
+            col.set(cfg.color);
+            break;
+          }
+          case 'ripple': {
+            let best = 0;
+            let bestColor: THREE.Color | null = null;
+            for (const rp of this.ripples) {
+              const age = now - rp.bornAt;
+              if (age < 0 || age > 1.6) continue;
+              const d = Math.hypot(k.x - rp.x, k.z - rp.z);
+              const radius = age * 1.9;
+              const band = Math.abs(d - radius);
+              if (band < 0.32) {
+                const v = (1 - band / 0.32) * (1 - age / 1.6);
+                if (v > best) {
+                  best = v;
+                  bestColor = rp.color;
+                }
+              }
+            }
+            if (bestColor) col.copy(bestColor);
+            else col.set(cfg.color);
+            intensity = cfg.brightness * best;
+            break;
+          }
+          case 'typing': {
+            const at = this.keyHitAt.get(k.spec.id);
+            const age = at === undefined ? Infinity : now - at;
+            if (age > 2.2) intensity = 0;
+            else intensity = cfg.brightness * Math.pow(1 - age / 2.2, 1.8);
+            col.set(cfg.color);
+            break;
+          }
+          case 'aurora': {
+            const n = Math.sin(nx * 3.1 + now * 0.6) * 0.5 + Math.sin(nz * 2.3 - now * 0.45) * 0.5;
+            const m = (n + 1) * 0.5;
+            col.set(m > 0.5 ? cfg.color2 : cfg.color);
+            intensity = cfg.brightness * (0.45 + 0.55 * m);
+            break;
+          }
+          case 'random': {
+            const seed = Math.abs(Math.sin(nx * 127.1 + nz * 311.7) * 43758.5453);
+            const idx = Math.floor(seed) % palette.length;
+            const rotate = Math.floor(now * 0.6);
+            col.set(palette[(idx + rotate) % palette.length]);
+            intensity = cfg.brightness * (0.72 + 0.28 * Math.sin(now * 2.2 + seed));
+            break;
+          }
+          default:
+            col.set(cfg.color);
+            break;
+        }
+
+        // Reactive flash on the key that was just pressed.
+        const pressed = k.glow;
+        if (cfg.reactive && pressed > 0.05) {
+          intensity = Math.min(1, intensity + pressed * 0.75);
+          col.set(cfg.color2);
+        }
+
+        if (intensity > 0.02) {
+          lr = col.r;
+          lg = col.g;
+          lb = col.b;
+          // Blend the lit colour over the cap colour by intensity.
+          const a = Math.min(1, intensity * 1.25);
+          r = white.r * (1 - a) + lr * a;
+          g = white.g * (1 - a) + lg * a;
+          b = white.b * (1 - a) + lb * a;
+        }
+      } else if (k.glow > 0.005) {
+        // No lighting configured: keep the original press flash on the cap.
+        const a = Math.min(1, k.glow * 0.9);
+        r = white.r * (1 - a) + this.hitColor.r * a;
+        g = white.g * (1 - a) + this.hitColor.g * a;
+        b = white.b * (1 - a) + this.hitColor.b * a;
+      }
+
+      const off = k.index * 3;
+      tints[off] = r;
+      tints[off + 1] = g;
+      tints[off + 2] = b;
+    }
+    attr.needsUpdate = true;
+
+    // Edge light strip: a thin emissive ring under the chassis.
+    if (this.lightEdgeMat) {
+      const cfg2 = cfg;
+      if (cfg2 && cfg2.edgeLight) {
+        const m = 0.5 + 0.5 * Math.sin(now * 2.1);
+        const col2 =
+          cfg2.effect === 'rainbow'
+            ? hslToColor(now * 70, 0.85, 0.6, this.tmpLightCol)
+            : this.tmpLightCol.set(cfg2.color);
+        this.lightEdgeMat.color.copy(col2);
+        this.lightEdgeMat.opacity = (0.35 + 0.35 * m) * cfg2.brightness;
+        this.lightEdgeMat.visible = true;
+      } else if (this.lightEdgeMat.visible) {
+        this.lightEdgeMat.visible = false;
+      }
     }
   }
 
@@ -1016,7 +1255,9 @@ export class KeyboardAndMouse3D {
     this.deskGroup.updateMatrixWorld(false);
     this.mouseGroup.updateMatrixWorld(false);
     this.mouseShape.updateMatrixWorld(false);
-    return out.set(0, 0.115, -0.05).applyMatrix4(this.mouseShape.matrixWorld);
+    // Grip the palm heel at the back of the shell (local −z), not the button end,
+    // so the paw never covers the L/R plates in either orientation.
+    return out.set(0, 0.102, -0.115).applyMatrix4(this.mouseShape.matrixWorld);
   }
 
   public update(
@@ -1034,7 +1275,6 @@ export class KeyboardAndMouse3D {
     // Only animate keys that are actually pressed or rebounding/fading (0-3 keys instead of 67-108!)
     if (this.activeKeys.size > 0 && this.sideInstanced && this.topInstanced && this.topTintAttr && this.topTintArray) {
       let matrixDirty = false;
-      let tintDirty = false;
       const baseY = this.boardH + 0.008;
       const kDownDepth = approach(62, dt);
       const kUpDepth = approach(24, dt);
@@ -1059,23 +1299,16 @@ export class KeyboardAndMouse3D {
         this.sideInstanced.setMatrixAt(k.index, this.tmpMat);
         this.topInstanced.setMatrixAt(k.index, this.tmpMat);
         matrixDirty = true;
-
-        this.tmpCol.copy(this.whiteColor).lerp(this.hitColor, k.glow * 0.90);
-        const off = k.index * 3;
-        this.topTintArray[off] = this.tmpCol.r;
-        this.topTintArray[off + 1] = this.tmpCol.g;
-        this.topTintArray[off + 2] = this.tmpCol.b;
-        tintDirty = true;
       }
 
       if (matrixDirty) {
         this.sideInstanced.instanceMatrix.needsUpdate = true;
         this.topInstanced.instanceMatrix.needsUpdate = true;
       }
-      if (tintDirty) {
-        this.topTintAttr.needsUpdate = true;
-      }
     }
+
+    // Cap tints come from one shared pass (lighting + keycap overrides + press glow).
+    this.applyLighting(dt);
 
     if (this.privacyPlate) {
       this.privacyPlate.visible = privacyAlpha > 0.02;

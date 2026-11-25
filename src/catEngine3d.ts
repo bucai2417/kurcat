@@ -23,6 +23,8 @@ import {
 } from './keyboard3d';
 import { createProp3D, type Prop3DHandle } from './prop3d';
 import type { PropConfig, PropKind } from './prop';
+import type { KeyboardLightConfig } from './keyboardLight';
+import type { KeycapOverride } from './deskSkin';
 
 export type CollarColorId = 'none' | 'red' | 'blue' | 'pink' | 'green';
 
@@ -74,7 +76,7 @@ interface Fx3D {
 }
 
 interface IdleAct3D {
-  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance';
+  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk';
   t0: number;
   dur: number;
   side: -1 | 1;
@@ -732,6 +734,8 @@ export class KuroCatEngine3D {
   private propLift = 0;
   /** Seconds of silence before random idle fidgets start (user setting). */
   private idleDelaySec = 6;
+  /** Next time the angry tail lashes a key. */
+  private nextAngrySlapAt = 0;
 
   private petting = false;
   private petUntil = -100;
@@ -1650,6 +1654,23 @@ export class KuroCatEngine3D {
     this.wakeRendering();
   }
 
+  /** RGB lighting on the 3D keycaps (same config the 2D deck uses). */
+  public setLightConfig(cfg: KeyboardLightConfig): void {
+    this.desk.setLightConfig(cfg);
+    this.wakeRendering();
+  }
+
+  /** Keycap designer colours, mapped from the 2D override records to cap tops. */
+  public setKeycapOverrides(map: Record<string, KeycapOverride>): void {
+    const colors: Record<string, string> = {};
+    for (const [id, ov] of Object.entries(map ?? {})) {
+      const top = (ov as { top?: string } | undefined)?.top;
+      if (typeof top === 'string' && top.length > 0) colors[id] = top;
+    }
+    this.desk.setKeycapOverrides(colors);
+    this.wakeRendering();
+  }
+
   /** Mirrors the 2D prop config so both render modes show the same drink. */
   public setPropConfig(cfg: PropConfig): void {
     this.propEnabled = Boolean(cfg.enabled);
@@ -1668,6 +1689,46 @@ export class KuroCatEngine3D {
       this.placeProp();
     }
     this.wakeRendering();
+  }
+
+  /**
+   * Hit regions in window-normalized coordinates for the Rust click-through test.
+   *
+   * The 2D desk layout does not describe the 3D framing, so reusing it left the
+   * whole 3D model marked as "click-through" and nothing was clickable. The 3D
+   * scene fills the window, so a generous centred box (cat + desk) is correct and
+   * keeps the transparent corners from swallowing desktop clicks.
+   */
+  public getHitRegions(): {
+    cat: { cx: number; cy: number; rx: number; ry: number };
+    desk: { cx: number; cy: number; rx: number; ry: number };
+    prop: { cx: number; cy: number; rx: number; ry: number } | null;
+    petBox: { cx: number; cy: number; rx: number; ry: number };
+    menuBox?: { cx: number; cy: number; rx: number; ry: number } | null;
+  } {
+    return {
+      // Whole window is the pet; Rust then maps clicks straight through.
+      petBox: { cx: 0.5, cy: 0.5, rx: 0.5, ry: 0.5 },
+      // Modelled body sits slightly above centre.
+      cat: { cx: 0.5, cy: 0.44, rx: 0.30, ry: 0.36 },
+      // Keyboard + mouse band across the lower third.
+      desk: { cx: 0.5, cy: 0.78, rx: 0.40, ry: 0.20 },
+      prop: this.propEnabled ? this.propScreenRegion() : null,
+      menuBox: null,
+    };
+  }
+
+  /** Projects the cup to a window-normalized box; null if it is off-screen. */
+  private propScreenRegion(): { cx: number; cy: number; rx: number; ry: number } {
+    const p = this.propHandle ? this.propHandle.group.position : null;
+    if (!p) return { cx: 0.5, cy: 0.8, rx: 0.06, ry: 0.10 };
+    this.tmpV1.set(p.x, 0.18, p.z).project(this.camera);
+    return {
+      cx: (this.tmpV1.x + 1) / 2,
+      cy: (1 - this.tmpV1.y) / 2,
+      rx: 0.07,
+      ry: 0.12,
+    };
   }
 
   /** Clicking the cup refills it, or drinks from it if it still has liquid. */
@@ -1722,14 +1783,17 @@ export class KuroCatEngine3D {
     this.placeProp();
   }
 
-  /** Sits the cup on the desk aisle on the configured side, clear of the mouse. */
+  /** Sits the cup just outside the keyboard bezel, on the configured side. */
   private placeProp(): void {
     if (!this.propHandle) return;
-    const is108 = this.desk.getLayoutId() === '108';
-    // Tuck it just outside the keyboard bezel, on the opposite side from the mouse.
-    const x = this.propSide === 'left' ? (is108 ? -1.34 : -1.10) : is108 ? 1.58 : 1.32;
-    this.propHandle.group.position.set(x, 0, 1.06);
-    this.propHandle.group.rotation.y = this.propSide === 'left' ? 0.28 : -0.28;
+    this.propHandle.group.position.set(this.propHomeX(), 0, 1.18);
+    this.propHandle.group.rotation.y = this.propSide === 'left' ? 0.30 : -0.30;
+  }
+
+  /** The cup's resting X, so the lift animation can return to it. */
+  private propHomeX(): number {
+    const halfW = this.desk.getBoardWidth() / 2;
+    return this.propSide === 'left' ? 0.24 - halfW - 0.14 : 0.24 + halfW + 0.14;
   }
 
   private readonly propPhaseDur: Record<'reach' | 'lift' | 'sip' | 'return', number> = {
@@ -1781,7 +1845,7 @@ export class KuroCatEngine3D {
 
     // Nudge the cup toward the mouth as it rises.
     const base = this.propHandle.group;
-    const homeX = this.propSide === 'left' ? (this.desk.getLayoutId() === '108' ? -1.34 : -1.10) : this.desk.getLayoutId() === '108' ? 1.58 : 1.32;
+    const homeX = this.propHomeX();
     base.position.x += (mix(homeX, -0.06, clamp(this.propLift / 0.62, 0, 1)) - base.position.x) * approach(10, dt);
 
     this.propHandle.update(this.propKind, this.propLevel, this.propLift, performance.now());
@@ -2207,6 +2271,21 @@ export class KuroCatEngine3D {
     }, 170);
   }
 
+  /** A quick angry tail strike with no key bubble — used when the cat is cross. */
+  private tailSlapKey(keyId: string): void {
+    this.tailTap.keyId = keyId;
+    this.tailTap.from = this.tailTap.reach;
+    this.tailTap.t0 = this.elapsed;
+    this.tailTap.dur = 0.10;
+    this.tailTap.down = true;
+    this.tailTap.landAt = this.elapsed;
+    this.desk.setKeyDown(keyId, true);
+    this.sSquash.kick(0.16);
+    window.setTimeout(() => {
+      this.desk.setKeyDown(keyId, false);
+    }, 110);
+  }
+
   private spawnKeyPopup(keyId: string, label: string, side: -1 | 1): void {
     const clean = label.length > 6 ? label.slice(0, 6) : label;
     const { tex, aspect } = getPopupTexture(clean);
@@ -2325,17 +2404,17 @@ export class KuroCatEngine3D {
     const curiousNow = !this.asleep && !this.privacyMode && !this.isCross && t < this.curiousUntil;
     const curious = clamp(this.sCurious.step(curiousNow ? 1 : 0, dt), 0, 1);
 
-    // Grumpy annoyance state
+    // Grumpy annoyance state: sustained fast typing winds the cat up.
     if (!this.privacyMode && !this.asleep) {
-      if (cps > 8.5) {
-        this.pokeAnnoy((cps - 8.5) * 0.055 * dt);
-      } else if (this.isCross && t - this.lastKey < 0.9 && cps >= 4) {
+      if (cps > 6) {
+        this.pokeAnnoy((cps - 6) * 0.085 * dt);
+      } else if (this.isCross && t - this.lastKey < 0.9 && cps >= 3) {
         this.lastPoke = t;
       }
       if (t - this.lastPoke > 2.2) {
         this.annoy = Math.max(0, this.annoy - 0.15 * dt);
       }
-      if (!this.isCross && this.annoy >= 0.62) {
+      if (!this.isCross && this.annoy >= 0.55) {
         this.isCross = true;
         this.crossSince = t;
         this.crossHuffDir = this.cursorNdc.x >= 0 ? -1 : 1;
@@ -2351,6 +2430,14 @@ export class KuroCatEngine3D {
     }
     const cross = clamp(this.sCross.step(this.isCross ? 1 : 0, dt), 0, 1);
 
+    // Angry tail lashing: while cross, the tail snaps at the keyboard in quick strikes.
+    if (this.isCross && cross > 0.35 && t >= this.nextAngrySlapAt) {
+      this.nextAngrySlapAt = t + 0.26 + Math.random() * 0.34;
+      const ids = [...this.tailKeyIdSet].filter((id) => this.desk.getKeyById(id));
+      const pick = ids.length ? ids[Math.floor(Math.random() * ids.length)] : 'enter';
+      if (this.desk.getKeyById(pick)) this.tailSlapKey(pick);
+    }
+
     // Calm idle fidgets
     if (this.idleAct && t > this.idleAct.t0 + this.idleAct.dur) this.idleAct = null;
     if (
@@ -2363,7 +2450,9 @@ export class KuroCatEngine3D {
       !this.isCross &&
       !curiousNow
     ) {
-      const kinds: IdleAct3D['kind'][] = ['tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail', 'stretch', 'glance'];
+      const kinds: IdleAct3D['kind'][] = [
+        'tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail', 'stretch', 'glance', 'groom', 'perk',
+      ];
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const durMap: Record<IdleAct3D['kind'], number> = {
         tilt: 1.9,
@@ -2373,6 +2462,8 @@ export class KuroCatEngine3D {
         tail: 1.1,
         stretch: 2.8,
         glance: 2.4,
+        groom: 2.6,
+        perk: 1.5,
       };
       this.idleAct = { kind, t0: t, dur: durMap[kind], side: Math.random() < 0.5 ? -1 : 1 };
       this.nextIdleAct = t + 3.4 + Math.random() * 4.0;
@@ -2424,6 +2515,13 @@ export class KuroCatEngine3D {
     }
     if (act && act.kind === 'glance') {
       targetLean = act.side * 0.10 * actEnv;
+    }
+    if (act && act.kind === 'groom') {
+      // Crouch a little while washing its face.
+      targetSquash += 0.05 * actEnv;
+    }
+    if (act && act.kind === 'perk') {
+      targetSquash -= 0.035 * actEnv;
     }
 
     this.bend.x = this.sShift.step(targetShift + targetLean, dt);
@@ -2481,6 +2579,17 @@ export class KuroCatEngine3D {
       if (act.kind === 'stretch') {
         // Chin up, head tilts back slightly during the stretch.
         targetPitch -= 0.10 * actEnv;
+      }
+      if (act.kind === 'groom') {
+        // Head dips toward a paw and rubs side to side, like washing its face.
+        targetPitch += 0.16 * actEnv;
+        targetRoll += Math.sin(actU * Math.PI * 4) * 0.10 * actEnv;
+        targetYaw += act.side * 0.10 * actEnv;
+      }
+      if (act.kind === 'perk') {
+        // Ears up, chin lifted, a quick alert little look-around.
+        targetPitch -= 0.07 * actEnv;
+        targetYaw += act.side * 0.14 * actEnv;
       }
     }
     if (cross > 0.05) {
@@ -2761,7 +2870,7 @@ export class KuroCatEngine3D {
       );
 
       // Soft sculpted plush paw resting cleanly right behind top edge of keyboard when calm
-      const pawScale = mix(1.0, 0.94, tuck);
+      const pawScale = mix(1.0, 0.94, tuck) * (onMouse ? 0.84 : 1);
       arm.paw.position.set(arm.hand.x, arm.hand.y - 0.010, arm.hand.z + 0.014);
       arm.paw.scale.set(0.126 * pawScale, 0.080 * pawScale, 0.118 * pawScale);
       arm.paw.rotation.y = Math.atan2(arm.hand.x - arm.c2.x, Math.max(0.1, arm.hand.z - arm.c2.z)) * 0.42;

@@ -251,6 +251,8 @@ function syncEngine3DState(): void {
   engine3d.setKeyboardConfig(kbLayout, kbOrient);
   engine3d.setTailKeyConfig(tailMode, tailIds);
   engine3d.setPropConfig(settings.propConfig);
+  engine3d.setLightConfig(settings.keyboardLight);
+  engine3d.setKeycapOverrides(settings.keycapOverrides);
   engine3d.setPrivacyMode(privacyActive);
   engine3d.resize();
 }
@@ -265,6 +267,7 @@ function activateRenderEngine(): void {
       canvas.classList.remove('hidden');
       active3d = false;
       engine.start();
+      pushHitRegions();
     }
     return;
   }
@@ -280,6 +283,8 @@ function activateRenderEngine(): void {
       engine3d.resize();
       engine3d.start();
       active3d = true;
+      // The click-through map differs between engines: re-publish it right away.
+      pushHitRegions();
     }
     return;
   }
@@ -311,6 +316,7 @@ if (isPreview) {
   (window as unknown as Record<string, unknown>).__kurocatEngine = engine;
   (window as unknown as Record<string, unknown>).__openMenu = (x = 40, y = 40) =>
     openContextMenu(x, y);
+
 }
 
 /**
@@ -798,8 +804,10 @@ function syncMenuUI(): void {
     mouseOrientation: settings.mouseOrientation,
   });
   engine.setLightConfig(settings.keyboardLight);
+  engine3d?.setLightConfig(settings.keyboardLight);
   engine.setDeskSkin(activeDeskSkin());
   engine.setKeycapOverrides(settings.keycapOverrides);
+  engine3d?.setKeycapOverrides(settings.keycapOverrides);
   engine.setPropConfig(settings.propConfig);
   engine3d?.setPropConfig(settings.propConfig);
   engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
@@ -851,7 +859,9 @@ function consumeIdleRequest(): void {
   engine3d?.triggerIdleAction(kind);
 }
 function pushHitRegions(): void {
-  const regions = engine.getHitRegions();
+  // In 3D the framing differs completely from the 2D desk layout; using the 2D
+  // regions marked the whole model as click-through, so nothing was clickable.
+  const regions = active3d && engine3d ? engine3d.getHitRegions() : engine.getHitRegions();
   // The menu sits in the margin Rust reserves outside the pet box, so Rust needs
   // its rect too — otherwise clicks on the menu fall through to the desktop.
   if (!menuEl.classList.contains('hidden')) {
