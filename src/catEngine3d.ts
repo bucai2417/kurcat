@@ -730,6 +730,8 @@ export class KuroCatEngine3D {
   private propMoodT = 0;
   private propMood: PropKind | null = null;
   private propLift = 0;
+  /** Seconds of silence before random idle fidgets start (user setting). */
+  private idleDelaySec = 6;
 
   private petting = false;
   private petUntil = -100;
@@ -1446,6 +1448,14 @@ export class KuroCatEngine3D {
     const w = Math.max(1, parent ? parent.clientWidth : this.canvas.clientWidth || 640);
     const h = Math.max(1, parent ? parent.clientHeight : this.canvas.clientHeight || 420);
     this.renderer.setSize(w, h, false);
+    // `setSize(w, h, false)` leaves the CSS box untouched, so pin it to exactly the
+    // size we rendered into. Otherwise the stylesheet's 100vw/100vh can disagree
+    // with the backing store (fractional display scaling, scrollbars) and the model
+    // renders zoomed and clipped off the right edge.
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    this.canvas.style.left = '0';
+    this.canvas.style.top = '0';
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.lastCamKey = '';
@@ -1631,6 +1641,13 @@ export class KuroCatEngine3D {
 
   public setRenderScale(scale: number): void {
     this.renderScale = clamp(scale, 0.2, 2.0);
+  }
+
+  /** How many seconds of silence before a random idle fidget fires. */
+  public setIdleDelaySec(sec: number): void {
+    if (!Number.isFinite(sec)) return;
+    this.idleDelaySec = clamp(sec, 2, 120);
+    this.wakeRendering();
   }
 
   /** Mirrors the 2D prop config so both render modes show the same drink. */
@@ -1904,8 +1921,7 @@ export class KuroCatEngine3D {
   }
 
   /** MCP mood override: 0..1 annoyance and 0..1 dizzy, mirroring the 2D engine. */
-  public setMoodMeter(annoyance?: number, dizzy?: number): void {
-    if (typeof annoyance === 'number' && Number.isFinite(annoyance)) {
+  public setMoodMeter(annoyance?: number, dizzy?: number): void {    if (typeof annoyance === 'number' && Number.isFinite(annoyance)) {
       this.annoy = Math.min(1, Math.max(0, annoyance));
       if (this.annoy >= 0.62 && !this.isCross) {
         this.isCross = true;
@@ -2340,7 +2356,7 @@ export class KuroCatEngine3D {
     if (
       !this.idleAct &&
       t >= this.nextIdleAct &&
-      idleSec > 2.6 &&
+      idleSec > this.idleDelaySec &&
       !this.asleep &&
       !this.privacyMode &&
       !petActive &&

@@ -221,6 +221,8 @@ export class KuroCatEngine {
   /** Current idle behaviour (sleep / roll), or null. */
   private idleAction: IdleActionState | null = null;
   private idleAutoEnabled = true;
+  /** Seconds of silence before an automatic idle action starts (user setting). */
+  private idleDelaySec = 6;
   private nextIdleActionAt = 0;
   /** Additive pose offsets layered on top of the typing / mouse pose while idling. */
   private idlePose = { lean: 0, hunch: 0, headTilt: 0, squint: 0 };
@@ -522,6 +524,13 @@ export class KuroCatEngine {
   public setIdleAutoEnabled(enabled: boolean): void {
     this.idleAutoEnabled = enabled;
     if (!enabled) this.endIdleAction();
+    this.wakeRendering();
+  }
+
+  /** How many seconds of silence before a random idle action fires. */
+  public setIdleDelaySec(sec: number): void {
+    if (!Number.isFinite(sec)) return;
+    this.idleDelaySec = Math.min(120, Math.max(2, sec));
     this.wakeRendering();
   }
 
@@ -2053,7 +2062,7 @@ export class KuroCatEngine {
   private interruptIdleAction(): void {
     if (!this.idleAction) return;
     this.endIdleAction();
-    this.nextIdleActionAt = this.elapsed + 45 + Math.random() * 70;
+    this.nextIdleActionAt = this.elapsed + this.idleDelaySec + Math.random() * (this.idleDelaySec + 18);
   }
 
   /** Drops the action, releases any posed paw and parks the tail again. */
@@ -2176,12 +2185,12 @@ export class KuroCatEngine {
 
       if (this.idleAction.t >= this.idleAction.duration) {
         this.endIdleAction();
-        this.nextIdleActionAt = this.elapsed + 45 + Math.random() * 70;
+        this.nextIdleActionAt = this.elapsed + this.idleDelaySec + Math.random() * (this.idleDelaySec + 18);
       }
       this.wakeRendering(now);
-    } else if (this.idleAutoEnabled && idleSec > 18 && this.elapsed >= this.nextIdleActionAt) {
+    } else if (this.idleAutoEnabled && idleSec > this.idleDelaySec && this.elapsed >= this.nextIdleActionAt) {
       this.pickIdleAction();
-      this.nextIdleActionAt = this.elapsed + 45 + Math.random() * 70;
+      this.nextIdleActionAt = this.elapsed + this.idleDelaySec + Math.random() * (this.idleDelaySec + 18);
     }
 
     const k = 1 - Math.exp(-8 * dt);

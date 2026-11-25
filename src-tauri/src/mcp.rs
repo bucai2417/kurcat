@@ -239,16 +239,18 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "set_idle_actions",
-            "description": "Turn automatic random idle behaviours on or off (the pet picks drink/roll/sleep after ~20s of inactivity).",
+            "description": "Turn automatic random idle behaviours on or off, and set how many seconds of silence trigger them (default 6s).",
             "inputSchema": {
                 "type": "object",
-                "required": ["enabled"],
-                "properties": { "enabled": { "type": "boolean" } }
+                "properties": {
+                    "enabled": { "type": "boolean" },
+                    "delaySec": { "type": "number", "minimum": 2, "maximum": 120 }
+                }
             }
         },
         {
             "name": "get_idle_actions",
-            "description": "Read whether automatic idle behaviours are enabled, plus the last request/sequence.",
+            "description": "Read whether automatic idle behaviours are enabled, the silence delay, plus the last request/sequence.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false }
         },
         {
@@ -589,6 +591,7 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             let s = load_settings();
             ok_text(json!({
                 "enabled": s.idle_actions_enabled,
+                "delaySec": s.idle_delay_sec,
                 "lastRequest": s.idle_action_request,
                 "seq": s.idle_action_seq,
                 "available": ["drink", "stretch", "wave", "groom", "nap", "cuddle"]
@@ -621,14 +624,23 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             ok_text(json!({ "status": "queued", "kind": kind, "seq": s.idle_action_seq }))
         }
         "set_idle_actions" => {
-            let Some(enabled) = args.get("enabled").and_then(|v| v.as_bool()) else {
-                return err_text("Missing required 'enabled' boolean argument.");
-            };
+            let enabled = args.get("enabled").and_then(|v| v.as_bool());
+            let delay = args.get("delaySec").and_then(|v| v.as_f64());
+            if enabled.is_none() && delay.is_none() {
+                return err_text("Provide 'enabled' (bool) and/or 'delaySec' (number).");
+            }
             let mut s = load_settings();
-            s.idle_actions_enabled = enabled;
+            if let Some(enabled) = enabled {
+                s.idle_actions_enabled = enabled;
+            }
+            if let Some(delay) = delay {
+                if delay.is_finite() {
+                    s.idle_delay_sec = delay.clamp(2.0, 120.0);
+                }
+            }
             save_settings(&s);
             on_change();
-            ok_text(json!({ "enabled": enabled }))
+            ok_text(json!({ "enabled": s.idle_actions_enabled, "delaySec": s.idle_delay_sec }))
         }
         "get_mood" => {
             let s = load_settings();

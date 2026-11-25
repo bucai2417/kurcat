@@ -73,6 +73,7 @@ interface AppSettings {
   propConfig: PropConfig;
   keycapOverrides: Record<string, KeycapOverride>;
   idleActionsEnabled: boolean;
+  idleDelaySec: number;
   idleActionRequest: string;
   idleActionSeq: number;
   moodTrackingEnabled: boolean;
@@ -159,6 +160,7 @@ let settings: AppSettings = {
   propConfig: { ...DEFAULT_PROP },
   keycapOverrides: {},
   idleActionsEnabled: true,
+  idleDelaySec: 6,
   idleActionRequest: '',
   idleActionSeq: 0,
   moodTrackingEnabled: true,
@@ -273,6 +275,9 @@ function activateRenderEngine(): void {
       engine.stop();
       canvas.classList.add('hidden');
       canvas3d?.classList.remove('hidden');
+      // Re-measure now that the canvas is actually visible; sizing it while it was
+      // display:none leaves a stale backing store and the model renders clipped.
+      engine3d.resize();
       engine3d.start();
       active3d = true;
     }
@@ -798,12 +803,18 @@ function syncMenuUI(): void {
   engine.setPropConfig(settings.propConfig);
   engine3d?.setPropConfig(settings.propConfig);
   engine.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
+  engine.setIdleDelaySec(settings.idleDelaySec ?? 6);
+  engine3d?.setIdleDelaySec(settings.idleDelaySec ?? 6);
   engine.setMoodTrackingEnabled(settings.moodTrackingEnabled !== false);
   engine.setTailKeyConfig(settings.tailKeyMode ?? 'smart', settings.tailKeyIds ?? [...DEFAULT_TAIL_KEY_IDS]);
   // Keep the 3D engine (if loaded) in step, and swap renderers when the mode changes.
   activateRenderEngine();
   const idleAutoEl = document.getElementById('idle-auto') as HTMLInputElement | null;
   if (idleAutoEl) idleAutoEl.checked = settings.idleActionsEnabled !== false;
+  const idleDelaySlider = document.getElementById('idle-delay-slider') as HTMLInputElement | null;
+  if (idleDelaySlider) idleDelaySlider.value = String(Math.round(settings.idleDelaySec ?? 6));
+  const idleDelayValue = document.getElementById('idle-delay-value');
+  if (idleDelayValue) idleDelayValue.textContent = `${Math.round(settings.idleDelaySec ?? 6)} 秒`;
   if (!sliderDragging) {
     engine.setRenderScale(settings.scale);
   }
@@ -1379,6 +1390,22 @@ async function bootstrap(): Promise<void> {
   if (idleAutoEl) {
     idleAutoEl.addEventListener('change', () => {
       void applySettingsPatch({ idleActionsEnabled: idleAutoEl.checked });
+    });
+  }
+
+  // Silence before random idle actions; applies live while dragging.
+  const idleDelaySliderEl = document.getElementById('idle-delay-slider') as HTMLInputElement | null;
+  if (idleDelaySliderEl) {
+    idleDelaySliderEl.addEventListener('input', () => {
+      const sec = Math.max(2, Math.min(60, Number(idleDelaySliderEl.value) || 6));
+      const label = document.getElementById('idle-delay-value');
+      if (label) label.textContent = `${sec} 秒`;
+      engine.setIdleDelaySec(sec);
+      engine3d?.setIdleDelaySec(sec);
+    });
+    idleDelaySliderEl.addEventListener('change', () => {
+      const sec = Math.max(2, Math.min(60, Number(idleDelaySliderEl.value) || 6));
+      void applySettingsPatch({ idleDelaySec: sec });
     });
   }
 

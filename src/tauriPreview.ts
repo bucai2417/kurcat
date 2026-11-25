@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS = {
   },
   keycapOverrides: {},
   idleActionsEnabled: true,
+  idleDelaySec: 6,
   idleActionRequest: '',
   idleActionSeq: 0,
   moodTrackingEnabled: true,

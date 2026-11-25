@@ -250,6 +250,11 @@ fn default_idle_actions_enabled() -> bool {
     true
 }
 
+/// Default silence before random idle actions (was hard-coded 18s).
+fn default_idle_delay_sec() -> f64 {
+    6.0
+}
+
 /// "" = no pending request; otherwise "drink" | "roll" | "sleep".
 fn default_idle_action_request() -> String {
     String::new()
@@ -358,6 +363,9 @@ pub struct AppSettings {
     pub keycap_overrides: std::collections::HashMap<String, KeycapOverride>,
     #[serde(default = "default_idle_actions_enabled")]
     pub idle_actions_enabled: bool,
+    /// Seconds of silence before the pet starts doing random idle actions.
+    #[serde(default = "default_idle_delay_sec")]
+    pub idle_delay_sec: f64,
     #[serde(default = "default_idle_action_request")]
     pub idle_action_request: String,
     #[serde(default)]
@@ -495,6 +503,7 @@ impl Default for AppSettings {
             prop_config: PropConfig::default(),
             keycap_overrides: std::collections::HashMap::new(),
             idle_actions_enabled: default_idle_actions_enabled(),
+            idle_delay_sec: default_idle_delay_sec(),
             idle_action_request: default_idle_action_request(),
             idle_action_seq: 0,
             mood_tracking_enabled: default_mood_tracking_enabled(),

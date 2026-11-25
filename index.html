@@ -206,6 +206,21 @@
           <span>空闲时随机待机</span>
           <input type="checkbox" id="idle-auto" checked />
         </label>
+        <div class="scale-header light-brightness-row">
+          <span class="menu-scale-label">静默多久后开始</span>
+          <span class="menu-hint" id="idle-delay-value">6 秒</span>
+        </div>
+        <div class="scale-slider-wrap">
+          <input
+            type="range"
+            id="idle-delay-slider"
+            class="scale-slider"
+            min="2"
+            max="60"
+            step="1"
+            value="6"
+          />
+        </div>
       </div>
       <div class="menu-scale-row">
         <div class="scale-header">
