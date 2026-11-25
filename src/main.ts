@@ -249,6 +249,12 @@ function syncEngine3DState(): void {
   engine3d.setHeadphones(shouldWearHeadphonesNow());
   engine3d.setGameActive(gameActive);
   engine3d.setKeyboardConfig(kbLayout, kbOrient);
+  engine3d.setMouseOrientation(settings.mouseOrientation);
+  engine3d.setLogicalSize(engine.getLogicalSize());
+  if (!sliderDragging) engine3d.setRenderScale(settings.scale);
+  engine3d.setIdleAutoEnabled(settings.idleActionsEnabled !== false);
+  engine3d.setIdleDelaySec(settings.idleDelaySec ?? 6);
+  engine3d.setMoodTrackingEnabled(settings.moodTrackingEnabled !== false);
   engine3d.setTailKeyConfig(tailMode, tailIds);
   engine3d.setPropConfig(settings.propConfig);
   engine3d.setLightConfig(settings.keyboardLight);
@@ -916,7 +922,7 @@ function repositionMenu(): void {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  const pet = engine.getPetScreenRect();
+  const pet = active3d && engine3d ? engine3d.getPetScreenRect() : engine.getPetScreenRect();
   const petLeft = pet.left;
   const petTop = pet.top;
   const petRight = pet.left + pet.width;
@@ -1298,6 +1304,8 @@ async function bootstrap(): Promise<void> {
       const nextScale = Math.max(0.2, Math.min(1.5, Number(scaleSliderEl.value) / 100));
       updateScaleSliderVisual(nextScale);
       engine.setRenderScale(nextScale);
+      engine3d?.setRenderScale(nextScale);
+      pushHitRegions();
     });
     const commitSliderScale = () => {
       sliderDragging = false;

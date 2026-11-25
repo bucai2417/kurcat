@@ -1,3 +1,4 @@
+import { clipAngryEyelid } from './petMotion';
 import {
   KEYBOARD_KEYS_65,
   KEYBOARD_KEYS_108,
@@ -134,7 +135,7 @@ type ParticleShape = 'bubble' | 'steam' | 'heart' | 'spark' | 'pearl';
 type ReactionKind = 'satisfied' | 'lick' | 'shake' | 'happy' | 'burp';
 
 /** Idle behaviours the pet picks from when the user is away. */
-export type IdleActionKind = 'drink' | 'stretch' | 'groom' | 'nap' | 'cuddle' | 'wave';
+export type IdleActionKind = 'drink' | 'stretch' | 'groom' | 'nap' | 'cuddle' | 'wave' | 'tilt' | 'slowBlink';
 
 /** Old names kept working for menu / MCP payloads already in the wild. */
 const IDLE_ALIASES: Record<string, IdleActionKind> = {
@@ -536,13 +537,14 @@ export class KuroCatEngine {
 
   /** Plays one of the idle behaviours right now (also used by MCP / the menu). */
   public triggerIdleAction(rawKind: string): boolean {
+    if (this.privacyMode) return false;
     const kind: IdleActionKind = (IDLE_ALIASES[rawKind] ?? rawKind) as IdleActionKind;
     if (kind === 'drink') {
       if (!this.propConfig.enabled) return false;
       return this.triggerSip() || this.clickProp() !== 'ignored';
     }
-    if (!['stretch', 'groom', 'nap', 'cuddle', 'wave'].includes(kind)) return false;
-    if (this.idleAction) return false;
+    if (!['stretch', 'groom', 'nap', 'cuddle', 'wave', 'tilt', 'slowBlink'].includes(kind)) return false;
+    if (this.idleAction || this.drinker.drinking) return false;
 
     // The whale girl has her own rig: she waves and stretches with her hands.
     if (this.catBreed === 'dafeiyu') {
@@ -553,7 +555,7 @@ export class KuroCatEngine {
       return true;
     }
 
-    const duration =
+    const duration = kind === 'slowBlink' ? 2.4 : kind === 'tilt' ? 2.2 :
       kind === 'nap'
         ? 8 + Math.random() * 4
         : kind === 'groom'
@@ -585,9 +587,12 @@ export class KuroCatEngine {
 
   /** Manual "drink now" trigger; returns false when the cup is empty or busy. */
   public triggerSip(): boolean {
-    if (!this.propConfig.enabled) return false;
+    if (!this.propConfig.enabled || this.privacyMode) return false;
     const started = this.drinker.startSip();
-    if (started) this.wakeRendering();
+    if (started) {
+      this.endIdleAction();
+      this.wakeRendering();
+    }
     return started;
   }
 
@@ -2153,6 +2158,17 @@ export class KuroCatEngine {
           }
           break;
         }
+        case 'tilt': {
+          headTiltTarget = 0.20 * envelope;
+          leanTarget = -0.06 * envelope;
+          break;
+        }
+        case 'slowBlink': {
+          // A relaxed greeting: eyes close slowly, pause, then open again.
+          squintTarget = Math.sin(t * Math.PI) ** 2;
+          headTiltTarget = -0.06 * envelope;
+          break;
+        }
         case 'nap': {
           // Sitting loaf: head down, eyes shut, slow breathing, Zzz.
           hunchTarget = 0.9 * envelope;
@@ -2248,7 +2264,7 @@ export class KuroCatEngine {
       else this.triggerIdleAction(fishKind);
       return;
     }
-    const pool: IdleActionKind[] = ['cuddle', 'stretch', 'groom', 'wave', 'nap', 'nap'];
+    const pool: IdleActionKind[] = ['cuddle', 'stretch', 'groom', 'wave', 'tilt', 'slowBlink', 'nap', 'nap'];
     if (this.propConfig.enabled && this.drinker.level > 0.05) pool.push('drink');
     const kind = pool[Math.floor(Math.random() * pool.length)];
     if (kind === 'drink') {
@@ -3779,6 +3795,10 @@ export class KuroCatEngine {
       const openRy = Math.max(1.2, ry * (1 - closedness));
       const curiousTilt = (idx === 0 ? -0.1 : 0.1) * (0.25 + this.typingHunch * 0.75);
       ctx.rotate(curiousTilt);
+      // Clip the entire eye, including highlights and its rim, beneath a real lid.
+      // The previously drawn fur shows through, so patterned skins stay seamless.
+      clipAngryEyelid(ctx, rx, openRy, idx === 0 ? 1 : -1,
+        this.fierce * (1 - Math.min(1, this.dizzy * 1.4)));
 
       if (isRagdoll) {
         // Gentle soulful sky-cerulean Ragdoll eyes (warm & lifelike, matching user's Ragdoll!)
@@ -3861,28 +3881,6 @@ export class KuroCatEngine {
         ctx.beginPath();
         ctx.ellipse(0, 0, rx, openRy, 0, 0, Math.PI * 2);
         ctx.stroke();
-      }
-
-      // Angry brow: an inward-slanting slab over the top of the eye. Drawn last so it
-      // clips visually against the iris and turns a neutral stare into a glare.
-      // It fades out as the pet goes dizzy — a glare would hide the spinning eyes.
-      const fierce = this.fierce * (1 - Math.min(1, this.dizzy * 1.4));
-      if (fierce > 0.04 && openRy > 3.0) {
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, fierce * 1.25);
-        // Dark stroke: the iris is bright (lemon / sapphire), so a same-colour brow
-        // would vanish. A dark slab reads on both breeds.
-        ctx.strokeStyle = 'rgba(16, 18, 24, 0.92)';
-        ctx.lineWidth = 2.6 + fierce * 1.6;
-        ctx.lineCap = 'round';
-        // Inner (toward nose) end sits low, outer end high — mirrored per eye.
-        const innerSign = idx === 0 ? 1 : -1;
-        const lift = 3.0 + fierce * 4.2;
-        ctx.beginPath();
-        ctx.moveTo(-innerSign * (rx * 0.92), -lift);
-        ctx.lineTo(innerSign * (rx * 0.62), -lift * 0.28);
-        ctx.stroke();
-        ctx.restore();
       }
 
       ctx.restore();
@@ -5467,6 +5465,10 @@ export class KuroCatEngine {
       const openRy = Math.max(1.2, ry * (1 - closedness));
       const curiousTilt = (idx === 0 ? -0.1 : 0.1) * (0.25 + this.typingHunch * 0.75);
       ctx.rotate(curiousTilt);
+      // Clip the entire eye, including highlights and its rim, beneath a real lid.
+      // The previously drawn fur shows through, so patterned skins stay seamless.
+      clipAngryEyelid(ctx, rx, openRy, idx === 0 ? 1 : -1,
+        this.fierce * (1 - Math.min(1, this.dizzy * 1.4)));
 
       const irisGrad = ctx.createLinearGradient(0, -openRy, 0, openRy);
       irisGrad.addColorStop(0.0, s.eyeColorTop);
@@ -5541,24 +5543,6 @@ export class KuroCatEngine {
         ctx.beginPath();
         ctx.ellipse(0, 0, rx, openRy, 0, 0, Math.PI * 2);
         ctx.stroke();
-      }
-
-      // Angry brow, matching the built-in cats' glare (dark, since the iris is bright).
-      // Fades out while dizzy so the spinning pupils stay visible.
-      const fierce = this.fierce * (1 - Math.min(1, this.dizzy * 1.4));
-      if (fierce > 0.04 && openRy > 3.0) {
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, fierce * 1.25);
-        ctx.strokeStyle = 'rgba(16, 18, 24, 0.92)';
-        ctx.lineWidth = 2.6 + fierce * 1.6;
-        ctx.lineCap = 'round';
-        const innerSign = idx === 0 ? 1 : -1;
-        const lift = 3.0 + fierce * 4.2;
-        ctx.beginPath();
-        ctx.moveTo(-innerSign * (rx * 0.92), -lift);
-        ctx.lineTo(innerSign * (rx * 0.62), -lift * 0.28);
-        ctx.stroke();
-        ctx.restore();
       }
 
       ctx.restore();

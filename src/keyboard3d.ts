@@ -6,6 +6,7 @@ import {
   type KeySpec,
 } from './keyboardLayout';
 import type { KeyboardOrientation } from './catEngine';
+import { resolveMouseFacing, type MouseOrientation } from './deskMetrics';
 import { DEFAULT_LIGHT_PALETTE, type KeyboardLightConfig } from './keyboardLight';
 
 /** HSL (h in degrees) to a THREE.Color, for the rainbow/aurora effects. */
@@ -591,6 +592,7 @@ export class KeyboardAndMouse3D {
   private readonly wheelMat: THREE.MeshBasicMaterial;
   private readonly mouseLabelLMat: THREE.MeshBasicMaterial;
   private readonly mouseLabelRMat: THREE.MeshBasicMaterial;
+  private mouseOrientation: MouseOrientation = 'auto';
   private readonly mouseHome = new THREE.Vector3(-1.32, 0.015, 1.04);
   private readonly mouseOffset = new THREE.Vector3();
   private readonly mouseTarget = new THREE.Vector3();
@@ -810,6 +812,20 @@ export class KeyboardAndMouse3D {
     this.mouseBodyMat.needsUpdate = true;
   }
 
+  public setMouseOrientation(mode: MouseOrientation): void {
+    this.mouseOrientation = mode;
+    const catFacing = resolveMouseFacing(mode, this.orientation) === 'cat';
+    const yaw = catFacing ? -0.10 : Math.PI - 0.10;
+    if (this.mouseShape.rotation.y === yaw) return;
+    this.mouseShape.rotation.y = yaw;
+    this.mouseLabelLMat.map?.dispose();
+    this.mouseLabelRMat.map?.dispose();
+    this.mouseLabelLMat.map = makeMouseLabelTexture('L', catFacing);
+    this.mouseLabelRMat.map = makeMouseLabelTexture('R', catFacing);
+    this.mouseLabelLMat.needsUpdate = true;
+    this.mouseLabelRMat.needsUpdate = true;
+  }
+
   public rebuildBoard(layoutId: KeyboardLayoutId, orientation: KeyboardOrientation): void {
     // Skip redundant rebuild if nothing changed and meshes already exist
     if (this.sideInstanced && this.layoutId === layoutId && this.orientation === orientation) {
@@ -833,12 +849,7 @@ export class KeyboardAndMouse3D {
     const is108 = layoutId === '108';
     const isCatFacing = orientation === 'cat';
 
-    // Sync mouse orientation (180° cat-facing vs 0° viewer-facing)
-    this.mouseShape.rotation.y = isCatFacing ? -0.10 : Math.PI - 0.10;
-    this.mouseLabelLMat.map = makeMouseLabelTexture('L', isCatFacing);
-    this.mouseLabelRMat.map = makeMouseLabelTexture('R', isCatFacing);
-    this.mouseLabelLMat.needsUpdate = true;
-    this.mouseLabelRMat.needsUpdate = true;
+    this.setMouseOrientation(this.mouseOrientation);
 
     const U = is108 ? 0.122 : 0.150;
     const CAP = U * 0.87;
@@ -1262,7 +1273,11 @@ export class KeyboardAndMouse3D {
     this.mouseShape.updateMatrixWorld(false);
     // Grip the palm heel at the back of the shell (local −z), not the button end,
     // so the paw never covers the L/R plates in either orientation.
-    return out.set(0, 0.102, -0.115).applyMatrix4(this.mouseShape.matrixWorld);
+    // In viewer-facing mode the rear sits in front of the buttons on screen.
+    // Rest on the rear flank so the paw keeps contact without hiding the click area.
+    if (resolveMouseFacing(this.mouseOrientation, this.orientation) === 'viewer') out.set(-0.18, 0.065, -0.13);
+    else out.set(-0.025, 0.111, -0.185);
+    return out.applyMatrix4(this.mouseShape.matrixWorld);
   }
 
   public update(

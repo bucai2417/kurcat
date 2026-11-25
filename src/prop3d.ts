@@ -31,9 +31,12 @@ const LOOKS: Record<
 
 export interface Prop3DHandle {
   group: THREE.Group;
-  /** World-space point the cat's mouth should meet during a sip. */
+  /** Local anchors transformed by the engine with the rigid cup. */
   mouthAnchor: THREE.Vector3;
-  update(kind: PropKind, level: number, lift: number, nowMs: number): void;
+  gripAnchor: THREE.Vector3;
+  /** A separate ground shadow; it never rides up with the cup. */
+  shadow: THREE.Mesh<THREE.CircleGeometry, THREE.MeshBasicMaterial>;
+  update(level: number): void;
   dispose(): void;
 }
 
@@ -71,6 +74,7 @@ export function createProp3D(kind: PropKind): Prop3DHandle {
   lid.position.y = look.height + look.height * 0.02;
   group.add(lid);
 
+  const mouthAnchor = new THREE.Vector3(0, look.height + look.radius * 0.74 * 0.55, 0);
   if (look.form === 'pudding') {
     const cap = new THREE.Mesh(
       new THREE.SphereGeometry(look.radius * 0.74, 22, 12, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -96,6 +100,7 @@ export function createProp3D(kind: PropKind): Prop3DHandle {
     straw.position.set(look.radius * 0.28, look.height * 0.95, look.radius * 0.12);
     straw.rotation.z = -0.22;
     group.add(straw);
+    mouthAnchor.set(0, look.height * 0.45, 0).applyEuler(straw.rotation).add(straw.position);
   }
 
   // Soft contact shadow so the cup does not float.
@@ -105,27 +110,24 @@ export function createProp3D(kind: PropKind): Prop3DHandle {
   );
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.002;
-  group.add(shadow);
-
-  const mouthAnchor = new THREE.Vector3(0, look.height * 0.92, 0);
-  const bodyBaseY = body.position.y;
   const liquidBaseY = liquid.position.y;
-  const lidBaseY = lid.position.y;
 
   return {
     group,
+    shadow,
     mouthAnchor,
-    update(_kind: PropKind, level: number, lift: number, nowMs: number) {
-      group.position.y = lift;
+    gripAnchor: new THREE.Vector3(0, look.height * 0.48, -look.radius * 0.90),
+    update(level: number) {
       const fill = Math.max(0.05, level);
       liquid.position.y = liquidBaseY - (1 - fill) * look.height * 0.42;
       liquid.scale.y = Math.max(0.35, fill);
-      // Subtle settle bob while it is being held up.
-      const bob = lift > 0.02 ? Math.sin(nowMs * 0.008) * 0.004 : 0;
-      body.position.y = bodyBaseY + bob;
-      lid.position.y = lidBaseY + bob;
+      shadow.position.set(group.position.x, 0.002, group.position.z);
+      shadow.material.opacity = 0.18 * Math.exp(-Math.max(0, group.position.y) * 4);
+      shadow.visible = shadow.material.opacity > 0.01;
     },
     dispose() {
+      shadow.geometry.dispose();
+      shadow.material.dispose();
       group.traverse((o) => {
         const mesh = o as THREE.Mesh;
         mesh.geometry?.dispose();
