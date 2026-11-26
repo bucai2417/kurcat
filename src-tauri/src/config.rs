@@ -389,6 +389,8 @@ pub struct AppSettings {
     #[serde(default = "default_desk_skin_id")]
     pub desk_skin_id: String,
     #[serde(default)]
+    pub desk_accessories: std::collections::HashMap<String, String>,
+    #[serde(default)]
     pub prop_config: PropConfig,
     #[serde(default)]
     pub keycap_overrides: std::collections::HashMap<String, KeycapOverride>,
@@ -535,6 +537,7 @@ impl Default for AppSettings {
             mouse_orientation: default_mouse_orientation(),
             keyboard_light: KeyboardLightConfig::default(),
             desk_skin_id: default_desk_skin_id(),
+            desk_accessories: std::collections::HashMap::new(),
             prop_config: PropConfig::default(),
             keycap_overrides: std::collections::HashMap::new(),
             keycap_overrides3d: Some(std::collections::HashMap::new()),
@@ -589,12 +592,17 @@ pub fn config_path() -> PathBuf {
     app_data_dir().join("settings.json")
 }
 
+pub fn normalize_accessories(selected: &mut std::collections::HashMap<String, String>) {
+    selected.retain(|slot, id| ["keyboard2d", "keyboard3d", "mouse2d", "mouse3d"].contains(&slot.as_str()) && !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_'));
+}
+
 pub fn load_settings() -> AppSettings {
     let path = config_path();
     if let Ok(content) = fs::read_to_string(&path) {
         if let Ok(mut parsed) = serde_json::from_str::<AppSettings>(&content) {
             parsed.scale = parsed.scale.clamp(0.20, 1.50);
             parsed.input_sound = parsed.input_sound.normalized();
+            normalize_accessories(&mut parsed.desk_accessories);
             if parsed.keycap_overrides3d.is_none() {
                 parsed.keycap_overrides3d = Some(parsed.keycap_overrides.clone());
             }

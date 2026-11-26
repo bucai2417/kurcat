@@ -1,0 +1,26 @@
+{
+  "format": "diy-cat-resource",
+  "version": 1,
+  "kind": "mouse",
+  "id": "mint-mouse-3d",
+  "name": "薄荷鼠标 · 3D",
+  "modes": [
+    "3d"
+  ],
+  "revision": 1,
+  "author": "DIY-Cat",
+  "license": "MIT",
+  "description": "适合 3D 桌面的薄荷外设，沿用猫爪接触和按压动画。",
+  "skin": {
+    "shell": "#E6F2EB",
+    "shellEdge": "#88AC99",
+    "button": "#F5FFF7",
+    "buttonEdge": "#567568",
+    "wheel": "#F7CB77",
+    "outline": "#233D30",
+    "silhouette": "ergonomic",
+    "material": "plastic",
+    "pattern": "solid",
+    "glow": ""
+  }
+}

@@ -134,7 +134,7 @@ class KuroOverlayService : Service(), KuroPetListener {
             val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             val ch = NotificationChannel(
                 CHANNEL_ID,
-                "KuroCat 悬浮桌宠常驻服务",
+                "DIY-Cat 悬浮桌宠常驻服务",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "保持悬浮小猫置顶显示，并在通知栏提供一键解锁穿透与切换皮肤快捷按钮"
@@ -181,7 +181,7 @@ class KuroOverlayService : Service(), KuroPetListener {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_kurocat)
-            .setContentTitle("KuroCat 桌宠运行中")
+            .setContentTitle("DIY-Cat 桌宠运行中")
             .setContentText(statusText)
             .setOngoing(true)
             .setSilent(true)

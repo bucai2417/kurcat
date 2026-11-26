@@ -11,6 +11,9 @@ import { PetGesture } from './petGesture';
 import { SettingsSync } from './settingsSync';
 import { modelActions, modelMode, modelModes } from './modelPack';
 import { setupModelLibrary } from './modelLibrary';
+import { setupResourceLibrary } from './resourceLibrary';
+import { parseResourcePack, composeDeskSkin, resourceSlot, type ResourcePack, type ResourceSelections } from './resourcePack';
+import type { ModelMode } from './modelPack';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -79,6 +82,7 @@ interface AppSettings {
   mouseOrientation: MouseOrientation;
   keyboardLight: KeyboardLightConfig;
   deskSkinId: string;
+  deskAccessories: ResourceSelections;
   deskSkins: DeskSkinConfig[];
   propConfig: PropConfig;
   keycapOverrides: Record<string, KeycapOverride>;
@@ -117,6 +121,7 @@ interface WindowCursorInfo {
   insideWindow: boolean;
   overCat: boolean;
   altOverride?: boolean;
+  overPetArea?: boolean;
 }
 
 interface UpdateInfo {
@@ -145,6 +150,13 @@ let dismissedVersion: string | null = null;
 let toastAutoHideTimer: number | null = null;
 let sliderDragging = false;
 let altOverride = false;
+let pointerOverPetArea = false;
+let petAvoidingPointer = false;
+function syncPointerAvoidance() {
+  petAvoidingPointer = settings.clickThroughLocked && !altOverride && pointerOverPetArea;
+  canvas.classList.toggle('pet-avoiding-pointer', petAvoidingPointer);
+  canvas3d?.classList.toggle('pet-avoiding-pointer', petAvoidingPointer);
+}
 let lastKnownLockState: boolean | null = null;
 let syncWin7OverlayFn: ((focusMenu?: boolean) => void) | null = null;
 
@@ -168,6 +180,7 @@ let settings: AppSettings = {
   mouseOrientation: 'auto',
   keyboardLight: { ...DEFAULT_LIGHT },
   deskSkinId: 'classic-cream',
+  deskAccessories: {},
   deskSkins: [...BUILTIN_DESK_SKINS],
   propConfig: { ...DEFAULT_PROP },
   keycapOverrides: {},
@@ -222,6 +235,8 @@ let loading3dPromise: Promise<void> | null = null;
 let webgl3dUnavailable = false;
 let active3d = false;
 let syncModelLibrary = () => {};
+let syncResourceLibrary = () => {};
+let resourceList: ResourcePack[] = [];
 function effectiveMode(): '2d' | '3d' { return modelMode(catList.find(c => c.id === settings.catBreed) ?? catList[0], settings.renderMode === '3d' ? '3d' : '2d'); }
 
 /** True when the user picked 3D and the environment supports it. */
@@ -273,7 +288,9 @@ function syncEngine3DState(): void {
   engine3d.setTailKeyConfig(tailMode, tailIds);
   engine3d.setPropConfig(settings.propConfig);
   engine3d.setLightConfig(settings.keyboardLight);
+  engine3d.setDeskSkin(activeDeskSkin('3d'));
   engine3d.setKeycapOverrides(settings.keycapOverrides3d ?? settings.keycapOverrides);
+  syncPointerAvoidance();
   engine3d.setPrivacyMode(privacyActive);
   engine3d.resize();
 }
@@ -526,9 +543,9 @@ function allDeskSkins(): DeskSkinConfig[] {
   return merged;
 }
 
-function activeDeskSkin(): DeskSkinConfig {
+function activeDeskSkin(mode: ModelMode): DeskSkinConfig {
   const list = allDeskSkins();
-  return list.find((s) => s.id === settings.deskSkinId) ?? list[0];
+  return composeDeskSkin(list.find((s) => s.id === settings.deskSkinId) ?? list[0], resourceList, settings.deskAccessories ?? {}, mode);
 }
 
 function renderDeskSkinPills(): void {
@@ -689,8 +706,8 @@ function renderKeycapGrid(): void {
     const height = (rSpan / layout.totalRows) * 100;
     const ov = overrides[key.id];
     const bg = ov?.top ?? '#e8e9e4';
-    const fg = effectiveMode() === '3d' ? '#2c2f36' : ov?.text ?? '#2c2f36';
-    const glyph = effectiveMode() === '3d' ? key.label : ov?.emoji || ov?.label || key.label;
+    const fg = ov?.text ?? '#2c2f36';
+    const glyph = (ov?.emoji || ov?.label || key.label).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
     const sel = kcSelectedKeyId === key.id ? ' selected' : '';
     parts.push(
       `<button class="kce-key${sel}" data-kcekey="${key.id}" style="left:${left.toFixed(2)}%;top:${top.toFixed(2)}%;width:${width.toFixed(2)}%;height:${height.toFixed(2)}%;background:${bg};color:${fg}" title="${key.id}">${glyph}</button>`,
@@ -704,10 +721,8 @@ function renderKeycapGrid(): void {
       const ov = currentKeycap(kcSelectedKeyId);
       const bits = [key?.label || kcSelectedKeyId];
       if (ov.top) bits.push(ov.top);
-      if (effectiveMode() !== '3d') {
-        if (ov.emoji) bits.push(ov.emoji);
-        if (ov.label) bits.push(`“${ov.label}”`);
-      }
+      if (ov.emoji) bits.push(ov.emoji);
+      if (ov.label) bits.push(`“${ov.label}”`);
       kceSelectedEl.textContent = `已选中：${bits.join(' · ')}`;
     } else {
       kceSelectedEl.textContent = '未选择按键（点上方键盘）';
@@ -830,6 +845,7 @@ function syncMenuUI(): void {
       : '未开启';
   }
   updateKbScaleVisual(kbLayout, kbScale);
+  syncPointerAvoidance();
   renderDeskSkinPills();
   renderPropUI();
   syncLightUI();
@@ -852,7 +868,8 @@ function syncMenuUI(): void {
   });
   engine.setLightConfig(settings.keyboardLight);
   engine3d?.setLightConfig(settings.keyboardLight);
-  engine.setDeskSkin(activeDeskSkin());
+  engine.setDeskSkin(activeDeskSkin('2d'));
+  engine3d?.setDeskSkin(activeDeskSkin('3d'));
   engine.setKeycapOverrides(settings.keycapOverrides);
   engine3d?.setKeycapOverrides(settings.keycapOverrides3d ?? settings.keycapOverrides);
   engine.setPropConfig(settings.propConfig);
@@ -902,10 +919,9 @@ function syncMenuUI(): void {
   const allowedActions = modelActions(activeCat, webgl3dUnavailable ? '2d' : effectiveMode());
   document.querySelectorAll<HTMLButtonElement>('[data-idleaction]').forEach(btn => { btn.hidden = !allowedActions.includes(btn.dataset.idleaction ?? ''); });
   syncModelLibrary();
+  syncResourceLibrary();
   const keycapHint = document.getElementById('kce-hint');
-  if (keycapHint) keycapHint.textContent = effectiveMode() === '3d'
-    ? '点选下方任意按键，再挑颜色；3D 当前支持顶面配色'
-    : '点选下方任意按键，再挑颜色 / 图标';
+  if (keycapHint) keycapHint.textContent = '点选下方任意按键，再挑颜色 / 图标；个人设置会覆盖资源包键帽';
   if (kceEl && !kceEl.classList.contains('hidden')) renderKeycapGrid();
   repositionMenu();
   pushHitRegions();
@@ -1645,6 +1661,41 @@ async function bootstrap(): Promise<void> {
     resize: () => { repositionMenu(); pushHitRegions(); },
   });
 
+  syncResourceLibrary = setupResourceLibrary({
+    capture: (kind, mode) => {
+      const desk = activeDeskSkin(mode);
+      const skin = structuredClone(desk[kind]);
+      if (kind === 'keyboard' && 'keyTop' in skin) {
+        const overrides = (mode === '3d' ? settings.keycapOverrides3d ?? settings.keycapOverrides : settings.keycapOverrides) ?? {};
+        skin.keycaps = { ...skin.keycaps };
+        for (const [id, cap] of Object.entries(overrides)) skin.keycaps[id] = { ...skin.keycaps[id], ...cap };
+      }
+      return parseResourcePack({ format: 'diy-cat-resource', version: 1, kind, id: 'my-'+kind+'-'+mode, name: '我的'+mode.toUpperCase()+(kind==='keyboard'?'键盘':'鼠标'), modes: [mode], revision: 1, skin });
+    },
+    resources: () => resourceList,
+    selected: () => settings.deskAccessories ?? {},
+    mode: () => effectiveMode(),
+    activate: async (pack, mode) => {
+      await settingsSync.update({ deskAccessories: { ...settings.deskAccessories, [resourceSlot(pack.kind, mode)]: pack.id } });
+    },
+    reset: async (kind, mode) => {
+      const next = { ...settings.deskAccessories }; delete next[resourceSlot(kind, mode)];
+      await settingsSync.update({ deskAccessories: next });
+    },
+    install: async (pack, replace) => {
+      const installed = await invoke<ResourcePack>('import_resource_pack', { package: pack, replace });
+      resourceList = resourceList.filter(p => p.id !== installed.id).concat(installed);
+      syncMenuUI();
+    },
+    remove: async id => { await invoke('delete_resource_pack', { id }); resourceList = resourceList.filter(p => p.id !== id); await settingsSync.refresh(); },
+    export: async pack => invoke<string>('export_resource_pack', { package: pack }),
+    openPage: async url => { await invoke('open_release_page', { url }); },
+    resize: () => { repositionMenu(); pushHitRegions(); },
+  });
+  await safeListen<ResourcePack[]>('kuro-resources', ev => { resourceList = ev.payload; syncMenuUI(); });
+  try { resourceList = await invoke<ResourcePack[]>('get_resources'); syncMenuUI(); }
+  catch (error) { document.getElementById('resource-status')!.textContent = '读取资源失败：' + String(error); }
+
   // ---- Keycap designer ----
   // Tab switching (menu stays a single scroll-free panel per tab).
   document.querySelectorAll<HTMLButtonElement>('.menu-tab-btn').forEach((btn) => {
@@ -1820,6 +1871,8 @@ async function bootstrap(): Promise<void> {
   await safeListen<WindowCursorInfo>('kuro-cursor', (ev) => {
     const c = ev.payload;
     altOverride = Boolean(c.altOverride);
+    pointerOverPetArea = Boolean(c.overPetArea);
+    syncPointerAvoidance();
     if (active3d && engine3d) {
       engine3d.onWindowCursor(c.relX, c.relY, c.overCat);
     } else {
@@ -1890,7 +1943,10 @@ async function bootstrap(): Promise<void> {
 
     const deskSkinId = target.dataset.deskskin;
     if (deskSkinId) {
-      void applySettingsPatch({ deskSkinId });
+      const deskAccessories = { ...settings.deskAccessories };
+      delete deskAccessories[resourceSlot('keyboard', effectiveMode())];
+      delete deskAccessories[resourceSlot('mouse', effectiveMode())];
+      void applySettingsPatch({ deskSkinId, deskAccessories });
       return;
     }
 
@@ -2114,6 +2170,8 @@ async function bootstrap(): Promise<void> {
         if (w < 8 || h < 8) return;
 
         const imgData = petCtx.getImageData(0, 0, w, h);
+        // ULW receives raw pixels; CSS opacity does not affect native presentation.
+        if (petAvoidingPointer) imgData.data.fill(0);
         const u32 = new Uint32Array(
           imgData.data.buffer,
           imgData.data.byteOffset,
@@ -2146,7 +2204,7 @@ async function bootstrap(): Promise<void> {
       engine.onAfterRender = presentWin7Frame;
       // Kick initial presentation immediately & keep overlay bounds in sync if toast/menu resizes
       setTimeout(presentWin7Frame, 30);
-      setInterval(() => syncWin7Overlay(false), 200);
+      setInterval(() => { syncWin7Overlay(false); presentWin7Frame(); }, 200);
     }
   } catch {
     // Non-Win7 or unsupported: keep native transparency untouched

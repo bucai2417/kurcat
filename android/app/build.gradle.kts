@@ -1,9 +1,9 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
 }
-
-import java.io.File
-import java.util.Properties
 
 android {
     namespace = "com.kurocat.pet"
@@ -13,8 +13,8 @@ android {
         applicationId = "com.kurocat.pet"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40800
-        versionName = "4.8.0"
+        versionCode = 40801
+        versionName = "1.0.0"
     }
 
     val signingPropsFile = File("${System.getProperty("user.home")}/.kurocat-android/signing.properties")
@@ -54,6 +54,11 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+
+    // Release CI must provide the same persistent signing identity for every update.
+    if (System.getenv("CI") == "true" && gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+        check(signingConfigs.findByName("release") != null) { "Missing Android release signing secrets" }
     }
 
     compileOptions {

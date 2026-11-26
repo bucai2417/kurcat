@@ -1,3 +1,5 @@
+import { BUILTIN_DESK_SKINS, type DeskSkinConfig, type KeyboardSkin, type KeycapOverride } from './deskSkin';
+import { paintPattern, paintMaterialSheen } from './deskTexture';
 import * as THREE from 'three';
 import {
   getKeyboardLayout,
@@ -294,7 +296,6 @@ interface KeyAtlasData {
   rects: Map<string, [number, number, number, number]>;
 }
 
-const keyAtlasCache = new Map<string, KeyAtlasData>();
 const miscTextureCache = new Map<string, THREE.CanvasTexture>();
 
 /**
@@ -306,18 +307,17 @@ function getKeycapAtlas(
   layoutId: KeyboardLayoutId,
   keys: readonly KeySpec[],
   rotated180: boolean,
+  skin: KeyboardSkin,
 ): KeyAtlasData {
-  const cacheKey = `${layoutId}|${rotated180 ? 1 : 0}`;
-  const cached = keyAtlasCache.get(cacheKey);
-  if (cached) return cached;
 
   const unique: Array<{ key: string; label: string; accent: 'base' | 'mod' | 'orange' }> = [];
   const seen = new Set<string>();
   for (const spec of keys) {
     const accent: 'base' | 'mod' | 'orange' =
       spec.accent === 'orange' ? 'orange' : spec.accent === 'mod' ? 'mod' : 'base';
-    const label = spec.id === 'space' ? '' : spec.id === 'esc' ? 'Esc' : spec.label;
-    const tk = `${label}|${accent}`;
+    const cap = skin.keycaps?.[spec.id];
+    const label = cap?.emoji || (cap?.label ?? (spec.id === 'space' ? '' : spec.id === 'esc' ? 'Esc' : spec.label));
+    const tk = spec.id;
     if (!seen.has(tk)) {
       seen.add(tk);
       unique.push({ key: tk, label, accent });
@@ -339,7 +339,7 @@ function getKeycapAtlas(
   c.width = atlasW;
   c.height = atlasH;
   const g = c.getContext('2d')!;
-  g.fillStyle = '#f9f8f3';
+  g.fillStyle = skin.keyTop;
   g.fillRect(0, 0, atlasW, atlasH);
 
   const rects = new Map<string, [number, number, number, number]>();
@@ -353,10 +353,12 @@ function getKeycapAtlas(
     const ox = col * CELL;
     const oy = row * CELL;
 
-    g.fillStyle =
-      item.accent === 'orange' ? '#f59b2e' : item.accent === 'mod' ? '#e6e4db' : '#f9f8f3';
+    const cap = skin.keycaps?.[item.key];
+    g.fillStyle = cap?.top ?? (item.accent === 'orange' ? skin.accentKeyTop : item.accent === 'mod' ? skin.modKeyTop : skin.keyTop);
     g.fillRect(ox, oy, CELL, CELL);
 
+    paintPattern(g, skin.pattern, {x: ox, y: oy, w: CELL, h: CELL, color: skin.patternColor, scale: skin.patternScale, alpha: .18});
+    paintMaterialSheen(g, skin.material, {x: ox, y: oy, w: CELL, h: CELL, radius: 8});
     // Sculpted concave PBT keycap sheen
     const grad = g.createLinearGradient(0, oy + PAD, 0, oy + CELL - PAD);
     grad.addColorStop(0, 'rgba(255,255,255,0.28)');
@@ -371,10 +373,10 @@ function getKeycapAtlas(
       const len = item.label.length;
       const fontSize = len >= 4 ? 29 : len === 3 ? 35 : len === 2 ? 42 : 52;
       g.font = `700 ${fontSize}px "Segoe UI", system-ui, sans-serif`;
-      g.fillStyle = item.accent === 'orange' ? '#ffffff' : '#2b2d34';
+      g.fillStyle = cap?.text ?? skin.keyText;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(item.label, 0, 2);
+      g.fillText(item.label, 0, 2, CELL - PAD * 2);
       g.restore();
     }
 
@@ -392,7 +394,7 @@ function getKeycapAtlas(
   if (orangeOnly.length > 0) {
     // Place orange tiles on the bottom-most atlas row for a full-row mipmap buffer + 10px per-tile padding!
     const orangeRow = Math.floor(atlasH / CELL) - 1;
-    g.fillStyle = '#f59b2e';
+    g.fillStyle = skin.accentKeyTop;
     g.fillRect(0, orangeRow * CELL, atlasW, CELL);
     for (let i = 0; i < orangeOnly.length; i++) {
       paintTile(orangeOnly[i], i % cols, orangeRow);
@@ -404,7 +406,6 @@ function getKeycapAtlas(
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   const entry: KeyAtlasData = { tex, rects };
-  keyAtlasCache.set(cacheKey, entry);
   return entry;
 }
 
@@ -537,6 +538,11 @@ export class KeyboardAndMouse3D {
   public readonly deskGroup = new THREE.Group();
 
   private readonly capSideGeo: THREE.CylinderGeometry;
+  private deskSkin: DeskSkinConfig = BUILTIN_DESK_SKINS[0];
+  private appearanceKey = '';
+  private capOverrides: Record<string, KeycapOverride> = {};
+  private mouseSkinTexture?: THREE.CanvasTexture;
+  private mouseSkinScale = new THREE.Vector3(1, 1, 1);
   private readonly capTopBaseGeo: THREE.PlaneGeometry;
   private readonly capSideMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
   private readonly chassisMat = new THREE.MeshBasicMaterial({ vertexColors: true });
@@ -558,7 +564,6 @@ export class KeyboardAndMouse3D {
 
   // ---- Keycap DIY + RGB lighting -------------------------------------------
   /** Per-key colour override from the keycap designer, keyed by key id. */
-  private keyOverrides: Record<string, string> = {};
   private lightCfg: KeyboardLightConfig | null = null;
   private lightT = 0;
   /** Ripples in board-local key coordinates: origin + spawn time + colour. */
@@ -790,6 +795,9 @@ export class KeyboardAndMouse3D {
       lblL,
       lblR,
     );
+    this.mouseShape.userData.dome = dome;
+    this.mouseShape.userData.skirt = baseSkirt;
+    this.mouseShape.userData.seams = seamsMesh;
     this.mouseShape.userData.leftBtn = leftBtn;
     this.mouseShape.userData.rightBtn = rightBtn;
     this.deskGroup.add(this.mouseGroup);
@@ -826,9 +834,9 @@ export class KeyboardAndMouse3D {
     this.mouseLabelRMat.needsUpdate = true;
   }
 
-  public rebuildBoard(layoutId: KeyboardLayoutId, orientation: KeyboardOrientation): void {
+  public rebuildBoard(layoutId: KeyboardLayoutId, orientation: KeyboardOrientation, force = false): void {
     // Skip redundant rebuild if nothing changed and meshes already exist
-    if (this.sideInstanced && this.layoutId === layoutId && this.orientation === orientation) {
+    if (!force && this.sideInstanced && this.layoutId === layoutId && this.orientation === orientation) {
       return;
     }
 
@@ -857,7 +865,11 @@ export class KeyboardAndMouse3D {
     const D = layout.totalRows * U + 0.14;
     this.boardWidth = W;
     this.boardH = 0.112;
-    this.capH = is108 ? 0.048 : 0.056;
+    const caps = {...this.deskSkin.keyboard.keycaps};
+    for (const [id, cap] of Object.entries(this.capOverrides)) caps[id] = {...caps[id], ...cap};
+    const skin = {...this.deskSkin.keyboard, keycaps: caps};
+    this.sideColorBase.set(skin.keySide); this.sideColorMod.set(skin.modKeySide); this.sideColorOrange.set(skin.accentKeySide);
+    this.capH = (is108 ? 0.048 : 0.056) * ({classic: 1, sa: 1.5, flat: .62, jelly: 1.2}[skin.shape]);
 
     this.boardGroup.position.set(0.24, 0.015, 1.08);
     this.mouseHome.set(is108 ? -1.46 : -1.16, 0.015, 0.96);
@@ -871,14 +883,17 @@ export class KeyboardAndMouse3D {
 
     // Merge baseChassis + topBezel + plate into 1 single vertex-colored draw call!
     const baseGeo = makeRoundedSlabGeo(W, D, this.boardH, 0.068, 0);
-    const bezelGeo = makeRoundedSlabGeo(W - 0.014, D - 0.014, 0.014, 0.060, this.boardH - 0.008);
+    const rimGeo = makeRoundedSlabGeo(W - 0.006, D - 0.006, 0.008, 0.064, this.boardH - 0.008);
+    const bezelGeo = makeRoundedSlabGeo(W - 0.022, D - 0.022, 0.014, 0.056, this.boardH - 0.008);
     const plateGeo = makeRoundedSlabGeo(W - 0.062, D - 0.062, 0.008, 0.044, this.boardH + 0.004);
     const chassisGeo = mergeStaticGeometries([
-      { geo: baseGeo, color: '#202229' },
-      { geo: bezelGeo, color: '#2c2f38' },
-      { geo: plateGeo, color: '#181a20' },
+      { geo: baseGeo, color: skin.deckSide },
+      { geo: rimGeo, color: skin.deckEdge },
+      { geo: bezelGeo, color: skin.deckTop },
+      { geo: plateGeo, color: skin.bedFill },
     ]);
     baseGeo.dispose();
+    rimGeo.dispose();
     bezelGeo.dispose();
     plateGeo.dispose();
     const chassisMesh = new THREE.Mesh(chassisGeo, this.chassisMat);
@@ -887,12 +902,16 @@ export class KeyboardAndMouse3D {
 
     // Single Texture Atlas + 2 InstancedMeshes for ALL 67 or 108 keycaps (2 draw calls total!)
     const keyCount = layout.keys.length;
-    const atlas = getKeycapAtlas(layoutId, layout.keys, isCatFacing);
+    const atlas = getKeycapAtlas(layoutId, layout.keys, isCatFacing, skin);
+    this.boardDisposables.push(atlas.tex);
 
-    const sideInst = new THREE.InstancedMesh(this.capSideGeo, this.capSideMat, keyCount);
+    const sides = skin.shape === 'jelly' ? makeRoundedSlabGeo(1, 1, 1, .16, 0) : this.capSideGeo;
+    if (sides !== this.capSideGeo) this.boardDisposables.push(sides);
+    const sideInst = new THREE.InstancedMesh(sides, this.capSideMat, keyCount);
     sideInst.frustumCulled = false;
 
     const topGeo = this.capTopBaseGeo.clone();
+    if (skin.shape === 'jelly') topGeo.translate(0, .002, 0);
     const uvRects = new Float32Array(keyCount * 4);
     const tints = new Float32Array(keyCount * 3);
     const uvAttr = new THREE.InstancedBufferAttribute(uvRects, 4);
@@ -940,8 +959,8 @@ export class KeyboardAndMouse3D {
             : this.sideColorBase,
       );
 
-      const legendText = spec.id === 'space' ? '' : spec.id === 'esc' ? 'Esc' : spec.label;
-      const rect = atlas.rects.get(`${legendText}|${accent}`) ?? [0, 0, 0.1, 0.1];
+      if (skin.keycaps?.[spec.id]?.side) sideInst.setColorAt(i, this.tmpCol.set(skin.keycaps[spec.id].side!));
+      const rect = atlas.rects.get(spec.id) ?? [0, 0, 0.1, 0.1];
       uvRects[i * 4] = rect[0];
       uvRects[i * 4 + 1] = rect[1];
       uvRects[i * 4 + 2] = rect[2];
@@ -1045,10 +1064,37 @@ export class KeyboardAndMouse3D {
     }
   }
 
-  /** Keycap designer colours (top colour per key id); empty clears them. */
-  public setKeycapOverrides(map: Record<string, string>): void {
-    this.keyOverrides = { ...map };
-    this.applyLighting(0, true);
+  /** Personal keycap colours and legends layer over resource-pack keycaps. */
+  public setKeycapOverrides(map: Record<string, KeycapOverride>): void {
+    if (JSON.stringify(this.capOverrides) === JSON.stringify(map ?? {})) return;
+    this.capOverrides = { ...(map ?? {}) };
+    this.rebuildBoard(this.layoutId, this.orientation, true);
+  }
+
+  public setDeskSkin(skin: DeskSkinConfig): void {
+    const key = JSON.stringify(skin); if (key === this.appearanceKey) return;
+    const keyboardChanged = JSON.stringify(skin.keyboard) !== JSON.stringify(this.deskSkin.keyboard);
+    this.appearanceKey = key; this.deskSkin = skin;
+    if (keyboardChanged) this.rebuildBoard(this.layoutId, this.orientation, true);
+    const m = skin.mouse;
+    const dome = this.mouseShape.userData.dome as THREE.Mesh<THREE.BufferGeometry>;
+    const pos = dome.geometry.getAttribute('position'); const colors = dome.geometry.getAttribute('color');
+    const top = new THREE.Color(m.shell), side = new THREE.Color(m.shellEdge), button = new THREE.Color(m.button);
+    for (let i = 0; i < pos.count; i++) {
+      this.tmpCol.copy(side).lerp(pos.getZ(i) > .08 ? button : top, smoothstep(.08, .76, pos.getY(i)));
+      colors.setXYZ(i, this.tmpCol.r, this.tmpCol.g, this.tmpCol.b);
+    }
+    colors.needsUpdate = true;
+    (this.mouseShape.userData.skirt as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(m.outline);
+    (this.mouseShape.userData.seams as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(m.glow || m.buttonEdge);
+    const c = document.createElement('canvas'); c.width = c.height = 256; const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 256, 256);
+    paintPattern(ctx, m.pattern, {x: 0, y: 0, w: 256, h: 256, color: m.outline, scale: 1, alpha: .3});
+    paintMaterialSheen(ctx, m.material, {x: 0, y: 0, w: 256, h: 256, radius: 20});
+    this.mouseSkinTexture?.dispose(); this.mouseSkinTexture = new THREE.CanvasTexture(c); this.mouseSkinTexture.colorSpace = THREE.SRGBColorSpace;
+    this.mouseBodyMat.map = this.mouseSkinTexture; this.mouseBodyMat.needsUpdate = true;
+    this.mouseSkinScale.set(m.silhouette === 'oval' ? 1 : 1.14, m.silhouette === 'ergonomic' ? 1.18 : m.silhouette === 'gaming' ? .82 : 1, m.silhouette === 'gaming' ? 1.12 : 1);
+    this.mouseShape.scale.copy(this.mouseSkinScale);
   }
 
   /** RGB lighting config; pass null / disabled to fall back to plain caps. */
@@ -1077,8 +1123,7 @@ export class KeyboardAndMouse3D {
     const attr = this.topTintAttr;
     if (!tints || !attr) return;
     const cfg = this.lightCfg;
-    const hasOverride = Object.keys(this.keyOverrides).length > 0;
-    if (!cfg && !hasOverride && !force && this.activeKeys.size === 0) return;
+    if (!cfg && !force && this.activeKeys.size === 0) return;
 
     this.lightT += dt;
     const now = this.lightT;
@@ -1090,17 +1135,10 @@ export class KeyboardAndMouse3D {
     if (this.ripples.length > 16) this.ripples.splice(0, this.ripples.length - 16);
 
     for (const k of this.keys.values()) {
-      // Base: keycap override colour, else white.
-      const ov = this.keyOverrides[k.spec.id];
+      // Appearance is baked into the atlas; only lighting multiplies it.
       let r = 1;
       let g = 1;
       let b = 1;
-      if (ov) {
-        col.set(ov);
-        r = col.r;
-        g = col.g;
-        b = col.b;
-      }
 
       if (cfg) {
         const nx = (k.x / halfW + 1) * 0.5; // 0..1 across the deck
@@ -1353,9 +1391,9 @@ export class KeyboardAndMouse3D {
     if (leftBtn) leftBtn.visible = this.leftPress > 0.005;
     if (rightBtn) rightBtn.visible = this.rightPress > 0.005;
 
-    this.wheelMat.color.set('#555966').lerp(this.hitColor, this.wheelGlow);
+    this.wheelMat.color.set(this.deskSkin.mouse.wheel).lerp(this.hitColor, this.wheelGlow);
 
     const anyPress = Math.max(this.leftPress, this.rightPress);
-    this.mouseShape.scale.set(1 + 0.03 * anyPress, 1 - 0.10 * anyPress, 1);
+    this.mouseShape.scale.set(this.mouseSkinScale.x * (1 + .03 * anyPress), this.mouseSkinScale.y * (1 - .10 * anyPress), this.mouseSkinScale.z);
   }
 }

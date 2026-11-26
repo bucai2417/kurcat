@@ -4409,7 +4409,7 @@ export class KuroCatEngine {
       }
 
       // DIY keycap overrides win over the skin palette but lose to the pressed state.
-      const diy = this.keycapOverrides[key.id] ?? kbs.keycaps?.[key.id];
+      const diy = kbs.keycaps?.[key.id] || this.keycapOverrides[key.id] ? { ...kbs.keycaps?.[key.id], ...this.keycapOverrides[key.id] } : undefined;
       if (diy && press <= 0.14) {
         if (diy.top) topColor = diy.top;
         if (diy.side) sideColor = diy.side;

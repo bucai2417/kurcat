@@ -21,3 +21,9 @@ node scripts/build-model-catalog.mjs --check
 ```
 
 这些命令不安装依赖、不编译桌宠。格式、动作契约与外部骨架规划参见 [模型接入文档](../docs/model-packs.md)。
+
+## 键盘和鼠标
+
+此目录同时接收 `.diycat.json` 键盘 / 鼠标外观包，目录任务会生成 `resources.json`。商城按类型和 2D / 3D 筛选，独立保存四个键鼠选择。请从 mint-keyboard / mint-mouse 示例开始，并阅读 [完整创作教程](../docs/RESOURCE_AUTHORING.md)。两个模式设计不同外观时使用不同 ID；同 ID 更新必须递增 revision。`space`、`esc` 等按键 ID 区分大小写。
+
+`node scripts/check-resource-library.mjs` 验证资源与存储行为；`node scripts/build-model-catalog.mjs --check` 同时检查宠物、键鼠目录。此格式暂不加载自定义网格或外部骨架。

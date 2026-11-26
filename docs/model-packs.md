@@ -183,3 +183,7 @@ node scripts/build-model-catalog.mjs --check
 ```
 
 回归脚本需要 Node 22.15+，覆盖状态时序、动作中断、尾尖接地、完整 2D 特效绘制路径、包格式、中文与目录下载校验。模型库回归另外覆盖修订比较、目录生成、过期索引、错误下载、删除后的设置持久化与事件广播，不依赖 npm 包。检查模拟 Canvas/WebGL 绘制与浏览器环境，不替代安装包中的视觉与原生窗口测试。Rust 模型校验单元测试和安装包构建交给 GitHub Actions。
+
+## 键盘与鼠标资源
+
+商城现按宠物 / 键盘 / 鼠标及 2D / 3D 分类，键鼠支持独立替换、图片预览、导入导出和删除。制作步骤、完整字段、行为验收与发布说明见 [资源创作教程](RESOURCE_AUTHORING.md)。键鼠使用独立的 `.diycat.json` 协议与 `resources.json` 目录，不混入宠物 `catalog.json`。

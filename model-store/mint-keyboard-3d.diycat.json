@@ -1,0 +1,41 @@
+{
+  "format": "diy-cat-resource",
+  "version": 1,
+  "kind": "keyboard",
+  "id": "mint-keyboard-3d",
+  "name": "薄荷键盘 · 3D",
+  "modes": [
+    "3d"
+  ],
+  "revision": 1,
+  "author": "DIY-Cat",
+  "license": "MIT",
+  "description": "适合 3D 桌面的薄荷外设，沿用猫爪接触和按压动画。",
+  "skin": {
+    "deckTop": "#E6F2EB",
+    "deckSide": "#567568",
+    "deckEdge": "#88AC99",
+    "bedFill": "#3C574B",
+    "keyTop": "#F5FFF7",
+    "keySide": "#C6DBCA",
+    "keyText": "#233D30",
+    "modKeyTop": "#B6DCCA",
+    "modKeySide": "#82AB94",
+    "accentKeyTop": "#F7CB77",
+    "accentKeySide": "#C19A52",
+    "patternColor": "#699C7D",
+    "shape": "sa",
+    "material": "plastic",
+    "pattern": "solid",
+    "patternScale": 1,
+    "keycaps": {
+      "space": {
+        "label": "摸鱼时间",
+        "top": "#F7CB77"
+      },
+      "esc": {
+        "label": "喵"
+      }
+    }
+  }
+}

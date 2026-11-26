@@ -96,7 +96,8 @@ export function parseModelCatalog(raw: string): ModelPack[] {
   if (new Set(packs.map(p => p.skin.id)).size !== packs.length) throw Error('目录中有重复的模型 ID');
   return packs;
 }
-export async function fetchModelCatalog(rawUrl: string): Promise<ModelPack[]> {
+export async function fetchModelCatalog(rawUrl: string): Promise<ModelPack[]> { return parseModelCatalog(await fetchCatalogText(rawUrl)); }
+export async function fetchCatalogText(rawUrl: string): Promise<string> {
   const url = new URL(normalizeCatalogUrl(rawUrl));
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 10000);
   try {
@@ -110,7 +111,7 @@ export async function fetchModelCatalog(rawUrl: string): Promise<ModelPack[]> {
     } } finally { await reader.cancel().catch(() => {}); }
     const bytes = new Uint8Array(size); let offset = 0;
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    return parseModelCatalog(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch (e) {
     if (controller.signal.aborted) throw Error('读取 GitHub 超时，请检查网络后重试');
     if (e instanceof TypeError) throw Error('无法读取模型目录，请检查网络、UTF-8 文件编码和 GitHub 地址');

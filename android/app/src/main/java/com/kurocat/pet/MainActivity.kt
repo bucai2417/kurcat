@@ -162,13 +162,13 @@ class MainActivity : AppCompatActivity(), KuroPetListener {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         titleCol.addView(TextView(this).apply {
-            text = "🐈‍⬛ KuroCat Android"
+            text = "🐈‍⬛ DIY-Cat Android"
             setTextColor(0xFFF4F6FA.toInt())
             textSize = 23f
             typeface = Typeface.DEFAULT_BOLD
         })
         titleCol.addView(TextView(this).apply {
-            text = "v4.8.0 · 透明悬浮打字桌宠 · 免费开源"
+            text = "v1.0.0 · 透明悬浮打字桌宠 · 免费开源"
             setTextColor(0xFF8F9DB5.toInt())
             textSize = 12.5f
             setPadding(0, dp(2), 0, 0)
@@ -304,7 +304,7 @@ class MainActivity : AppCompatActivity(), KuroPetListener {
             "感知任意 App 打字节奏与密码框自动闭眼捂眼（绝不读取/上传文本）",
             "去开启"
         ) {
-            Toast.makeText(this, "请在「已下载的应用 / 已安装的服务」中开启 KuroCat", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请在「已下载的应用 / 已安装的服务」中开启 DIY-Cat", Toast.LENGTH_LONG).show()
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
         a11yStatusBadge = a11yBadge
@@ -532,7 +532,7 @@ class MainActivity : AppCompatActivity(), KuroPetListener {
 
         // Footer Tip
         root.addView(TextView(this).apply {
-            text = "悬浮手势：按住拖动移位 · 单击猫头摸头呼噜 · 双击打开设置\n免费开源 · 官网：qianyi.one/kurocat"
+            text = "悬浮手势：按住拖动移位 · 单击猫头摸头呼噜 · 双击打开设置\n免费开源 · 项目：github.com/bucai2417/kurcat"
             gravity = Gravity.CENTER
             setTextColor(0xFF6F7B94.toInt())
             textSize = 11.5f

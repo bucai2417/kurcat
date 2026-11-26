@@ -117,6 +117,17 @@
       </div>
       </div><!-- /appearance -->
       <div class="tab-panel model-library" id="panel-models" role="tabpanel" aria-labelledby="tab-models" data-tab-panel="models">
+        <div class="library-toolbar">
+          <div class="model-actions" role="group" aria-label="资源分类">
+            <button class="kb-pill" type="button" data-library-kind="pet" aria-pressed="true">宠物</button>
+            <button class="kb-pill" type="button" data-library-kind="keyboard" aria-pressed="false">键盘</button>
+            <button class="kb-pill" type="button" data-library-kind="mouse" aria-pressed="false">鼠标</button>
+          </div>
+          <label for="library-mode">适用模式</label>
+          <select id="library-mode" class="sound-profile"><option value="2d">2D 资源</option><option value="3d">3D 资源</option></select>
+          <p class="model-copy">筛选本机与 GitHub 资源。键盘和鼠标可分别搭配，2D / 3D 的选择独立保存。</p>
+        </div>
+        <div id="pet-library-content">
         <div class="menu-scale-row">
           <span class="menu-scale-label">正在陪伴你</span>
           <p id="model-current" class="model-copy"></p>
@@ -130,8 +141,8 @@
         <div class="menu-scale-row">
           <label class="menu-scale-label" for="model-search">本机模型</label>
           <input type="search" id="model-search" placeholder="搜索名称、ID 或作者" aria-label="搜索本机与 GitHub 模型" />
-          <label class="model-filter-label" for="model-filter">适用模式</label>
-          <select id="model-filter" class="sound-profile"><option value="all">全部模型</option><option value="2d">支持 2D</option><option value="3d">支持 3D</option><option value="custom">仅自定义模型</option></select>
+          <label hidden class="model-filter-label" for="model-filter">适用模式</label>
+          <select hidden id="model-filter" class="sound-profile"><option value="all">全部模型</option><option value="2d">支持 2D</option><option value="3d">支持 3D</option><option value="custom">仅自定义模型</option></select>
           <p id="model-installed-count" class="model-copy"></p>
           <p class="model-copy">点击图片可放大，并切换 2D / 3D 预览。</p>
           <section id="model-gallery" class="model-gallery" aria-label="模型图片预览" hidden>
@@ -178,9 +189,53 @@
           </details>
         </div>
         <p id="model-status" class="model-copy" role="status" aria-live="polite">内置模型会保留；删除自定义模型前可以先导出备份。</p>
+        </div><!-- /pet-library-content -->
+        <div id="accessory-library-content" hidden>
+          <div class="menu-scale-row">
+            <label class="menu-scale-label" for="resource-search">本机资源</label>
+            <input type="search" id="resource-search" placeholder="搜索名称、ID 或作者" />
+            <p id="resource-current" class="model-copy"></p>
+            <div class="model-actions"><button type="button" class="kb-pill" id="resource-reset">恢复跟随桌面主题</button><button type="button" class="kb-pill" id="resource-export-current">导出当前设计</button><button type="button" class="kb-pill" id="resource-export-all">导出全部自定义资源</button></div>
+            <div id="resource-list" class="model-list" role="list" aria-label="本机键鼠资源"></div>
+          </div>
+          <section id="resource-gallery" class="model-gallery" aria-label="键鼠外观预览" hidden>
+            <div class="model-actions"><strong id="resource-gallery-title"></strong><button type="button" class="kb-pill" id="resource-gallery-close">收起预览</button></div>
+            <img id="resource-gallery-image" alt="" width="420" height="440" hidden />
+            <p id="resource-gallery-status" class="model-copy" role="status"></p>
+          </section>
+          <div class="menu-scale-row">
+            <label class="menu-scale-label" for="resource-file">导入键盘 / 鼠标</label>
+            <p class="model-copy">选择 .diycat.json 或 resources.json；支持多选，一次最多 50 个资源、合计 256 KB。</p>
+            <input type="file" id="resource-file" multiple accept=".json,application/json" />
+            <div id="resource-pending" hidden>
+              <p id="resource-pending-text" class="model-copy"></p>
+              <label class="menu-toggle-row"><span>确认替换本机同 ID 资源</span><input type="checkbox" id="resource-replace" /></label>
+              <div class="model-actions"><button type="button" class="kb-pill" id="resource-install">导入资源</button><button type="button" class="kb-pill" id="resource-cancel">取消</button></div>
+            </div>
+          </div>
+          <div class="menu-scale-row">
+            <label class="menu-scale-label" for="resource-catalog-url">GitHub 键鼠商城</label>
+            <p class="model-copy">默认来自 bucai2417/kurcat；也支持其他公开仓库的 resources.json。加载后可预览，安装时才保存到本机。</p>
+            <input type="url" id="resource-catalog-url" spellcheck="false" autocomplete="off" />
+            <div class="model-actions"><button type="button" class="kb-pill" id="resource-catalog-load">加载 / 刷新</button><button type="button" class="kb-pill" id="resource-catalog-reset">恢复默认来源</button></div>
+            <p id="resource-catalog-summary" class="model-copy">尚未读取目录。</p>
+            <div id="resource-catalog-list" class="model-list" role="list" aria-label="GitHub 键鼠资源"></div>
+          </div>
+          <p id="resource-status" class="model-copy" role="status" aria-live="polite">内置资源可导出为创作模板，自定义资源可以删除。</p>
+        </div>
+        <details class="model-publish" id="resource-tutorial">
+          <summary>制作教程：宠物、键盘与鼠标</summary>
+          <p class="model-copy">1. 选择上方资源分类与 2D / 3D。宠物先导出当前模型；键盘或鼠标点击下方“导出创作模板”。所有文件使用 UTF-8 保存。</p>
+          <p class="model-copy">2. 修改唯一 ID、名称、修订号和颜色。宠物使用 .kurocat.json，适配器 canvas-cat-v1 / three-cat-v1 声明支持模式；键鼠使用 .diycat.json，通过 modes 指定 2d / 3d。</p>
+          <p class="model-copy">3. 版本 1 是程序化外观资源：宠物继承内置骨架、输入反应、抚摸、道具、打盹与起床气；键盘继承按键位置与下压，鼠标继承左右键、滚轮与爪子对位。不能添加任意骨骼或替换动画文件，暂不支持 GLB、VRM、Live2D。</p>
+          <p class="model-copy">4. 键盘可设计配色、图案、材质、键帽高度和逐键文字；鼠标可设计外壳、按键、滚轮、纹理和轮廓比例。导入后分别预览 2D / 3D，再验证 65 / 108 配列、点击和道具动作。</p>
+          <p class="model-copy">5. 上传资源包至 GitHub 的 model-store 文件夹，Actions 会校验并生成 catalog.json（宠物）或 resources.json（键鼠）。更新时保留 ID 并提高 revision。刷新商城后安装；删除已选资源会恢复桌面主题。</p>
+          <div class="model-actions"><button type="button" class="kb-pill" id="resource-template">导出键鼠创作模板</button><button type="button" class="kb-pill" id="resource-design-guide">查看完整字段与验收教程</button></div>
+          <p id="resource-tutorial-status" class="model-copy" role="status" aria-live="polite"></p>
+        </details>
       </div><!-- /models -->
       <div class="tab-panel" id="panel-keyboard" role="tabpanel" aria-labelledby="tab-keyboard" data-tab-panel="keyboard">
-      <p class="menu-section-note">键帽按 2D / 3D 独立保存；配列、灯光和键鼠外观共用。</p>
+      <p class="menu-section-note">键帽与商城键鼠按 2D / 3D 独立保存；配列、灯光和默认桌面主题共用。</p>
       <div class="menu-scale-row">
         <span class="menu-scale-label">键盘配列与方向</span>
         <div class="kb-pills">
@@ -249,11 +304,11 @@
             <span class="kce-label">顶面</span>
             <div class="light-swatches" id="kce-colors"></div>
           </div>
-          <div class="kce-row" data-model-only="2d">
+          <div class="kce-row">
             <span class="kce-label">图标</span>
             <div class="light-swatches" id="kce-emojis"></div>
           </div>
-          <div class="kce-row" data-model-only="2d">
+          <div class="kce-row">
             <input id="kce-label-input" class="kce-input" aria-label="自定义键帽文字" maxlength="4" placeholder="自定义文字（最多4字）" />
             <button class="kb-pill" id="kce-apply-label" type="button">应用文字</button>
           </div>

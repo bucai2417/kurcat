@@ -8,7 +8,7 @@ use crate::desk_skins::{
     sanitize_skin_id, upsert_desk_skin, DeskSkinConfig,
 };
 use serde_json::{json, Value};
-use crate::models;
+use crate::{models, resources};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,6 +32,12 @@ const VALID_KEY_IDS: &[&str] = &[
 
 fn tool_definitions() -> Value {
     json!([
+        {"name":"get_resource_contract","description":"Get the versioned keyboard/mouse resource schema and supported 2D/3D modes; appearance-only packages inherit fixed interaction geometry.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"list_resources","description":"List installed custom keyboard/mouse packages and independent mode selections. Built-in themes remain available through desk tools.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"import_resource_pack","description":"Validate and install a DIY-Cat keyboard or mouse package. Existing IDs require explicit replace; package kind cannot change.","inputSchema":{"type":"object","required":["package"],"properties":{"package":{"type":"object"},"replace":{"type":"boolean","default":false}},"additionalProperties":false}},
+        {"name":"export_resource_pack","description":"Return an installed resource package as JSON for saving as UTF-8 .diycat.json.","inputSchema":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}},"additionalProperties":false}},
+        {"name":"delete_resource_pack","description":"Delete an installed custom resource and clear its selections in both modes. Export first if a backup is needed.","inputSchema":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}},"additionalProperties":false}},
+        {"name":"switch_resource","description":"Use an installed keyboard/mouse independently in 2D or 3D, without switching pet mode. Empty id restores the desk theme for that slot.","inputSchema":{"type":"object","required":["kind","mode","id"],"properties":{"kind":{"type":"string","enum":["keyboard","mouse"]},"mode":{"type":"string","enum":["2d","3d"]},"id":{"type":"string"}},"additionalProperties":false}},
         {
             "name": "get_model_contract",
             "description": "Get model package version, renderer adapters, supported reactions, action labels, metadata/revision rules, default GitHub catalog, publishing links and explicit-update policy. Packages customize built-in procedural cats; raw GLB/VRM/Live2D rigs are not supported.",
@@ -331,7 +337,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "set_keycaps",
-            "description": "DIY keycaps independently per mode (defaults to the active model mode). 3D supports top colors only; 2D also supports side/text colors and legends. Keys are KeySpec ids (a-z, 0-9, esc, tab, space, lshift, f1..f12, np_0..np_9, up/down/left/right, ...). Each entry may set top/side/text colours, a custom label, or an emoji legend. Merges with existing overrides unless replace: true.",
+            "description": "DIY keycaps independently per mode (defaults to the active model mode). Both modes support top/side/text colors and legends. Keys are KeySpec ids (a-z, 0-9, esc, tab, space, lshift, f1..f12, np_0..np_9, up/down/left/right, ...). Each entry may set top/side/text colours, a custom label, or an emoji legend. Merges with existing overrides unless replace: true.",
             "inputSchema": {
                 "type": "object",
                 "required": ["keycaps"],
@@ -459,6 +465,30 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 "cats": cats
             }))
         }
+        "get_resource_contract" => ok_text(resources::contract()),
+        "list_resources" => match resources::list() { Ok(packs) => ok_text(json!({"resources":packs,"selected":load_settings().desk_accessories})), Err(e) => err_text(&e) },
+        "import_resource_pack" => match resources::install(args["package"].clone(), args["replace"].as_bool().unwrap_or(false)) {
+            Ok(pack) => { on_change(); ok_text(pack) }, Err(e) => err_text(&e)
+        },
+        "export_resource_pack" => match resources::list() {
+            Ok(packs) => match packs.into_iter().find(|p| p["id"] == args["id"]) { Some(pack) => ok_text(pack), None => err_text("Unknown installed resource id") }, Err(e) => err_text(&e)
+        },
+        "delete_resource_pack" => {
+            let Some(id) = args["id"].as_str() else { return err_text("Missing id"); };
+            match resources::remove(id) { Ok(()) => { let mut s=load_settings(); s.desk_accessories.retain(|_,value|value!=id); save_settings(&s); on_change(); ok_text(json!({"deleted":id})) }, Err(e) => err_text(&e) }
+        },
+        "switch_resource" => {
+            let kind=args["kind"].as_str().unwrap_or(""); let mode=args["mode"].as_str().unwrap_or("");
+            let Some(id)=args["id"].as_str() else { return err_text("Missing id"); };
+            if !["keyboard","mouse"].contains(&kind) || !["2d","3d"].contains(&mode) { return err_text("Invalid kind or mode"); }
+            if !id.is_empty() {
+                let packs=match resources::list() {Ok(p)=>p,Err(e)=>return err_text(&e)};
+                if !packs.iter().any(|p|p["id"]==id && p["kind"]==kind && p["modes"].as_array().map(|ms|ms.iter().any(|m|m==mode)).unwrap_or(false)) { return err_text("Resource not installed or incompatible with this kind/mode"); }
+            }
+            let mut s=load_settings(); let slot=format!("{}{}",kind,mode);
+            if id.is_empty() {s.desk_accessories.remove(&slot);} else {s.desk_accessories.insert(slot,id.into());}
+            save_settings(&s); on_change(); ok_text(json!({"selected":s.desk_accessories}))
+        },
         "get_model_contract" => ok_text(models::contract()),
         "import_model_pack" => {
             let Some(package) = args.get("package") else { return err_text("Missing package object"); };
@@ -775,9 +805,6 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
                 let parsed: std::collections::HashMap<String, crate::config::KeycapOverride> = match serde_json::from_value(args["keycaps"].clone()) {
                     Ok(m) => m, Err(e) => return err_text(&format!("Invalid keycaps: {}", e)),
                 };
-                if mode == "3d" && parsed.values().any(|k| k.side.is_some() || k.text.is_some() || k.label.is_some() || k.emoji.is_some()) {
-                    return err_text("3D keycaps support top colors only; side, text, label and emoji are 2D-only");
-                }
                 if args["replace"].as_bool().unwrap_or(false) { next.clear(); }
                 next.extend(parsed);
                 next = crate::config::normalize_keycap_overrides(next);
@@ -942,7 +969,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
                     "name": SERVER_NAME,
                     "version": SERVER_VERSION
                 },
-                "instructions": "Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
+                "instructions": "Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
             }))
         }
         "ping" => Ok(json!({})),

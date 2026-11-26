@@ -3,6 +3,7 @@
 
 mod cats;
 mod models;
+mod resources;
 mod config;
 mod desk_skins;
 mod game_detect;
@@ -315,6 +316,7 @@ struct WindowCursorInfo {
     inside_window: bool,
     over_cat: bool,
     alt_override: bool,
+    over_pet_area: bool,
 }
 
 #[tauri::command]
@@ -355,6 +357,22 @@ fn delete_model_pack(app: AppHandle, state: State<'_, AppState>, id: String) -> 
 }
 
 #[tauri::command]
+fn get_resources() -> Result<Vec<serde_json::Value>, String> { resources::list() }
+#[tauri::command]
+fn import_resource_pack(app: AppHandle, package: serde_json::Value, replace: bool) -> Result<serde_json::Value, String> {
+    let pack = resources::install(package, replace)?;
+    let _ = app.emit("kuro-resources", resources::list()?); Ok(pack)
+}
+#[tauri::command]
+fn export_resource_pack(package: serde_json::Value) -> Result<String, String> { resources::export_file(package) }
+#[tauri::command]
+fn delete_resource_pack(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    resources::remove(&id)?;
+    { let mut settings = state.settings.lock().unwrap(); settings.desk_accessories.retain(|_, value| value != &id); save_settings(&settings); }
+    let _ = app.emit("kuro-resources", resources::list()?); reload_and_emit_all(&app); Ok(())
+}
+
+#[tauri::command]
 fn get_mcp_config(state: State<'_, AppState>) -> String {
     let port = state.settings.lock().unwrap().mcp_port;
     let exe = std::env::current_exe()
@@ -389,6 +407,7 @@ fn update_settings(app: AppHandle, state: State<'_, AppState>, patch: serde_json
         }
     }
     let mut patch: AppSettings = serde_json::from_value(merged).map_err(|err| err.to_string())?;
+    crate::config::normalize_accessories(&mut patch.desk_accessories);
     patch.scale = patch.scale.clamp(0.20, 1.50);
     patch.idle_delay_sec = if patch.idle_delay_sec.is_finite() {
         patch.idle_delay_sec.clamp(2.0, 120.0)
@@ -803,6 +822,7 @@ pub fn reload_and_emit_all(app: &AppHandle) {
     // Broadcast BEFORE the Tauri emits, which consume these values.
     obs::broadcast_raw("cats", &serde_json::to_string(&cats).unwrap_or_default());
     obs::broadcast_raw("settings", &serde_json::to_string(&disk_settings).unwrap_or_default());
+    if let Ok(resources) = resources::list() { let _ = app.emit("kuro-resources", resources); }
     let _ = app.emit("kuro-cats", cats);
     let _ = app.emit("kuro-settings", disk_settings);
 }
@@ -1385,6 +1405,8 @@ fn start_hit_test_loop(
         let mut last_cursor: (i32, i32) = (i32::MIN, i32::MIN);
         let mut last_alt_override = false;
         let mut last_effective_locked = false;
+        let mut last_pet_area = false;
+        let mut last_pet_position = (f64::NAN, f64::NAN);
         #[cfg(windows)]
         let mut drift_ticks: u8 = 0;
         #[cfg(windows)]
@@ -1626,19 +1648,22 @@ fn start_hit_test_loop(
                 .map(|m| m.contains_box(rx, ry))
                 .unwrap_or(false);
 
-            let (over_interactive, raw_over_cat) = if inside_pet {
+            let (over_interactive, raw_over_cat, over_pet_area) = if inside_pet {
                 let regions = hit_regions.lock().unwrap();
                 match regions.as_ref() {
                     Some(r) => {
                         let over_cat = r.cat.map(|c| c.contains(pet_rx, pet_ry)).unwrap_or(false);
                         let over_desk = r.desk.map(|d| d.contains(pet_rx, pet_ry)).unwrap_or(false);
                         let over_prop = r.prop.map(|p| p.contains_box(pet_rx, pet_ry)).unwrap_or(false);
-                        (over_cat || over_desk || over_prop || over_menu, over_cat)
+                        (over_cat || over_desk || over_prop || over_menu, over_cat, over_cat || over_desk || over_prop)
                     }
-                    None => is_over_interactive_silhouette(pet_rx, pet_ry, is_108),
+                    None => {
+                        let (area, cat) = is_over_interactive_silhouette(pet_rx, pet_ry, is_108);
+                        (area || over_menu, cat, area)
+                    },
                 }
             } else {
-                (over_menu, false)
+                (over_menu, false, false)
             };
             // While click-through is locked (and Alt is not held), suppress petting hover so users
             // aren't misled by squinting eyes when the cat is intentionally click-through.
@@ -1711,10 +1736,14 @@ fn start_hit_test_loop(
             if (cx, cy) != last_cursor
                 || alt_override != last_alt_override
                 || effective_locked != last_effective_locked
+                || over_pet_area != last_pet_area
+                || (pet_rx, pet_ry) != last_pet_position
             {
                 last_cursor = (cx, cy);
                 last_alt_override = alt_override;
                 last_effective_locked = effective_locked;
+                last_pet_area = over_pet_area;
+                last_pet_position = (pet_rx, pet_ry);
                 let _ = app.emit(
                     "kuro-cursor",
                     WindowCursorInfo {
@@ -1723,6 +1752,7 @@ fn start_hit_test_loop(
                         inside_window: inside_pet,
                         over_cat,
                         alt_override,
+                        over_pet_area,
                     },
                 );
             }
@@ -2190,6 +2220,10 @@ pub fn run() {
             get_settings,
             get_cats,
             import_model_pack,
+            get_resources,
+            import_resource_pack,
+            export_resource_pack,
+            delete_resource_pack,
             export_model_pack,
             delete_model_pack,
             open_model_exports,

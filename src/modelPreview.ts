@@ -1,5 +1,6 @@
 import { KuroCatEngine } from './catEngine';
 import type { KuroCatEngine3D } from './catEngine3d';
+import { BUILTIN_DESK_SKINS, type DeskSkinConfig } from './deskSkin';
 import type { CatSkinConfig } from './catSkins';
 import { modelModes, type ModelMode } from './modelPack';
 
@@ -15,9 +16,9 @@ export class ModelPreviews {
     const canvas = document.createElement('canvas'); container.append(canvas); document.body.append(container);
     return canvas;
   }
-  image(cat: CatSkinConfig, mode: ModelMode): Promise<string> {
+  image(cat: CatSkinConfig, mode: ModelMode, desk: DeskSkinConfig = BUILTIN_DESK_SKINS[0]): Promise<string> {
     if (!modelModes(cat).includes(mode)) return Promise.reject(Error('此模型不支持 ' + mode.toUpperCase()));
-    const key = JSON.stringify([mode, cat]);
+    const key = JSON.stringify([mode, cat, desk]);
     const cached = this.cache.get(key); if (cached) return Promise.resolve(cached);
     const task = this.queue.catch(() => {}).then(async () => {
       // Yield between cards so opening the library does not block input.
@@ -30,6 +31,7 @@ export class ModelPreviews {
           try { this.two = new KuroCatEngine(canvas, { embedded: true, previewOnly: true }); }
           catch (error) { canvas.parentElement?.remove(); throw error; }
         }
+        this.two.setDeskSkin(desk);
         url = await this.two.snapshot(cat);
       } else {
         if (!this.three) {
@@ -38,6 +40,7 @@ export class ModelPreviews {
           try { this.three = new KuroCatEngine3D(canvas, { embedded: true, previewOnly: true }); }
           catch (error) { canvas.parentElement?.remove(); throw error; }
         }
+        this.three.setDeskSkin(desk);
         url = this.three.snapshot(cat);
       }
       if (this.cache.size >= 64) this.cache.delete(this.cache.keys().next().value!);

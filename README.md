@@ -2,7 +2,7 @@
 
 > **当前版本：1.0.0** · [项目仓库](https://github.com/bucai2417/kurcat) · [下载与发布记录](https://github.com/bucai2417/kurcat/releases) · [GitHub Actions 构建](#github-actions-build)
 
-轻量级 **Windows（Win11/10 & Win7 SP1）/ macOS（10.15+ Apple Silicon & Intel）/ Linux（银河麒麟 KylinOS / Ubuntu / UOS）** 透明置顶桌面打字猫咪伴侣（开箱自带 **6 款手绘猫咪皮肤 + 🐳 大肥鱼（鲸鱼娘）**：经典小黑猫、暖奶茶布偶猫、大橘猫、三花猫、奶牛猫、暹罗猫、大肥鱼，支持**输密码自动闭眼/捂眼防偷窥**，并原生内置 **MCP 协议服务端**，支持用 AI 一句话定制或新增更多你自己的猫咪！），基于 **Tauri v2（Rust 全局原生钩子 + 内置 MCP 引擎 + HTML5 Canvas 2D + Three.js 3D）** 打造。桌面版支持透明窗口与全局键鼠监听；系统运行库要求以对应平台构建产物为准。
+轻量级 **Windows（Win10/11；Win7/8.1 实验包）/ macOS（10.15+ Apple Silicon & Intel）/ Linux（银河麒麟 KylinOS / Ubuntu / UOS）** 透明置顶桌面打字猫咪伴侣（开箱自带 **6 款手绘猫咪皮肤 + 🐳 大肥鱼（鲸鱼娘）**：经典小黑猫、暖奶茶布偶猫、大橘猫、三花猫、奶牛猫、暹罗猫、大肥鱼，支持**输密码自动闭眼/捂眼防偷窥**，并原生内置 **MCP 协议服务端**，支持用 AI 一句话定制或新增更多你自己的猫咪！），基于 **Tauri v2（Rust 全局原生钩子 + 内置 MCP 引擎 + HTML5 Canvas 2D + Three.js 3D）** 打造。桌面版支持透明窗口与全局键鼠监听；系统运行库要求以对应平台构建产物为准。
 
 DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，版本从 **1.0.0** 开始。程序检查更新和下载安装均使用 `bucai2417/kurcat` 的正式 Releases，仅识别 `DIY-Cat-` 开头的发布包，不把旧 KuroCat 4.x / 5.x 版本当成更新。已有设置目录、MCP 服务 ID `kurocat` 与 `.kurocat.json` 模型格式保留兼容。
 
@@ -15,6 +15,18 @@ DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，
 - **会表达情绪的 3D 耳朵**：左右耳独立轻抖、朝向鼠标，侧耳听、打盹、抚摸和生气分别有平滑过渡的耳朵姿态。
 - **GitHub 模型发布**：默认读取 `bucai2417/kurcat/main/model-store/catalog.json`。UI 提供上传入口；将 `.kurocat.json` 上传到 `model-store/` 后，**Publish model catalog** 工作流自动校验并提交目录，回到模型库刷新即可安装。发布和下架步骤见 [模型包文档](docs/model-packs.md#发布-github-模型目录)。
 - **统一模型能力契约**：UI、MCP、OBS 根据适配器提供的能力选择 2D / 3D 模式和动作。版本 1 包含现有程序化猫咪的外观配置，继承其完整互动；任意 GLB / VRM / Live2D 骨架文件接入尚未实现。详细格式、动作列表及后续接入设计见 [模型包文档](docs/model-packs.md)，可试用 [薄荷云朵示例](model-store/mint-cloud.kurocat.json)。
+
+### 模型商城与创作
+
+右键 → 设置 → 模型库，选择 **宠物 / 键盘 / 鼠标**，再选 **2D / 3D**。点击“查看图片”预览，加载 GitHub 目录后安装，再点“用于 2D / 3D”。键盘和鼠标独立替换，不必重新更换宠物。可导入多个包、导出当前设计、导出全部和删除；当前设计包含个人键帽修改，列表导出保留原包。删除正在使用的资源会恢复桌面主题。
+
+- [完整制作教程：宠物、键盘、鼠标（2D / 3D）](docs/RESOURCE_AUTHORING.md)
+- [模型包协议与动作能力](docs/model-packs.md)
+- [GitHub 上传与目录维护](model-store/README.md)
+
+模板和教程入口也在模型库内。键鼠包使用 `.diycat.json`，宠物包使用 `.kurocat.json`；这些文件是 UTF-8 JSON 配置，不能直接替代 GLB / VRM / Live2D 文件。
+
+锁定鼠标穿透后，不按 Alt 将指针移到宠物或桌面道具上，会自动隐藏整个宠物画面；移开或按 Alt 后恢复，便于操作被遮住的内容。
 
 ## 🎬 上游历史演示
 
@@ -57,7 +69,10 @@ DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，
 | macOS Universal | `DIY-Cat-v1.0.0-macos-universal.dmg` | 将 DIY-Cat.app 拖入“应用程序” |
 | Linux amd64 / arm64 | `DIY-Cat-v1.0.0-linux-<arch>.deb` / `.AppImage` | 按系统架构选择；AppImage 为尽力构建 |
 
-上表是 v1.0.0 标签构建的命名约定，不表示文件已发布。当前跨平台工作流没有生成 Win7 专用包，代码保留 Win7 兼容路径，需单独构建验证。
+| Android 8.0+ | `DIY-Cat-1.0.0-android.apk` | 签名 APK，2D 悬浮宠物；[安装与权限](docs/ANDROID.md) |
+| Windows 7 SP1 / 8.1 x64（实验） | `DIY-Cat-1.0.0-win7-x64-experimental.zip` | 需旧版 WebView2 与系统补丁；[限制与排查](docs/LEGACY_WINDOWS.md) |
+
+上表为标签构建的命名约定，以 Release 实际附件为准。常规 Windows 包面向 Win10/11；实验包通过编译不等于已验证旧系统运行兼容性。Android 当前提供 2D 悬浮宠物，不包含桌面版 3D、模型商城和 MCP。
 
 macOS 首次运行需在“系统设置 → 隐私与安全性”中为 **DIY-Cat** 授予“辅助功能”与“输入监控”。Stdio MCP 路径为 `/Applications/DIY-Cat.app/Contents/MacOS/DIY-Cat`，参数为 `--mcp`。
 
@@ -66,11 +81,11 @@ macOS 首次运行需在“系统设置 → 隐私与安全性”中为 **DIY-Ca
 <a id="github-actions-build"></a>
 ## ☁️ 使用 GitHub Actions 构建
 
-本地无需安装构建依赖。在仓库 **Actions → Build Cross-Platform Release → Run workflow** 选择目标分支；只测试 Windows 时勾选 `windows_only`，三个平台筛选项最多选择一个。全部不选则构建 Windows、macOS 与 Linux。可填写 `release_tag: v1.0.0` 作为文件名标签。
+本地无需安装构建依赖。在仓库 **Actions → Build Cross-Platform Release → Run workflow** 选择目标分支；只测试 Windows 时勾选 `windows_only`，或选择 `android_only`、`legacy_only`、`macos_only`、`linux_only`，平台筛选项最多选择一个。全部不选则构建所有平台。可填写 `release_tag: v1.0.0` 作为文件名标签。
 
-工作流先检查 TypeScript、互动回归与模型目录，再在 GitHub runner 安装依赖、执行 Rust 测试并打包。运行成功后，从该次运行的 **Artifacts** 下载相应平台产物。普通代码推送不会触发二进制构建。
+工作流先检查 TypeScript、互动回归、模型和键鼠资源目录，再在 GitHub runner 安装依赖、执行 Rust 测试并打包。运行成功后，从该次运行的 **Artifacts** 下载相应平台产物。普通代码推送不会触发二进制构建。
 
-推送 `v1.0.0` 等版本标签会触发同一工作流，并把附件上传到 **Release 草稿**。验证测试包后再公开草稿，软件内检查更新才会看到它。后续版本需同步 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 的版本，再推送对应标签。
+推送 `v1.0.0` 等版本标签会触发同一工作流，并把附件上传到 **Release 草稿**。验证测试包后再公开草稿，软件内检查更新才会看到它。后续版本需同步 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 、`src-tauri/tauri.conf.json` 和 Android `versionName` 的版本，并递增 Android `versionCode`，再推送对应标签。
 
 ## ✨ 核心特性
 
@@ -105,12 +120,12 @@ macOS 首次运行需在“系统设置 → 隐私与安全性”中为 **DIY-Ca
   - **按键响应**：敲哪个键哪个键亮起副色；底座另有一圈柔和环境辉光。
   - 空闲 3 秒后自动降到约 15fps 继续呼吸，静止 60 秒后休眠，兼顾炫光与低功耗。
 - **🎨 2D / 3D 键帽 DIY（分别保存）**：
-  - 右键菜单打开设计器，按当前模型模式编辑。**2D** 支持顶面、侧面、文字颜色以及自定义文字和 Emoji；**3D** 当前支持顶面颜色，未接入的图例与侧面选项不会显示为可用。
+  - 右键菜单打开设计器，按当前模型模式编辑。**2D / 3D** 均支持顶面、侧面、文字颜色以及自定义文字和 Emoji，分别保存；Emoji 的显示取决于系统字体。
   - 提供 WASD、数字区、Esc、方向键等配色方案；清除当前模式的 DIY 不影响另一模式。
-  - MCP 的 `set_keycaps`、`get_keycaps`、`clear_keycaps` 接受 `mode: "2d" | "3d"`。3D 写入仅接受 `top`；合法键名由 `get_keycaps` 返回。
-- **🎨 2D 键鼠外观**：
+  - MCP 的 `set_keycaps`、`get_keycaps`、`clear_keycaps` 接受 `mode: "2d" | "3d"`。合法键名由 `get_keycaps` 返回。
+- **🎨 2D / 3D 键鼠资源**：
   - 内置经典奶白、暗夜碳纤、胡桃木、樱花奶油、赛博终端、深海鲸；键盘底座、键帽、修饰键、强调键、鼠标外壳与按键可以分别配色。
-  - OEM / SA / 矮轴 / 果冻键帽、三种鼠标轮廓、材质与程序化纹理由 2D 绘制器提供；这些选项不代表 3D 网格也会改变形状或材质。
+  - OEM / SA / 矮轴 / 果冻键帽、三种鼠标轮廓、材质与程序化纹理分别由 2D / 3D 绘制器呈现；两种模式的视觉效果可以不同。
   - 自定义外观存入 `desk-skins.json`；MCP 的五个桌面皮肤工具负责查询、新增、切换和删除。
 - **🥤 键盘旁边的小道具（点一下就喝，动作完整）**：
   - 内置 **可乐 / 咖啡 / 奶茶 / 能量饮 / 布丁** 五种，可放键盘左侧或右侧（放左侧时鼠标自动让位到右侧），支持手动开关。
@@ -185,16 +200,19 @@ DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP
 | `get_model_contract` | 读取模型包/修订规则、适配器、动作与反应契约、默认 GitHub 目录和发布入口 |
 | `import_model_pack` | 导入 `package` 对象；`replace` / `activate` 默认 false，已有 ID 需显式替换 |
 | `export_model_pack` | 按 `id` 导出 JSON 内容，由客户端保存为 UTF-8 文件 |
+| `get_resource_contract` / `list_resources` | 查询键盘、鼠标资源协议、本机资源与四个模式选择槽位 |
+| `import_resource_pack` / `export_resource_pack` | 导入或导出 `.diycat.json`；同 ID 替换需要显式确认 |
+| `switch_resource` / `delete_resource_pack` | 按 `kind`、`mode` 切换键鼠；删除后回退至桌面主题 |
 | `list_cats` / `get_cat_schema` | 查看所有外观、当前模型、花色参数、斑点坐标与品种模板 |
 | `upsert_cat` / `switch_cat` / `delete_cat` | 新增或修改外观、切换模型、删除自定义外观或重置内置外观 |
 | `get_settings` / `update_settings` | 查询或修改模式、缩放、气泡、呼噜、项圈、耳机、尾巴控制、键鼠音效、置顶、穿透等设置 |
 | `set_prop` / `get_prop` / `trigger_prop_sip` | 设置道具种类、位置、开关，查询配置，触发饮用 |
-| `get_desk_schema` / `list_desk_skins` | 查询 2D 键鼠外观参数与皮肤列表 |
-| `upsert_desk_skin` / `switch_desk_skin` / `delete_desk_skin` | 管理 2D 键鼠外观 |
+| `get_desk_schema` / `list_desk_skins` | 查询键鼠主题参数与皮肤列表 |
+| `upsert_desk_skin` / `switch_desk_skin` / `delete_desk_skin` | 管理键鼠主题 |
 | `get_idle_actions` / `set_idle_actions` | 查询当前模型、模式、可用动作和上次请求；开关自动待机、设置空闲延时 |
 | `trigger_idle_action` | 按 `kind` 请求动作，例如 `nap`、`tailGround`、`calm`；不改变自动待机开关 |
 | `get_mood` / `set_mood` / `set_mood_tracking` | 查询或设置情绪请求，开关连续打字反应；查询并非实时情绪遥测 |
-| `set_keycaps` / `get_keycaps` / `clear_keycaps` | 通过 `mode` 分开管理 2D / 3D 键帽；3D 当前仅支持顶面色 |
+| `set_keycaps` / `get_keycaps` / `clear_keycaps` | 通过 `mode` 分开管理 2D / 3D 键帽，含顶面、侧面、图例与文字色 |
 | `set_lighting` / `get_lighting` | 设置与查询 RGB 效果、配色、亮度、速度和边缘灯带 |
 
 动作是否可用取决于当前模型与模式；请求被保存不代表动画已播放，隐私模式或正在进行的冲突动作可能阻止执行。`update_settings.inputSound` 包含 `keyboard`、`mouse`、`profile`、`volume`；`soundEnabled` 仅控制呼噜。模型包完整示例及扩展设计见 [接入文档](docs/model-packs.md)。

@@ -857,3 +857,17 @@ html.win7-ulw-mode .update-toast {
 #model-gallery-modes { margin-top: 8px; }
 #model-gallery-modes [aria-pressed="true"] { background: #d2f244; color: #20261e; border-color: #d2f244; }
 #model-status { white-space: pre-line; }
+
+/* Keep geometry stable: hit testing must not depend on visibility. */
+#pet-canvas.pet-avoiding-pointer, #pet-canvas-3d.pet-avoiding-pointer { opacity: 0; }
+
+.library-toolbar { display: grid; gap: 8px; padding-bottom: 16px; border-bottom: 1px solid var(--menu-border, #444); margin-bottom: 16px; }
+.library-toolbar button[aria-pressed="true"] { background: #d2f244; color: #172008; }
+.library-toolbar label { font-weight: 600; }
+#pet-library-content[hidden], #accessory-library-content[hidden] { display: none; }
+#resource-gallery-image { display: block; width: 100%; height: auto; object-fit: contain; }
+#resource-gallery-image[hidden] { display: none; }
+.model-entry-title { margin: 0; overflow-wrap: anywhere; }
+.resource-entry { display: block; }
+.resource-entry .model-actions { margin-top: 8px; }
+#resource-tutorial p { line-height: 1.65; }

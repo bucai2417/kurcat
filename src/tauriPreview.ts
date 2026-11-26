@@ -11,6 +11,7 @@
  */
 import { DEFAULT_BUILTIN_CATS, type CatSkinConfig } from './catSkins';
 import { parseModelPack, exportModelPack } from './modelPack';
+import { parseResourcePack, type ResourcePack } from './resourcePack';
 
 type EventHandler = (event: { event: string; id: number; payload: unknown }) => void;
 
@@ -18,6 +19,7 @@ interface PreviewStore {
   settings?: Record<string, unknown>;
   cats?: unknown[];
   deskSkins?: unknown[];
+  resources?: ResourcePack[];
 }
 
 const STORAGE_KEY = 'kurocat-preview-v1';
@@ -55,6 +57,7 @@ const DEFAULT_SETTINGS = {
     backlitCaps: false,
   },
   deskSkinId: 'classic-cream',
+  deskAccessories: {},
   propConfig: {
     enabled: false,
     kind: 'coffee',
@@ -100,6 +103,7 @@ export function installTauriPreviewShim(): boolean {
   store.settings.keycapOverrides3d ??= { ...(store.settings.keycapOverrides as Record<string, unknown> ?? {}) };
   store.cats ??= [];
   store.deskSkins ??= [];
+  store.resources ??= [];
 
   const persist = () => {
     try {
@@ -173,6 +177,28 @@ export function installTauriPreviewShim(): boolean {
         const link = document.createElement('a'); link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
         return '已交给浏览器下载：' + name;
+      }
+      case 'get_resources': return store.resources;
+      case 'import_resource_pack': {
+        const pack = parseResourcePack(args.package); const old = store.resources!.find(p => p.id === pack.id);
+        if (old && (!args.replace || old.kind !== pack.kind)) throw Error('同 ID 资源已存在，需确认替换且保持种类相同');
+        if (!old && store.resources!.length >= 50) throw Error('自定义资源最多 50 个');
+        store.resources = store.resources!.filter(p => p.id !== pack.id).concat(pack); persist();
+        queueMicrotask(() => emit('kuro-resources', store.resources)); return pack;
+      }
+      case 'delete_resource_pack': {
+        const id = String(args.id); if (!store.resources!.some(p => p.id === id)) throw Error('资源不存在或不能删除');
+        store.resources = store.resources!.filter(p => p.id !== id);
+        const selected = { ...(settings().deskAccessories as Record<string,string> ?? {}) };
+        for (const key of Object.keys(selected)) if (selected[key] === id) delete selected[key];
+        store.settings = { ...settings(), deskAccessories: selected }; persist();
+        queueMicrotask(() => { emit('kuro-resources', store.resources); emit('kuro-settings', settings()); }); return null;
+      }
+      case 'export_resource_pack': {
+        const pack = parseResourcePack(args.package); const name = pack.id + '.diycat.json';
+        const url = URL.createObjectURL(new Blob([JSON.stringify(pack,null,2)], {type:'application/json;charset=utf-8'}));
+        const link = document.createElement('a'); link.href=url; link.download=name; document.body.append(link); link.click(); link.remove();
+        setTimeout(() => URL.revokeObjectURL(url),10000); return '已交给浏览器下载：'+name;
       }
       case 'get_desk_skins':
         return store.deskSkins ?? [];

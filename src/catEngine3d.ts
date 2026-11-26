@@ -1,3 +1,4 @@
+import type { DeskSkinConfig } from './deskSkin';
 import { SleepReaction, drawPetCaption } from './sleepReaction';
 import { modelHitArea } from './modelHitArea';
 import { petViewport, strikeHeight, STRIKE_IMPACT, STRIKE_RELEASE, STRIKE_DURATION } from './petMotion';
@@ -1774,13 +1775,12 @@ export class KuroCatEngine3D {
 
   /** Keycap designer colours, mapped from the 2D override records to cap tops. */
   public setKeycapOverrides(map: Record<string, KeycapOverride>): void {
-    const colors: Record<string, string> = {};
-    for (const [id, ov] of Object.entries(map ?? {})) {
-      const top = (ov as { top?: string } | undefined)?.top;
-      if (typeof top === 'string' && top.length > 0) colors[id] = top;
-    }
-    this.desk.setKeycapOverrides(colors);
+    this.desk.setKeycapOverrides(map);
     this.wakeRendering();
+  }
+
+  public setDeskSkin(skin: DeskSkinConfig): void {
+    this.desk.setDeskSkin(skin); this.wakeRendering();
   }
 
   /** Mirrors the 2D prop config so both render modes show the same drink. */
