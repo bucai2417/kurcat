@@ -25,7 +25,7 @@ test('mode selections compose independently and unavailable resources fall back'
   assert.deepEqual(composeDeskSkin(base,[],selected,'3d'),base);
 });
 test('reject malformed, executable, oversized and incompatible resource values', () => {
-  const changes=[p=>p.skin.keycaps={Space:{label:'错误大小写'}},p=>p.id='../bad',p=>p.id='builtin-evil',p=>p.modes=['2d','2d'],p=>p.modes=[],p=>p.revision=0,p=>p.revision=1.5,p=>p.name='坏\n名称',p=>p.skin.keyTop='url(x)',p=>p.skin.patternScale=Infinity,p=>p.skin.shape='unknown',p=>p.skin.keycaps=JSON.parse('{"__proto__":{}}'),p=>p.skin.keycaps.space.label='猫'.repeat(25)];
+  const changes=[p=>p.kind=['keyboard'],p=>p.skin.material=['plastic'],p=>p.skin.shape=['classic'],p=>p.skin.keycaps={Space:{label:'错误大小写'}},p=>p.id='../bad',p=>p.id='builtin-evil',p=>p.modes=['2d','2d'],p=>p.modes=[],p=>p.revision=0,p=>p.revision=1.5,p=>p.name='坏\n名称',p=>p.skin.keyTop='url(x)',p=>p.skin.patternScale=Infinity,p=>p.skin.shape='unknown',p=>p.skin.keycaps=JSON.parse('{"__proto__":{}}'),p=>p.skin.keycaps.space.label='猫'.repeat(25)];
   for (const change of changes) {const p=structuredClone(keyboard);change(p);assert.throws(()=>parseResourcePack(p));}
   const p=structuredClone(keyboard);p.extra='猫'.repeat(90000);assert.throws(()=>parseResourcePack(p),/256 KB/);
   assert.throws(()=>parseResourceCatalog(JSON.stringify({format:'diy-cat-resource-catalog',version:1,resources:[keyboard,keyboard]})),/重复/);

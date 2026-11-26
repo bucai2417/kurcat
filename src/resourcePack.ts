@@ -15,7 +15,7 @@ const color = (v: unknown) => typeof v === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f
 export function parseResourcePack(raw: unknown): ResourcePack {
   if (new TextEncoder().encode(typeof raw === 'string' ? raw : JSON.stringify(raw)).length > contract.maxBytes) throw Error('资源包不能超过 256 KB');
   if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { throw Error('资源包不是有效 JSON'); } }
-  if (!object(raw) || raw.format !== contract.format || raw.version !== 1 || !['keyboard', 'mouse'].includes(String(raw.kind))) throw Error('请选择版本 1 的 DIY-Cat 键盘或鼠标资源包');
+  if (!object(raw) || raw.format !== contract.format || raw.version !== 1 || (raw.kind !== 'keyboard' && raw.kind !== 'mouse')) throw Error('请选择版本 1 的 DIY-Cat 键盘或鼠标资源包');
   const kind = raw.kind as ResourceKind;
   const id = text(raw.id, '资源 ID', 36);
   if (!/^[a-z0-9][a-z0-9_-]{0,35}$/.test(id) || id.startsWith('builtin-')) throw Error('资源 ID 需为小写字母、数字、短横线或下划线，不能以 builtin- 开头');
@@ -25,7 +25,7 @@ export function parseResourcePack(raw: unknown): ResourcePack {
   if (!object(skin)) throw Error('缺少 skin 外观数据');
   const out: Record<string, unknown> = {};
   for (const key of contract[kind].colors) { if (!color(skin[key])) throw Error(key + ' 需要 #RGB 或 #RRGGBB'); out[key] = skin[key]; }
-  for (const [key, options] of Object.entries(contract[kind].enums)) { if (!(options as string[]).includes(String(skin[key]))) throw Error(key + ' 选项无效'); out[key] = skin[key]; }
+  for (const [key, options] of Object.entries(contract[kind].enums)) { if (typeof skin[key] !== 'string' || !(options as readonly unknown[]).includes(skin[key])) throw Error(key + ' 选项无效'); out[key] = skin[key]; }
   if (kind === 'keyboard') {
     if (typeof skin.patternScale !== 'number' || !Number.isFinite(skin.patternScale) || skin.patternScale < .2 || skin.patternScale > 4) throw Error('patternScale 范围为 0.2–4');
     out.patternScale = skin.patternScale;

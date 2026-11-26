@@ -68,7 +68,6 @@ DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，
 | Windows x64 | `DIY-Cat-1.0.0-x64-portable.zip` / `DIY-Cat-1.0.0-windows-x64.exe` | 便携版；独立 exe 也供程序内更新下载 |
 | macOS Universal | `DIY-Cat-v1.0.0-macos-universal.dmg` | 将 DIY-Cat.app 拖入“应用程序” |
 | Linux amd64 / arm64 | `DIY-Cat-v1.0.0-linux-<arch>.deb` / `.AppImage` | 按系统架构选择；AppImage 为尽力构建 |
-
 | Android 8.0+ | `DIY-Cat-1.0.0-android.apk` | 签名 APK，2D 悬浮宠物；[安装与权限](docs/ANDROID.md) |
 | Windows 7 SP1 / 8.1 x64（实验） | `DIY-Cat-1.0.0-win7-x64-experimental.zip` | 需旧版 WebView2 与系统补丁；[限制与排查](docs/LEGACY_WINDOWS.md) |
 
