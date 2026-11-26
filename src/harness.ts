@@ -110,7 +110,7 @@ function applyLayout(): void {
   canvas.style.width = `${Math.round(size.w * fit)}px`;
   canvas.style.height = `${Math.round(size.h * fit)}px`;
   engine.resize();
-  document.title = `KuroCat Harness ${size.w}x${size.h}`;
+  document.title = `DIY-Cat Harness ${size.w}x${size.h}`;
   syncPanel();
 }
 
@@ -281,7 +281,7 @@ function setStatus(text: string): void {
 function buildPanel(): void {
   if (!panel) return;
   panel.innerHTML = `
-    <div class="row"><strong>KuroCat 预览</strong><span id="status" class="status">直接敲键盘、点鼠标、摸猫头、点饮品</span></div>
+    <div class="row"><strong>DIY-Cat 预览</strong><span id="status" class="status">直接敲键盘、点鼠标、摸猫头、点饮品</span></div>
     <div class="row">
       <label>猫咪</label><span id="cats"></span>
     </div>
@@ -490,7 +490,7 @@ function syncPanel(): void {
   const bv = document.getElementById('bright-v');
   if (bv) bv.textContent = `${Math.round(engine.getLightConfig().brightness * 100)}%`;
 
-  document.title = `KuroCat Harness ${size.w}x${size.h}`;
+  document.title = `DIY-Cat Harness ${size.w}x${size.h}`;
 }
 
 buildVkTable();

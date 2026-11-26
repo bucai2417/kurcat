@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>KuroCat</title>
+    <title>DIY-Cat</title>
   </head>
   <body>
     <canvas id="pet-canvas"></canvas>
@@ -18,7 +18,7 @@
 
     <div id="context-menu" class="context-menu hidden tabbed">
       <div class="menu-header-row">
-        <div class="menu-header" id="menu-header">🐈‍⬛ KuroCat 小黑猫</div>
+        <div class="menu-header" id="menu-header">🐈‍⬛ DIY-Cat 小黑猫</div>
         <button class="menu-close-btn" id="btn-close-menu" type="button" title="关闭 (Esc)">×</button>
       </div>
       <div class="menu-tabs" role="tablist">
@@ -123,6 +123,7 @@
           <p id="model-capabilities" class="model-copy"></p>
           <div class="model-actions">
             <button type="button" class="kb-pill" id="model-export">导出当前模型</button>
+            <button type="button" class="kb-pill" id="model-export-all">导出所有自定义模型</button>
             <button type="button" class="kb-pill" id="model-export-folder">打开导出文件夹</button>
           </div>
         </div>
@@ -132,13 +133,23 @@
           <label class="model-filter-label" for="model-filter">适用模式</label>
           <select id="model-filter" class="sound-profile"><option value="all">全部模型</option><option value="2d">支持 2D</option><option value="3d">支持 3D</option><option value="custom">仅自定义模型</option></select>
           <p id="model-installed-count" class="model-copy"></p>
+          <p class="model-copy">点击图片可放大，并切换 2D / 3D 预览。</p>
+          <section id="model-gallery" class="model-gallery" aria-label="模型图片预览" hidden>
+            <div class="model-actions"><strong id="model-gallery-title"></strong><button type="button" class="kb-pill" id="model-gallery-close">收起预览</button></div>
+            <div id="model-gallery-modes" class="model-actions" aria-label="预览模式"></div>
+            <img id="model-gallery-image" alt="" width="420" height="440" hidden />
+            <p id="model-gallery-status" class="model-copy" role="status"></p>
+          </section>
           <div id="model-installed-list" class="model-list" role="list" aria-label="已安装模型"></div>
         </div>
         <div class="menu-scale-row">
           <label class="menu-scale-label" for="model-file">从文件导入</label>
           <p class="model-copy">.kurocat.json 包含猫咪外观、模式与行为能力，继承打字、抚摸、道具和起床气互动。暂不支持 GLB / VRM / Live2D 骨架文件。</p>
-          <input type="file" id="model-file" accept=".json,application/json" aria-describedby="model-status" />
+          <input type="file" id="model-file" multiple accept=".json,application/json" aria-describedby="model-status" />
+          <p class="model-copy">可多选文件，也可导入 catalog.json 集合；一次最多 50 个模型、合计 256 KB。</p>
           <div id="model-preview" class="model-preview" hidden>
+            <label class="model-filter-label" for="model-batch">待导入模型</label>
+            <select id="model-batch" class="sound-profile"></select>
             <p id="model-preview-text" class="model-copy"></p>
             <label id="model-replace-row" class="menu-toggle-row"><span>确认替换本机同 ID 模型</span><input type="checkbox" id="model-replace" /></label>
             <div class="model-actions">
@@ -398,17 +409,17 @@
       <div class="menu-footer-bar">
       <button class="menu-item" data-action="desktop-shortcut" id="btn-desktop-shortcut">
         <span>创建桌面图标</span>
-        <span class="menu-hint" id="shortcut-hint">KuroCat</span>
+        <span class="menu-hint" id="shortcut-hint">DIY-Cat</span>
       </button>
       <button class="menu-item" data-action="reset-pos">
         <span>重置位置到右下角</span>
       </button>
       <button class="menu-item" data-action="check-update" id="btn-check-update">
         <span>检查更新</span>
-        <span class="menu-hint" id="update-hint">v4.8.0</span>
+        <span class="menu-hint" id="update-hint">v1.0.0</span>
       </button>
       <button class="menu-item danger" data-action="quit">
-        <span>退出 KuroCat</span>
+        <span>退出 DIY-Cat</span>
       </button>
       </div><!-- /menu-footer-bar -->
     </div>

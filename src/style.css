@@ -70,7 +70,8 @@ html.win7-ulw-mode .update-toast {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='26' viewBox='0 0 24 24'%3E%3Cpath fill='%2316171a' stroke='%23ffffff' stroke-width='1.65' stroke-linejoin='round' d='M9 11V5.5a1.5 1.5 0 0 1 3 0V10m0-5.5a1.5 1.5 0 0 1 3 0V10m0-4a1.5 1.5 0 0 1 3 0V11m0-2.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-1.5a6.5 6.5 0 0 1-5.4-2.9l-2.6-4.1a1.5 1.5 0 0 1 2.4-1.8L7 14V7.5a1.5 1.5 0 0 1 2 0Z'/%3E%3C/svg%3E") 12 12, grab;
 }
 
-#pet-canvas.pet-dragging {
+#pet-canvas, #pet-canvas-3d { touch-action: none; }
+#pet-canvas.pet-dragging, #pet-canvas-3d.pet-dragging {
   cursor: grabbing;
 }
 
@@ -842,3 +843,17 @@ html.win7-ulw-mode .update-toast {
 .model-publish summary:focus-visible { outline: 2px solid #d2f244; outline-offset: 2px; }
 #model-catalog-summary { white-space: pre-line; }
 #model-status { margin: 10px; padding: 10px; border-top: 1px solid #66705d; }
+
+/* Fixed-size offscreen studios render a still only, without live pet state. */
+.model-render-studio { position: fixed; left: -10000px; top: 0; width: 420px; height: 440px; pointer-events: none; }
+.model-render-studio canvas { display: block; width: 420px; height: 440px; }
+.model-entry { display: flow-root; }
+.model-thumb { float: left; width: 80px; min-height: 84px; margin: 0 10px 6px 0; padding: 2px; border: 1px solid #66705d; border-radius: 6px; background: #e2e5de; color: #252c21; cursor: pointer; }
+.model-thumb img { display: block; width: 100%; height: auto; }
+.model-entry .model-actions, .model-delete-confirm { clear: both; }
+.model-gallery { margin: 10px 0; padding: 10px; border: 1px solid #66705d; border-radius: 8px; }
+.model-gallery strong { flex: 1; overflow-wrap: anywhere; color: #eef3e8; font-size: 13px; }
+#model-gallery-image { display: block; width: 100%; height: auto; max-height: 260px; object-fit: contain; background: #e2e5de; border-radius: 6px; margin-top: 8px; }
+#model-gallery-modes { margin-top: 8px; }
+#model-gallery-modes [aria-pressed="true"] { background: #d2f244; color: #20261e; border-color: #d2f244; }
+#model-status { white-space: pre-line; }

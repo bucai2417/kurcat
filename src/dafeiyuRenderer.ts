@@ -154,6 +154,11 @@ export class DaFeiYuRenderer {
     };
   }
 
+  /** Static previews must wait for the sprites instead of caching an empty frame. */
+  public async ready(): Promise<void> {
+    await Promise.all(Object.values(this.sprites).map(sprite => sprite.decode()));
+  }
+
   public onPrivacyModeChanged(active: boolean): void {
     if (active) {
       this.leftHand.heldVks.clear();

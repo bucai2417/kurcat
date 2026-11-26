@@ -188,6 +188,7 @@ const LIGHT_IDLE_FRAME_MS = 66;
 
 export class KuroCatEngine {
   private canvas: HTMLCanvasElement;
+  private readonly previewOnly: boolean;
   private ctx: CanvasRenderingContext2D;
   private rafId: number | null = null;
   private idleFrameTimer: number | null = null;
@@ -959,9 +960,10 @@ export class KuroCatEngine {
   private bubbles: KeyBubble[] = [];
   private nextBubbleId = 1;
 
-  constructor(canvas: HTMLCanvasElement, options?: { embedded?: boolean }) {
+  constructor(canvas: HTMLCanvasElement, options?: { embedded?: boolean; previewOnly?: boolean }) {
     this.canvas = canvas;
     this.embedded = Boolean(options?.embedded);
+    this.previewOnly = Boolean(options?.previewOnly);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Could not initialize 2D canvas context');
     this.ctx = ctx;
@@ -1008,11 +1010,19 @@ export class KuroCatEngine {
     };
 
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    if (!this.previewOnly) window.addEventListener('resize', () => this.resize());
+  }
+
+  /** Render once for the library; never starts an animation or changes the live pet. */
+  public async snapshot(skin: CatSkinConfig): Promise<string> {
+    if (skin.id === 'dafeiyu') await this.dafeiyu.ready();
+    this.setCatAppearance(skin.id, skin); this.setIdleAutoEnabled(false);
+    this.update(1 / 60, 0); this.render();
+    return this.canvas.toDataURL('image/png');
   }
 
   public resize(): void {
-    const dpr = Math.max(window.devicePixelRatio || 1, 1);
+    const dpr = this.previewOnly ? 1 : Math.max(window.devicePixelRatio || 1, 1);
     const cssW = Math.max(1, this.embedded ? (this.canvas.clientWidth || 420) : window.innerWidth);
     const cssH = Math.max(1, this.embedded ? (this.canvas.clientHeight || 440) : window.innerHeight);
     this.canvas.width = Math.round(cssW * dpr);
@@ -1021,6 +1031,7 @@ export class KuroCatEngine {
   }
 
   public start(): void {
+    if (this.previewOnly) return;
     if (this.rafId !== null || this.idleFrameTimer !== null) return;
     this.lastTime = this.lastActivityAt = performance.now();
     this.rafId = requestAnimationFrame(this.renderFrame);
@@ -1060,6 +1071,7 @@ export class KuroCatEngine {
   };
 
   private wakeRendering(now = performance.now()): void {
+    if (this.previewOnly) return;
     this.lastActivityAt = now;
     if (this.idleFrameTimer === null) return;
     window.clearTimeout(this.idleFrameTimer);

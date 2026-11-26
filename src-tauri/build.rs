@@ -13,14 +13,14 @@ fn main() {
         if let Ok(shim) = std::env::var("KUROCAT_WIN7_OLE32_SHIM_OBJ") {
             let trimmed = shim.trim();
             if !trimmed.is_empty() {
-                println!("cargo:rustc-link-arg-bin=KuroCat={}", trimmed);
+                println!("cargo:rustc-link-arg-bin=DIY-Cat={}", trimmed);
             }
         }
         if let Ok(obj) = std::env::var("KUROCAT_YY_THUNKS_OBJ") {
             let trimmed = obj.trim();
             if !trimmed.is_empty() {
-                println!("cargo:rustc-link-arg-bin=KuroCat={}", trimmed);
-                println!("cargo:rustc-link-arg-bin=KuroCat=/SUBSYSTEM:WINDOWS,6.01");
+                println!("cargo:rustc-link-arg-bin=DIY-Cat={}", trimmed);
+                println!("cargo:rustc-link-arg-bin=DIY-Cat=/SUBSYSTEM:WINDOWS,6.01");
             }
         }
     }

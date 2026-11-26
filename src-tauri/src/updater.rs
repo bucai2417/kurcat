@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
 
-const REPO_API_LATEST: &str = "https://api.github.com/repos/qianyiai/kurocat/releases/latest";
-const REPO_RELEASES_PAGE: &str = "https://github.com/qianyiai/kurocat/releases/latest";
+const REPO_API_RELEASES: &str = "https://api.github.com/repos/bucai2417/kurcat/releases?per_page=100";
+const REPO_RELEASES_PAGE: &str = "https://github.com/bucai2417/kurcat/releases";
 
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -35,6 +35,10 @@ struct GhRelease {
     tag_name: String,
     html_url: Option<String>,
     body: Option<String>,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
     #[serde(default)]
     assets: Vec<GhAsset>,
 }
@@ -105,73 +109,65 @@ fn detect_install_kind() -> &'static str {
 }
 
 fn select_asset<'a>(assets: &'a [GhAsset], install_kind: &str) -> Option<&'a GhAsset> {
+    let branded = || assets.iter().filter(|a| a.name.to_ascii_lowercase().starts_with("diy-cat-"));
     let want_108 = cfg!(feature = "layout-108");
     match install_kind {
-        "windows-nsis" => assets
-            .iter()
+        "windows-nsis" => branded()
             .find(|a| {
                 let n = a.name.to_ascii_lowercase();
                 n.ends_with("-setup.exe") && n.contains("x64") && (n.contains("108key") == want_108)
             })
             .or_else(|| {
-                assets.iter().find(|a| {
+                branded().find(|a| {
                     let n = a.name.to_ascii_lowercase();
                     n.ends_with("-setup.exe") && n.contains("x64")
                 })
             })
             .or_else(|| {
-                assets
-                    .iter()
+                branded()
                     .find(|a| a.name.to_ascii_lowercase().ends_with("-windows-x64.exe"))
             }),
-        "windows-portable" => assets
-            .iter()
+        "windows-portable" => branded()
             .find(|a| {
                 let n = a.name.to_ascii_lowercase();
                 n.ends_with("-windows-x64.exe") && (n.contains("108key") == want_108)
             })
             .or_else(|| {
-                assets
-                    .iter()
+                branded()
                     .find(|a| a.name.to_ascii_lowercase().ends_with("-windows-x64.exe"))
             })
             .or_else(|| {
-                assets
-                    .iter()
+                branded()
                     .find(|a| a.name.to_ascii_lowercase().ends_with("-setup.exe"))
             }),
-        "windows-win7" => assets.iter().find(|a| {
+        "windows-win7" => branded().find(|a| {
             let n = a.name.to_ascii_lowercase();
             n.contains("win7") && n.ends_with(".zip")
         }),
-        "macos-app" => assets
-            .iter()
+        "macos-app" => branded()
             .find(|a| a.name.to_ascii_lowercase().ends_with("-macos-universal.app.tar.gz"))
             .or_else(|| {
-                assets
-                    .iter()
+                branded()
                     .find(|a| a.name.to_ascii_lowercase().ends_with("-macos-universal.dmg"))
             }),
-        "linux-deb-arm64" => assets
-            .iter()
+        "linux-deb-arm64" => branded()
             .find(|a| {
                 let n = a.name.to_ascii_lowercase();
                 n.ends_with(".deb") && (n.contains("arm64") || n.contains("aarch64"))
             })
             .or_else(|| {
-                assets.iter().find(|a| {
+                branded().find(|a| {
                     let n = a.name.to_ascii_lowercase();
                     n.ends_with(".appimage") && (n.contains("arm64") || n.contains("aarch64"))
                 })
             }),
-        "linux-deb-amd64" => assets
-            .iter()
+        "linux-deb-amd64" => branded()
             .find(|a| {
                 let n = a.name.to_ascii_lowercase();
                 n.ends_with(".deb") && (n.contains("amd64") || n.contains("x86_64"))
             })
             .or_else(|| {
-                assets.iter().find(|a| {
+                branded().find(|a| {
                     let n = a.name.to_ascii_lowercase();
                     n.ends_with(".appimage") && (n.contains("amd64") || n.contains("x86_64"))
                 })
@@ -568,11 +564,11 @@ mod winhttp_client {
 }
 
 #[cfg(windows)]
-fn fetch_latest_release_json() -> Result<String, String> {
-    let ua = format!("KuroCat/{}", CURRENT_VERSION);
+fn fetch_releases_json() -> Result<String, String> {
+    let ua = format!("DIY-Cat/{}", CURRENT_VERSION);
     let mut body = Vec::with_capacity(8192);
     winhttp_client::get_stream(
-        REPO_API_LATEST,
+        REPO_API_RELEASES,
         &ua,
         Some("Accept: application/vnd.github+json\r\n"),
         20_000,
@@ -593,7 +589,7 @@ fn fetch_latest_release_json() -> Result<String, String> {
 }
 
 #[cfg(not(windows))]
-fn fetch_latest_release_json() -> Result<String, String> {
+fn fetch_releases_json() -> Result<String, String> {
     use std::process::Command;
 
     let curl_bin = if cfg!(target_os = "macos") {
@@ -609,10 +605,10 @@ fn fetch_latest_release_json() -> Result<String, String> {
             "--max-time",
             "20",
             "-H",
-            &format!("User-Agent: KuroCat/{}", CURRENT_VERSION),
+            &format!("User-Agent: DIY-Cat/{}", CURRENT_VERSION),
             "-H",
             "Accept: application/vnd.github+json",
-            REPO_API_LATEST,
+            REPO_API_RELEASES,
         ])
         .output()
         .map_err(|e| format!("无法调用 curl 检查更新: {}", e))?;
@@ -633,27 +629,28 @@ fn fetch_latest_release_json() -> Result<String, String> {
     Ok(text)
 }
 
-pub fn check_latest_update() -> Result<UpdateInfo, String> {
-    let raw_json = fetch_latest_release_json()?;
-    let rel: GhRelease = serde_json::from_str(&raw_json)
-        .map_err(|e| format!("解析最新版本信息失败: {}", e))?;
-
-    let latest_clean = rel
-        .tag_name
-        .trim()
-        .trim_start_matches(['v', 'V'])
-        .to_string();
+// A fork can contain older upstream 5.x releases. Only the DIY-Cat channel is
+// eligible; choose its highest stable version even when GitHub's "latest" points
+// at an old upstream tag. Drafts and prereleases never trigger automatic updates.
+fn update_info_from_releases(raw_json: &str, install_kind: &str) -> Result<UpdateInfo, String> {
+    let releases: Vec<GhRelease> = serde_json::from_str(raw_json)
+        .map_err(|e| format!("解析发布列表失败: {}", e))?;
+    let rel = releases.into_iter().filter(|r| {
+        let tag = r.tag_name.trim().trim_start_matches(['v', 'V']);
+        let parts: Vec<&str> = tag.split('.').collect();
+        !r.draft && !r.prerelease && parts.len() == 3
+            && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u64>().is_ok())
+            && r.assets.iter().any(|a| a.name.to_ascii_lowercase().starts_with("diy-cat-"))
+    }).max_by_key(|r| parse_semver(&r.tag_name))
+      .ok_or_else(|| "你的仓库尚未发布带安装包的 DIY-Cat 正式版本，请稍后再试或查看发布页".to_string())?;
+    let latest_clean = rel.tag_name.trim().trim_start_matches(['v', 'V']).to_string();
     let has_update = is_newer_version(&latest_clean, CURRENT_VERSION);
-    let install_kind = detect_install_kind();
     let asset = select_asset(&rel.assets, install_kind);
-
     Ok(UpdateInfo {
         current_version: CURRENT_VERSION.to_string(),
         latest_version: latest_clean,
         has_update,
-        release_url: rel
-            .html_url
-            .unwrap_or_else(|| REPO_RELEASES_PAGE.to_string()),
+        release_url: rel.html_url.clone().unwrap_or_else(|| REPO_RELEASES_PAGE.to_string()),
         asset_name: asset.map(|a| a.name.clone()),
         download_url: asset.map(|a| a.browser_download_url.clone()),
         asset_sha256: asset.and_then(|a| extract_sha256(&a.digest)),
@@ -661,6 +658,10 @@ pub fn check_latest_update() -> Result<UpdateInfo, String> {
         install_kind: install_kind.to_string(),
         notes_summary: summarize_notes(rel.body.as_deref()),
     })
+}
+
+pub fn check_latest_update() -> Result<UpdateInfo, String> {
+    update_info_from_releases(&fetch_releases_json()?, detect_install_kind())
 }
 
 fn emit_progress(app: &AppHandle, stage: &str, message: impl Into<String>, info: Option<UpdateInfo>) {
@@ -713,7 +714,7 @@ fn download_and_verify_windows(url: &str, dest: &PathBuf, expected_sha256: Optio
     let mut file = std::fs::File::create(&part_path)
         .map_err(|e| format!("无法创建下载临时文件: {}", e))?;
 
-    let ua = format!("KuroCat/{}", CURRENT_VERSION);
+    let ua = format!("DIY-Cat/{}", CURRENT_VERSION);
     let mut hasher = Sha256::new();
     let mut total_bytes: u64 = 0;
 
@@ -784,7 +785,7 @@ fn install_windows_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), Stri
     let asset_name = info
         .asset_name
         .as_deref()
-        .unwrap_or("KuroCat-update.exe");
+        .unwrap_or("DIY-Cat-update.exe");
 
     emit_progress(
         app,
@@ -879,7 +880,7 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
     let asset_name = info
         .asset_name
         .as_deref()
-        .unwrap_or("KuroCat-macos-universal.app.tar.gz");
+        .unwrap_or("DIY-Cat-macos-universal.app.tar.gz");
 
     if !asset_name.to_ascii_lowercase().ends_with(".tar.gz") {
         open_url_in_browser(url);
@@ -887,7 +888,7 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
     }
 
     let app_bundle = find_current_macos_app_bundle()
-        .unwrap_or_else(|| PathBuf::from("/Applications/KuroCat.app"));
+        .unwrap_or_else(|| PathBuf::from("/Applications/DIY-Cat.app"));
 
     emit_progress(
         app,
@@ -899,7 +900,7 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
     let temp_dir = std::env::temp_dir().join(format!("kurocat-update-{}", info.latest_version));
     let _ = std::fs::remove_dir_all(&temp_dir);
     std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
-    let archive_path = temp_dir.join("KuroCat-update.app.tar.gz");
+    let archive_path = temp_dir.join("DIY-Cat-update.app.tar.gz");
 
     let dl = Command::new("/usr/bin/curl")
         .args([
@@ -909,9 +910,9 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
             "--max-time",
             "240",
             "-H",
-            &format!("User-Agent: KuroCat/{}", CURRENT_VERSION),
+            &format!("User-Agent: DIY-Cat/{}", CURRENT_VERSION),
             "-o",
-            archive_path.to_str().unwrap_or("/tmp/KuroCat-update.app.tar.gz"),
+            archive_path.to_str().unwrap_or("/tmp/DIY-Cat-update.app.tar.gz"),
             url,
         ])
         .output()
@@ -955,7 +956,7 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
         return Err("解压更新包失败".to_string());
     }
 
-    // Find extracted .app (KuroCat.app or KuroCatPet.app)
+    // Find extracted .app (DIY-Cat.app or DIY-CatPet.app)
     let new_app = std::fs::read_dir(&extract_dir)
         .ok()
         .and_then(|mut it| {
@@ -1080,6 +1081,69 @@ pub fn start_background_update_checker(app: AppHandle) {
 mod tests {
     use super::*;
 
+    fn release(tag: &str, names: &[&str]) -> serde_json::Value {
+        serde_json::json!({
+            "tag_name": tag,
+            "html_url": format!("https://github.com/bucai2417/kurcat/releases/tag/{}", tag),
+            "body": "# DIY-Cat\n修复拖动与中文模型预览",
+            "assets": names.iter().map(|name| serde_json::json!({
+                "name": name,
+                "browser_download_url": format!("https://github.com/bucai2417/kurcat/releases/download/{}/{}", tag, name),
+                "size": 1024
+            })).collect::<Vec<_>>()
+        })
+    }
+
+    #[test]
+    fn release_channel_ignores_upstream_drafts_and_prereleases() {
+        let upstream = release("v5.9.0", &["KuroCat-5.9.0-x64-setup.exe"]);
+        let stable = release("v1.1.0", &["DIY-Cat-1.1.0-x64-setup.exe"]);
+        let initial = release("v1.0.0", &["DIY-Cat-1.0.0-x64-setup.exe"]);
+        let mut draft = release("v9.0.0", &["DIY-Cat-9.0.0-x64-setup.exe"]);
+        draft["draft"] = serde_json::json!(true);
+        let mut prerelease = release("v8.0.0", &["DIY-Cat-8.0.0-x64-setup.exe"]);
+        prerelease["prerelease"] = serde_json::json!(true);
+        let invalid = release("v7.0.0-beta", &["DIY-Cat-7.0.0-beta-x64-setup.exe"]);
+        let raw = serde_json::json!([upstream, initial, draft, stable, prerelease, invalid]).to_string();
+        let info = update_info_from_releases(&raw, "windows-nsis").unwrap();
+        assert_eq!(info.latest_version, "1.1.0");
+        assert!(info.has_update);
+        assert_eq!(info.asset_name.as_deref(), Some("DIY-Cat-1.1.0-x64-setup.exe"));
+        assert_eq!(info.release_url, "https://github.com/bucai2417/kurcat/releases/tag/v1.1.0");
+        assert!(info.notes_summary.contains("中文模型预览"));
+    }
+
+    #[test]
+    fn release_channel_reports_unpublished_and_current_versions() {
+        let upstream = release("v5.0.0", &["KuroCat-5.0.0-x64-setup.exe"]);
+        for raw in ["[]".to_string(), serde_json::json!([upstream]).to_string()] {
+            assert!(update_info_from_releases(&raw, "windows-nsis").unwrap_err().contains("尚未发布"));
+        }
+        let initial = release(&format!("v{}", CURRENT_VERSION), &["DIY-Cat-1.0.0-x64-setup.exe"]);
+        let info = update_info_from_releases(&serde_json::json!([initial]).to_string(), "windows-nsis").unwrap();
+        assert!(!info.has_update);
+        assert!(update_info_from_releases("{", "windows-nsis").unwrap_err().contains("解析发布列表失败"));
+    }
+
+    #[test]
+    fn release_assets_match_platform_and_portable_update_formats() {
+        let names = ["KuroCat-5.0.0-windows-x64.exe", "DIY-Cat-1.1.0-x64-portable.zip",
+            "DIY-Cat-1.1.0-x64-setup.exe", "DIY-Cat-1.1.0-windows-x64.exe",
+            "DIY-Cat-v1.1.0-macos-universal.dmg", "DIY-Cat-v1.1.0-macos-universal.app.tar.gz",
+            "DIY-Cat-v1.1.0-linux-amd64.deb", "DIY-Cat-v1.1.0-linux-arm64.deb",
+            "DIY-Cat-v1.1.0-win7-x64-portable.zip"];
+        let raw = serde_json::json!([release("v1.1.0", &names)]).to_string();
+        for (kind, name) in [("windows-nsis", names[2]), ("windows-portable", names[3]),
+            ("macos-app", names[5]), ("linux-deb-amd64", names[6]),
+            ("linux-deb-arm64", names[7]), ("windows-win7", names[8])] {
+            let info = update_info_from_releases(&raw, kind).unwrap();
+            assert_eq!(info.asset_name.as_deref(), Some(name));
+            assert!(info.download_url.unwrap().starts_with("https://github.com/bucai2417/kurcat/releases/download/v1.1.0/"));
+        }
+        let info = update_info_from_releases(&raw, "manual").unwrap();
+        assert!(info.has_update); assert!(info.download_url.is_none());
+    }
+
     #[test]
     fn semver_comparison_works() {
         assert!(is_newer_version("4.4.0", "4.3.0"));
@@ -1124,11 +1188,11 @@ mod tests {
     #[test]
     fn http_url_parser_handles_github_endpoints() {
         let (https, host, port, path) =
-            parse_http_url("https://api.github.com/repos/qianyiai/kurocat/releases/latest").unwrap();
+            parse_http_url("https://api.github.com/repos/bucai2417/kurcat/releases?per_page=100").unwrap();
         assert!(https);
         assert_eq!(host, "api.github.com");
         assert_eq!(port, 443);
-        assert_eq!(path, "/repos/qianyiai/kurocat/releases/latest");
+        assert_eq!(path, "/repos/bucai2417/kurcat/releases?per_page=100");
 
         let (https2, host2, port2, path2) =
             parse_http_url("http://127.0.0.1:8080/dl?v=1").unwrap();

@@ -517,6 +517,7 @@ export class KuroCatEngine3D {
   public privacyMode = false;
 
   private readonly canvas: HTMLCanvasElement;
+  private readonly previewOnly: boolean;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
@@ -820,9 +821,10 @@ export class KuroCatEngine3D {
   private readonly tmpArmOff = new THREE.Vector3();
   private readonly tmpFxPos = new THREE.Vector3();
 
-  constructor(canvas: HTMLCanvasElement, options?: { embedded?: boolean }) {
+  constructor(canvas: HTMLCanvasElement, options?: { embedded?: boolean; previewOnly?: boolean }) {
     this.canvas = canvas;
     this.embedded = Boolean(options?.embedded);
+    this.previewOnly = Boolean(options?.previewOnly);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -831,7 +833,7 @@ export class KuroCatEngine3D {
       premultipliedAlpha: true,
       powerPreference: 'low-power',
     });
-    this.renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
+    this.renderer.setPixelRatio(this.previewOnly ? 1 : Math.min(1.5, window.devicePixelRatio || 1));
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
@@ -1502,6 +1504,13 @@ export class KuroCatEngine3D {
     return { ...this.viewport };
   }
 
+  /** Capture synchronously while the WebGL drawing buffer is valid. */
+  public snapshot(skin: CatSkinConfig): string {
+    this.setCatSkin(skin); this.setIdleAutoEnabled(false);
+    this.update(1 / 60); this.renderer.render(this.scene, this.camera);
+    return this.canvas.toDataURL('image/png');
+  }
+
   public resize(): void {
     const parent = this.canvas.parentElement;
     const w = Math.max(1, this.embedded ? parent?.clientWidth || 640 : window.innerWidth);
@@ -1524,6 +1533,7 @@ export class KuroCatEngine3D {
   }
 
   public start(): void {
+    if (this.previewOnly) return;
     if (this.rafId !== null || this.idleTimer !== null) return;
     this.lastFrameMs = performance.now();
     this.directRafPrevMs = 0;
@@ -1814,6 +1824,7 @@ export class KuroCatEngine3D {
     prop: { cx: number; cy: number; rx: number; ry: number } | null;
     petBox: { cx: number; cy: number; rx: number; ry: number };
     menuBox?: { cx: number; cy: number; rx: number; ry: number } | null;
+    updateBox?: { cx: number; cy: number; rx: number; ry: number } | null;
   } {
     return {
       petBox: this.windowRegion(0.5, 0.5, 0.5, 0.5),
@@ -2428,6 +2439,7 @@ export class KuroCatEngine3D {
   // ---- Internal helpers ----
 
   private wakeRendering(): void {
+    if (this.previewOnly) return;
     // Only interrupt idle/sleep timers so active 60 FPS / 30 FPS pacing is never defeated by high-Hz mouse storms!
     if (this.idleTimer === null || !this.isIdlePacing) return;
     window.clearTimeout(this.idleTimer);
@@ -3013,7 +3025,7 @@ export class KuroCatEngine3D {
     const gazeX = this.sGazeX.step(targetGazeX, dt);
     const gazeY = this.sGazeY.step(targetGazeY, dt);
 
-    // 6) Compact ears: perk when curious, fold flat sideways into airplane ears when cross
+    // 6) Each ear turns at its base: listen independently, flick, droop and fold back.
     const earTarget =
       0.12 * this.excite * (1 - cross) +
       0.16 * curious + propReaction.ears + typingPose.ears + (act?.kind === 'listen' ? 0.24 * actEnv : 0) -
@@ -3021,13 +3033,23 @@ export class KuroCatEngine3D {
       0.56 * cross -
       0.10 * this.sleepAmt;
     const earState = this.sEars.step(earTarget, dt);
-    const earFlick = act && act.kind === 'ear' ? Math.sin(actU * Math.PI * 2) * 0.22 : 0;
+    const earFlick = act?.kind === 'ear' ? Math.sin(actU * Math.PI * 2) * Math.sin(actU * Math.PI) * 0.52 : 0;
+    const earBlend = 1 - Math.exp(-dt * 18);
     for (const e of this.ears) {
-      const flick = act && act.kind === 'ear' && act.side === e.s ? earFlick : 0;
-      const airplaneFold = cross * 0.56;
-      e.group.rotation.z = -e.s * (e.tilt + airplaneFold - earState * 0.28 + flick);
-      e.group.rotation.x = -0.06 - cross * 0.14 + curious * 0.10;
-      e.group.position.set(e.s * (0.295 + cross * 0.06), 0.255 - cross * 0.045, -0.015);
+      // Staggered small involuntary flicks continue even when automatic idle acts are off.
+      const phase = ((t + (e.s < 0 ? 1.7 : 5.1)) % 8.6) / 0.56;
+      const twitch = phase < 1 ? Math.sin(phase * Math.PI * 2) * Math.sin(phase * Math.PI) * 0.19 : 0;
+      const flick = (act?.kind === 'ear' && act.side === e.s ? earFlick : twitch) * (1 - cross * 0.8);
+      const awake = 1 - this.sleepAmt;
+      const listening = (lookCursor ? gx * 0.28 : 0) * awake * (1 - cross);
+      const z = -e.s * (e.tilt + cross * 0.56 + this.sleepAmt * 0.15 - earState * 0.48 + flick * (0.25 + awake * 0.75));
+      const x = -0.06 - cross * 0.42 + curious * 0.16 + this.sleepAmt * 0.22 - (petActive ? 0.12 : 0);
+      const y = listening + e.s * ((act?.kind === 'listen' ? 0.22 * actEnv : 0) - cross * 0.20);
+      e.group.rotation.z = mix(e.group.rotation.z, z, earBlend);
+      e.group.rotation.x = mix(e.group.rotation.x, x, earBlend);
+      e.group.rotation.y = mix(e.group.rotation.y, y, earBlend);
+      // Keep the base attached to the head throughout the rotation.
+      e.group.position.set(e.s * 0.295, 0.255, -0.015);
     }
 
     // 7) Iconic KuroCat Eyes: open / curious / grumpy zero-seam / petting lazy slits / sleep arcs

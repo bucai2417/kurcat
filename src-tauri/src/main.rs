@@ -8,7 +8,7 @@ fn main() {
         return;
     }
 
-    // Issue #41 escape hatch: `KuroCat.exe --unlock` clears the click-through lock
+    // Issue #41 escape hatch: `DIY-Cat.exe --unlock` clears the click-through lock
     // and exits, for users who cannot reach the tray or the Alt shortcut.
     if args.iter().any(|a| a == "--unlock") {
         kuro_cat_pet_lib::clear_click_through_lock();

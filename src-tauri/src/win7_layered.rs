@@ -561,7 +561,7 @@ pub fn init(app: AppHandle, x: i32, y: i32, w: u32, h: u32, always_on_top: bool)
         .name("kurocat-win7-ulw".to_string())
         .spawn(move || {
             let class_name: Vec<u16> = "KuroCatWin7LayeredClass\0".encode_utf16().collect();
-            let title: Vec<u16> = "KuroCat\0".encode_utf16().collect();
+            let title: Vec<u16> = "DIY-Cat\0".encode_utf16().collect();
             unsafe {
                 let hinst = GetModuleHandleW(std::ptr::null());
                 let wc = WNDCLASSEXW {

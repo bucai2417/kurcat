@@ -39,6 +39,7 @@ export interface HitRegions {
   petBox?: NormalizedRegion;
   /** Open settings menu box, also window-normalized; null when closed. */
   menuBox?: NormalizedRegion | null;
+  updateBox?: NormalizedRegion | null;
 }
 
 export const KB_SCALE_MIN = 0.7;

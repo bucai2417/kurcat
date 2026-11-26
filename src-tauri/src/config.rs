@@ -631,7 +631,8 @@ pub fn set_windows_autostart(enabled: bool) -> Result<(), String> {
     }
 
     let subkey = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-    let value_name = to_wide("KuroCat");
+    let value_name = to_wide("DIY-Cat");
+    let previous_value_name = to_wide("KuroCat");
     let legacy_value_name = to_wide("KuroCatPet");
 
     unsafe {
@@ -649,6 +650,7 @@ pub fn set_windows_autostart(enabled: bool) -> Result<(), String> {
 
         // Clean up legacy autostart key so users upgrading from <=v4.2 never run two copies
         let _ = RegDeleteValueW(hkey, legacy_value_name.as_ptr());
+        let _ = RegDeleteValueW(hkey, previous_value_name.as_ptr());
 
         let result = if enabled {
             let exe = std::env::current_exe()
@@ -742,10 +744,10 @@ pub fn set_windows_autostart(enabled: bool) -> Result<(), String> {
         let entry = format!(
             "[Desktop Entry]\n\
              Type=Application\n\
-             Name=KuroCat\n\
+             Name=DIY-Cat\n\
              Comment=Minimalist desktop cat typing & mouse companion\n\
              Exec=\"{exe}\"\n\
-             Icon=KuroCat\n\
+             Icon=DIY-Cat\n\
              Terminal=false\n\
              X-GNOME-Autostart-enabled=true\n",
             exe = exe.replace('"', "\\\"")
@@ -775,13 +777,13 @@ pub fn create_desktop_shortcut() -> Result<String, String> {
 
     let script = format!(
         "$desktop = [Environment]::GetFolderPath('Desktop'); \
-         $lnk = Join-Path $desktop 'KuroCat.lnk'; \
+         $lnk = Join-Path $desktop 'DIY-Cat.lnk'; \
          $ws = New-Object -ComObject WScript.Shell; \
          $s = $ws.CreateShortcut($lnk); \
          $s.TargetPath = '{exe}'; \
          $s.WorkingDirectory = '{wd}'; \
          $s.IconLocation = '{exe},0'; \
-         $s.Description = 'KuroCat Desktop Companion'; \
+         $s.Description = 'DIY-Cat Desktop Companion'; \
          $s.Save(); \
          Write-Output $lnk",
         exe = exe_str,

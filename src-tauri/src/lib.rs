@@ -31,7 +31,7 @@ use config::{
     normalize_tail_key_mode, save_settings, set_windows_autostart, AppSettings,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size, State};
@@ -236,12 +236,12 @@ pub fn shutdown_pet_windows() {
     }
 }
 
-/// Clears the persisted click-through lock and exits (`KuroCat.exe --unlock`).
+/// Clears the persisted click-through lock and exits (`DIY-Cat.exe --unlock`).
 pub fn clear_click_through_lock() {
     let mut s = load_settings();
     s.click_through_locked = false;
     save_settings(&s);
-    println!("KuroCat: click-through lock cleared.");
+    println!("DIY-Cat: click-through lock cleared.");
 }
 
 pub fn run_mcp_stdio() {
@@ -253,6 +253,7 @@ pub struct AppState {
     pub menu_open: Arc<AtomicBool>,
     menu_window: Mutex<Option<MenuWindow>>,
     pub dragging: Arc<AtomicBool>,
+    drag_generation: Arc<AtomicU64>,
     pub mcp_enabled: Arc<AtomicBool>,
     pub update_banner_open: Arc<AtomicBool>,
     pub paused_guard: Arc<AtomicBool>,
@@ -298,6 +299,7 @@ pub struct HitRegions {
     pub pet_box: Option<HitRegion>,
     /// Open settings menu box in window-normalized coordinates.
     pub menu_box: Option<HitRegion>,
+    pub update_box: Option<HitRegion>,
 }
 
 #[tauri::command]
@@ -357,7 +359,7 @@ fn get_mcp_config(state: State<'_, AppState>) -> String {
     let port = state.settings.lock().unwrap().mcp_port;
     let exe = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "KuroCat.exe".to_string());
+        .unwrap_or_else(|_| "DIY-Cat.exe".to_string());
     serde_json::to_string_pretty(&serde_json::json!({
         "mcpServers": {
             "kurocat": {
@@ -561,8 +563,66 @@ fn set_menu_open(app: AppHandle, state: State<'_, AppState>, open: bool) -> Menu
 }
 
 #[tauri::command]
-fn set_dragging(state: State<'_, AppState>, dragging: bool) {
+fn set_dragging(state: State<'_, AppState>, dragging: bool) -> u64 {
+    let generation = state.drag_generation.fetch_add(1, Ordering::SeqCst) + 1;
     state.dragging.store(dragging, Ordering::Relaxed);
+    generation
+}
+
+// Windows WebView native move loops can lose the initiating press after an overlay
+// or focus transition. Follow the physical cursor while the button is held instead.
+// This runs off the UI thread and also ends when the release never reaches the DOM.
+#[tauri::command]
+async fn start_pet_drag(app: AppHandle, state: State<'_, AppState>, generation: u64) -> Result<bool, String> {
+    if state.drag_generation.load(Ordering::SeqCst) != generation { return Ok(true); }
+    let win = app.get_webview_window("main").ok_or("Pet window unavailable")?;
+    #[cfg(windows)]
+    {
+        if win_needs_win7_ulw() { return Ok(true); } // The ULW presenter owns native dragging.
+        let dragging = state.dragging.clone();
+        let drag_generation = state.drag_generation.clone();
+        return tauri::async_runtime::spawn_blocking(move || {
+            use windows_sys::Win32::Foundation::POINT;
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+            use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+            let result = (|| -> Result<(), String> {
+                let mut cursor = POINT { x: 0, y: 0 };
+                if unsafe { GetCursorPos(&mut cursor) } == 0 { return Err("Cursor unavailable".into()); }
+                let origin = win.outer_position().map_err(|e| e.to_string())?;
+                let start = (cursor.x, cursor.y);
+                let mut previous = start;
+                let _ = win.set_ignore_cursor_events(false);
+                while drag_generation.load(Ordering::SeqCst) == generation
+                    && dragging.load(Ordering::Relaxed)
+                    && unsafe { GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0 }
+                {
+                    if unsafe { GetCursorPos(&mut cursor) } == 0 { break; }
+                    if previous != (cursor.x, cursor.y) {
+                        win.set_position(PhysicalPosition::new(
+                            origin.x + cursor.x - start.0, origin.y + cursor.y - start.1,
+                        )).map_err(|e| e.to_string())?;
+                        previous = (cursor.x, cursor.y);
+                    }
+                    std::thread::sleep(Duration::from_millis(8));
+                }
+                Ok(())
+            })();
+            // The frontend releases only the matching press. An older worker must
+            // never clear the flag belonging to a new drag.
+            if drag_generation.load(Ordering::SeqCst) == generation {
+                if let Ok(pos) = win.outer_position() {
+                    windows_display::remember_dragged_position(&app, pos);
+                }
+            }
+            result.map(|()| true)
+        }).await.map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = state;
+        win.start_dragging().map_err(|e| e.to_string())?;
+        Ok(false) // Native OS loop owns release; frontend capture/blur clears the hint.
+    }
 }
 
 #[tauri::command]
@@ -1536,7 +1596,7 @@ fn start_hit_test_loop(
             let (bw, bh) = base_dimensions(&layout_str, cur_kb_scale);
             let win_log_w = (w / sf).max(1.0);
             let win_log_h = (h / sf).max(1.0);
-            let (pet_x0, pet_y0, pet_w_frac, pet_h_frac, reported_menu) = {
+            let (pet_x0, pet_y0, pet_w_frac, pet_h_frac, reported_menu, reported_banner) = {
                 let regions = hit_regions.lock().unwrap();
                 match regions.as_ref() {
                     Some(r) if r.pet_box.is_some() => {
@@ -1547,12 +1607,13 @@ fn start_hit_test_loop(
                             (b.rx * 2.0).max(0.01),
                             (b.ry * 2.0).max(0.01),
                             r.menu_box,
+                            r.update_box,
                         )
                     }
                     _ => {
                         let pw = ((bw * cur_scale) / win_log_w).clamp(0.05, 1.0);
                         let ph = ((bh * cur_scale) / win_log_h).clamp(0.05, 1.0);
-                        (1.0 - pw, 1.0 - ph, pw, ph, None)
+                        (1.0 - pw, 1.0 - ph, pw, ph, None, None)
                     }
                 }
             };
@@ -1588,7 +1649,8 @@ fn start_hit_test_loop(
                 win7_layered::set_over_cat(over_cat);
             }
 
-            let over_banner = is_banner && inside && ry <= 0.19;
+            let over_banner = is_banner && inside
+                && reported_banner.map(|b| b.contains_box(rx, ry)).unwrap_or(false);
 
             // On Windows 7/8 ULW mode, UpdateLayeredWindow(ULW_ALPHA) natively passes through all
             // alpha==0 pixels at the OS level, so we ONLY toggle WS_EX_TRANSPARENT on ulw_hwnd when
@@ -1963,6 +2025,7 @@ pub fn run() {
             menu_open,
             menu_window: Mutex::new(None),
             dragging,
+            drag_generation: Arc::new(AtomicU64::new(0)),
             mcp_enabled,
             update_banner_open,
             paused_guard,
@@ -2138,6 +2201,7 @@ pub fn run() {
             update_settings,
             set_menu_open,
             set_dragging,
+            start_pet_drag,
             set_update_banner_open,
             set_hit_regions,
             is_win7_ulw_mode,
@@ -2152,7 +2216,7 @@ pub fn run() {
             quit_app,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running KuroCat");
+        .expect("error while running DIY-Cat");
 }
 
 #[cfg(all(test, windows))]

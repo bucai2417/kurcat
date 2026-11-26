@@ -177,7 +177,7 @@ export function installTauriPreviewShim(): boolean {
       case 'get_desk_skins':
         return store.deskSkins ?? [];
       case 'get_app_version':
-        return '4.8.0-preview';
+        return '1.0.0-preview';
       case 'get_mcp_config':
         return JSON.stringify(
           { mcpServers: { kurocat: { url: 'http://127.0.0.1:27420/mcp' } } },
@@ -186,10 +186,10 @@ export function installTauriPreviewShim(): boolean {
         );
       case 'check_for_update':
         return {
-          currentVersion: '4.8.0',
-          latestVersion: '4.8.0',
+          currentVersion: '1.0.0',
+          latestVersion: '1.0.0',
           hasUpdate: false,
-          releaseUrl: 'https://github.com/qianyiai/kurocat/releases/latest',
+          releaseUrl: 'https://github.com/bucai2417/kurcat/releases',
           assetName: null,
           downloadUrl: null,
           assetSha256: null,

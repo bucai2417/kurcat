@@ -1,20 +1,24 @@
-# 🐈‍⬛ KuroCat
+# 🐈‍⬛ DIY-Cat
 
-> 🌐 **上游官方网站与网页端在线试玩 / 国内高速下载**：[**https://qianyi.one/kurocat**](https://qianyi.one/kurocat)
+> **当前版本：1.0.0** · [项目仓库](https://github.com/bucai2417/kurcat) · [下载与发布记录](https://github.com/bucai2417/kurcat/releases) · [GitHub Actions 构建](#github-actions-build)
 
-轻量级 **Windows（Win11/10 & Win7 SP1）/ macOS（10.15+ Apple Silicon & Intel）/ Linux（银河麒麟 KylinOS / Ubuntu / UOS）** 透明置顶桌面打字猫咪伴侣（开箱自带 **6 款手绘猫咪皮肤 + 🐳 大肥鱼（鲸鱼娘）**：经典小黑猫、暖奶茶布偶猫、大橘猫、三花猫、奶牛猫、暹罗猫、大肥鱼，支持**输密码自动闭眼/捂眼防偷窥**，并原生内置 **MCP 协议服务端**，支持用 AI 一句话定制或新增更多你自己的猫咪！），基于 **Tauri v2（Rust 全局原生钩子 + 内置 MCP 引擎 + HTML5 Canvas 2D + Three.js 3D）** 打造。单文件轻量低耗，零外部运行时依赖。
+轻量级 **Windows（Win11/10 & Win7 SP1）/ macOS（10.15+ Apple Silicon & Intel）/ Linux（银河麒麟 KylinOS / Ubuntu / UOS）** 透明置顶桌面打字猫咪伴侣（开箱自带 **6 款手绘猫咪皮肤 + 🐳 大肥鱼（鲸鱼娘）**：经典小黑猫、暖奶茶布偶猫、大橘猫、三花猫、奶牛猫、暹罗猫、大肥鱼，支持**输密码自动闭眼/捂眼防偷窥**，并原生内置 **MCP 协议服务端**，支持用 AI 一句话定制或新增更多你自己的猫咪！），基于 **Tauri v2（Rust 全局原生钩子 + 内置 MCP 引擎 + HTML5 Canvas 2D + Three.js 3D）** 打造。桌面版支持透明窗口与全局键鼠监听；系统运行库要求以对应平台构建产物为准。
 
-本分支在 [bucai2417/kurcat](https://github.com/bucai2417/kurcat) 继续开发 2D / 3D 互动与模型库。下面保留的上游官网演示和 v4.8.0 下载链接属于历史版本，不包含本分支新增功能；测试本分支请使用 [GitHub Actions 构建](#github-actions-build)。
+DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，版本从 **1.0.0** 开始。程序检查更新和下载安装均使用 `bucai2417/kurcat` 的正式 Releases，仅识别 `DIY-Cat-` 开头的发布包，不把旧 KuroCat 4.x / 5.x 版本当成更新。已有设置目录、MCP 服务 ID `kurocat` 与 `.kurocat.json` 模型格式保留兼容。
 
-## 本分支新增功能
+## 新增功能
 
 - **睡眠被打断后的起床气**：猫咪打盹时，键盘按下、鼠标按下或滚轮会把它吵醒。2D / 3D 都会生气拍尾，尾巴先抬起蓄力、快速落地、再回弹，落地点带冲击反馈，并显示清晰中文气泡。随机 **2–5 秒**恢复，继续输入不会延长；来回抚摸头部可提前安抚。普通移动鼠标不会吵醒。
 - **更清晰的互动反馈**：起床气、安抚、道具与连续打字使用高对比文字；同一时刻按优先级显示，避免文字重叠。隐私模式会清理并暂停这些输入反应。
-- **模型库与导入导出**：右键“模型库”可搜索本机与 GitHub 模型，按 2D / 3D 筛选，查看作者、许可、简介、修订与动作，导入/使用/导出或删除自定义模型。支持更新识别与明确确认后的替换，删除当前模型自动切回黑猫。
+- **多模型库与图片预览**：本机可保存多个模型，按名称、作者和 2D / 3D 能力筛选，点击缩略图可放大并切换查看支持的 2D / 3D 外观，无需先启用模型。支持多选文件或目录 JSON 批量导入、导出全部自定义模型、删除与冲突确认；批量导入不切换当前猫咪。当前桌面显示一只猫，多模型指保存和切换。
+- **拖动与点击分离**：从猫咪或道具区域按住拖动；原地点击道具才会使用。增加释放、失焦与取消后的状态清理，Windows 拖动检查真实鼠标按键，更新提示只占用自身命中区域。
+- **会表达情绪的 3D 耳朵**：左右耳独立轻抖、朝向鼠标，侧耳听、打盹、抚摸和生气分别有平滑过渡的耳朵姿态。
 - **GitHub 模型发布**：默认读取 `bucai2417/kurcat/main/model-store/catalog.json`。UI 提供上传入口；将 `.kurocat.json` 上传到 `model-store/` 后，**Publish model catalog** 工作流自动校验并提交目录，回到模型库刷新即可安装。发布和下架步骤见 [模型包文档](docs/model-packs.md#发布-github-模型目录)。
 - **统一模型能力契约**：UI、MCP、OBS 根据适配器提供的能力选择 2D / 3D 模式和动作。版本 1 包含现有程序化猫咪的外观配置，继承其完整互动；任意 GLB / VRM / Live2D 骨架文件接入尚未实现。详细格式、动作列表及后续接入设计见 [模型包文档](docs/model-packs.md)，可试用 [薄荷云朵示例](model-store/mint-cloud.kurocat.json)。
 
-## 🎬 在线试玩预览 & 鲸鱼娘 14s 演示视频
+## 🎬 上游历史演示
+
+以下链接与图片展示上游 KuroCat，供了解原始外观；不代表 DIY-Cat 1.0.0 的全部功能。
 
 <table>
   <tr>
@@ -42,31 +46,31 @@
   </tr>
 </table>
 
-## 📥 直接下载使用（Windows / Win7 / macOS / Linux）
+## 📥 下载与更新
 
-前往上游 [Releases](https://github.com/qianyiai/kurocat/releases) 页面，或使用下面保留的历史 **`v4.8.0`** 安装包链接（所有版本均内置 **20%–150% 丝滑缩放滑动条**、右键一键切换 **65% 紧凑 / 108 全尺寸小键盘** 与 **面向猫咪 / 面向观众** 方向、**输密码自动闭眼/捂眼防偷窥**、**按住 `Alt` 随时解锁鼠标穿透**、**无边框 / 全屏优化游戏持续 Z 序置顶守护**、托盘一键 **以管理员身份重启（捕获游戏键鼠）** & **游戏反作弊护航暂停** 与 App 内自动新版本提醒及一键自升级）：
+请到 [bucai2417/kurcat Releases](https://github.com/bucai2417/kurcat/releases) 下载已公开的 **DIY-Cat** 版本。以页面实际上传的附件为准；尚未发布时，可先通过下面的 Actions 流程下载测试包。不要使用上游 KuroCat 安装包验证本项目的新功能。
 
-- **🪟 Windows 10 / 11（65% 经典安装版 · `v4.8.0`）**：[**`KuroCat-4.8.0-x64-setup.exe`**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-4.8.0-x64-setup.exe)（约 1.96 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/#download)
-  - 默认 65% 紧凑机械键盘，自动创建桌面 **`KuroCat`** 图标、开始菜单与系统卸载入口；右键或托盘随时一键切换 **108 键全尺寸小键盘**、**🐳 大肥鱼（鲸鱼娘）** 与 App 内一键更新。
-  - **常见问题说明**：
-    - **Edge / Chrome 浏览器提示「通常不会下载 `.exe`」怎么办？**（开源免费软件未购商业代码签名证书，全量源码公开可放心信任）：
-      - **Edge 浏览器**：鼠标移到该下载条上 → 点右侧 **三个点 `···`** → 点 **「保留」** → 弹窗出现「删除」按钮时，点开旁边的 **下箭头 `▾`（显示更多）** → 选择 **「仍然保留」** 即可完成下载。
-      - **Chrome 浏览器**：按 `Ctrl + J` 打开下载记录 → 点 **「保留危险文件」** → **「仍然保留」**。
-      - **双击安装若弹出蓝框「Windows 已保护你的电脑」**：点 **「更多信息」** → 点 **「仍要运行」** 即可。
-    - 极少数老版 Win10 / LTSC 精简版若提示缺少 `WebView2 Runtime`，安装微软官方 1.8 MB 引导程序（右键「以管理员身份运行」）即可：[`MicrosoftEdgeWebview2Setup.exe`](https://go.microsoft.com/fwlink/p/?LinkId=2124703)。
-    - **游戏全屏 / 管理员权限 / 直播提示**：单机与常规游戏在 Win10/11 全屏优化（FSO）或「无边框窗口化」下内置持续 Z 序置顶守卫且绝不抢焦点（建议开启「锁定鼠标穿透」，按 `Alt` 随时解锁）；若游戏本身以管理员权限运行导致无法捕获键鼠，右键系统托盘点击 **「以管理员身份重启（捕获游戏键鼠）」** 即可无缝提权；直播录屏推荐 OBS 添加「窗口捕获」叠加；玩无畏契约 / 三角洲行动等强内核反作弊网游建议右键托盘开启 **「暂停监听并隐藏（游戏反作弊护航）」**。
-- **🖥️ Windows 7 SP1（64 位专属兼容绿包版 · `v4.8.0`）**：[**`KuroCat-v4.8.0-win7-x64-portable.zip`**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-v4.8.0-win7-x64-portable.zip)（178.78 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/releases/v4.8.0/KuroCat-v4.8.0-win7-x64-portable.zip)
-  - 原生 PE 6.01 编译（零 Win8/Win10 DLL 依赖），内置微软官方最后一版支持 Win7 的离线 **WebView2 109.0.1518.78** 运行库，并搭载 **Win7 原生 256 级逐像素透明抗锯齿渲染（`UpdateLayeredWindow`）**，开不开 Aero 均无白底框与锯齿；解压后保持 `KuroCat.exe` 与 `WebView2Runtime` 同目录直接双击即可运行。
-- **🍎 macOS 10.15 Catalina+（Apple Silicon M1–M4 & Intel 通用版 · `v4.8.0`）**：[**`KuroCat-v4.8.0-macos-universal.dmg`**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-v4.8.0-macos-universal.dmg)（5.53 MB）｜[**官网国内高速下载**](https://qianyi.one/kurocat/releases/v4.8.0/KuroCat-v4.8.0-macos-universal.dmg)
-  - 打开 `.dmg` 将 `KuroCat.app` 拖入「应用程序」文件夹运行，内置 65% / 108 键切换与全部 7 款皮肤（含 🐳 大肥鱼鲸鱼娘）。
-  - **首次打开说明（开源未公证应用）**：若提示「无法验证开发者」或「已损坏」，在终端执行一次 `xattr -cr /Applications/KuroCat.app` 后即可正常打开（后续 App 内一键升级会自动处理，无需再敲命令）。
-  - **键盘与鼠标监听权限**：首次启动会自动弹出系统授权引导，请在「系统设置 → 隐私与安全性」中同时勾选 **「辅助功能」与「输入监控」** 里的 `KuroCat`（即开即生效，兼容 Karabiner-Elements；若覆盖升级后权限未生效，在列表中选中 `KuroCat` 点左下角 `-` 删除再重新 `+` 添加即可）。
-  - **macOS Stdio MCP 路径**：`/Applications/KuroCat.app/Contents/MacOS/KuroCat`（参数 `--mcp`），或在桌宠运行时直接连接 `http://127.0.0.1:27420/mcp`。
-- **🐧 Linux / Ubuntu 22.04+ / Debian 12+ / 银河麒麟 V11+ / UOS（`v4.8.0`）**：
-  - **x86_64（Intel / AMD / 兆芯 / 海光）**：[**`.deb`（2.18 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-v4.8.0-linux-amd64.deb) · [**`.AppImage`（77.32 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-v4.8.0-linux-amd64.AppImage)
-  - **ARM64（飞腾 / 鲲鹏 / 树莓派）**：[**`.deb`（2.14 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-v4.8.0-linux-arm64.deb) · [**`.AppImage`（75.50 MB）**](https://github.com/qianyiai/kurocat/releases/download/v4.8.0/KuroCat-v4.8.0-linux-arm64.AppImage)
-  - **系统要求说明**：基于 Tauri v2 + Ubuntu 22.04 基线构建，需要 **`glibc >= 2.34`** 且（`.deb` 版）依赖 **`libwebkit2gtk-4.1-0`** 与 **`libayatana-appindicator3-1`**（适用于 Ubuntu 22.04+ / Debian 12+ / 银河麒麟 V11+ 等发行版；**暂不支持基于 Ubuntu 20.04 / `glibc 2.31` / `webkit2gtk-4.0` 的银河麒麟 V10 SP1**）。
-  - 原生动态加载 X11 `XRecord`（免 root 捕获全局键鼠，Wayland 自动支持 `evdev` 回退），官网亦提供全部国内高速镜像：[`https://qianyi.one/kurocat/#linux-download`](https://qianyi.one/kurocat/#linux-download)。
+| 平台 | 构建产物 | 使用方式 |
+| --- | --- | --- |
+| Windows x64 | `DIY-Cat-1.0.0-x64-setup.exe` | 安装版 |
+| Windows x64 | `DIY-Cat-1.0.0-x64-portable.zip` / `DIY-Cat-1.0.0-windows-x64.exe` | 便携版；独立 exe 也供程序内更新下载 |
+| macOS Universal | `DIY-Cat-v1.0.0-macos-universal.dmg` | 将 DIY-Cat.app 拖入“应用程序” |
+| Linux amd64 / arm64 | `DIY-Cat-v1.0.0-linux-<arch>.deb` / `.AppImage` | 按系统架构选择；AppImage 为尽力构建 |
+
+上表是 v1.0.0 标签构建的命名约定，不表示文件已发布。当前跨平台工作流没有生成 Win7 专用包，代码保留 Win7 兼容路径，需单独构建验证。
+
+macOS 首次运行需在“系统设置 → 隐私与安全性”中为 **DIY-Cat** 授予“辅助功能”与“输入监控”。Stdio MCP 路径为 `/Applications/DIY-Cat.app/Contents/MacOS/DIY-Cat`，参数为 `--mcp`。
+
+软件启动或手动检查更新时，从本仓库读取非草稿、非预发布的三段版本号 Release，并按当前平台选择 DIY-Cat 附件。重命名版本通道不会混入上游旧包；草稿或未上传 DIY-Cat 附件的版本不会触发安装。
+
+<a id="github-actions-build"></a>
+## ☁️ 使用 GitHub Actions 构建
+
+本地无需安装构建依赖。在仓库 **Actions → Build Cross-Platform Release → Run workflow** 选择目标分支；只测试 Windows 时勾选 `windows_only`，三个平台筛选项最多选择一个。全部不选则构建 Windows、macOS 与 Linux。可填写 `release_tag: v1.0.0` 作为文件名标签。
+
+工作流先检查 TypeScript、互动回归与模型目录，再在 GitHub runner 安装依赖、执行 Rust 测试并打包。运行成功后，从该次运行的 **Artifacts** 下载相应平台产物。普通代码推送不会触发二进制构建。
+
+推送 `v1.0.0` 等版本标签会触发同一工作流，并把附件上传到 **Release 草稿**。验证测试包后再公开草稿，软件内检查更新才会看到它。后续版本需同步 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 和 `src-tauri/tauri.conf.json` 的版本，再推送对应标签。
 
 ## ✨ 核心特性
 
@@ -140,10 +144,10 @@
 
 ## 🤖 MCP 接入指南（用 AI 改猫 / 加自己的猫）
 
-KuroCat `v4.0.0+` 单文件程序原生内置 **Stdio** 与 **本机 Streamable HTTP（`127.0.0.1:27420`）** 双模式 MCP Server，无需任何额外依赖！
+DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP（`127.0.0.1:27420`）** 双模式 MCP Server，无需任何额外依赖！
 
 ### 最快接入方式
-1. 运行 `KuroCat`，右键猫咪 → 确认勾选 **「开启 MCP 扩展」** → 点击 **「复制 MCP 配置」**。
+1. 运行 `DIY-Cat`，右键猫咪 → 确认勾选 **「开启 MCP 扩展」** → 点击 **「复制 MCP 配置」**。
 2. 粘贴到你常用的 AI 客户端 MCP 配置文件（Claude Desktop / Cursor / Antigravity / Windsurf / Cline）：
 
 **方式 A：Stdio 模式（通用推荐，所有 MCP 客户端均支持）**
@@ -151,7 +155,7 @@ KuroCat `v4.0.0+` 单文件程序原生内置 **Stdio** 与 **本机 Streamable 
 {
   "mcpServers": {
     "kurocat": {
-      "command": "C:\\Users\\<你的用户名>\\AppData\\Local\\KuroCat\\KuroCat.exe",
+      "command": "C:\\Users\\<你的用户名>\\AppData\\Local\\DIY-Cat\\DIY-Cat.exe",
       "args": ["--mcp"]
     }
   }
@@ -170,8 +174,8 @@ KuroCat `v4.0.0+` 单文件程序原生内置 **Stdio** 与 **本机 Streamable 
 ```
 
 ### 试试这样跟 AI 说
-- *「帮我用 KuroCat MCP 新增一只大橘猫（虎斑纹 + 白手套 + 橘色高亮键盘），并马上切过去」*
-- *「看这张我家三花猫的照片，用 KuroCat MCP 按它的花色和斑点给我捏一只专属桌宠！」*
+- *「帮我用 DIY-Cat MCP 新增一只大橘猫（虎斑纹 + 白手套 + 橘色高亮键盘），并马上切过去」*
+- *「看这张我家三花猫的照片，用 DIY-Cat MCP 按它的花色和斑点给我捏一只专属桌宠！」*
 - *「把桌宠放大到 125%，关闭悬浮按键气泡，切回小黑猫」*
 
 ### 内置 MCP 工具清单
@@ -203,11 +207,11 @@ KuroCat `v4.0.0+` 单文件程序原生内置 **Stdio** 与 **本机 Streamable 
 
 ## 🛠️ 本地源码构建
 
-前置环境：Windows 10/11 或 macOS 11+、Node.js 18+、Rust 工具链（`cargo`）。
+前置环境：Windows 10/11 或 macOS 11+、Node.js 22.15+、Rust 工具链（`cargo`）。
 
 ```bash
-git clone https://github.com/qianyiai/kurocat.git
-cd kurocat
+git clone https://github.com/bucai2417/kurcat.git
+cd kurcat
 npm install
 npm run tauri:dev      # 本地热更新调试
 npm run tauri:build    # 编译 Release 可执行文件与安装包
@@ -238,5 +242,7 @@ npm run dev
 ## 📄 开源协议与致谢
 
 本项目基于 [MIT License](LICENSE) 开源。
+
+- DIY-Cat 基于 [qianyiai/kurocat](https://github.com/qianyiai/kurocat) 继续开发，保留原项目许可与素材署名。
 
 - 内置皮肤 **🐳 大肥鱼（鲸鱼娘）** 运行时素材基于 MIT 开源项目 [PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)（参考衍生 [QCYTSN/dsh-dafeiyu](https://github.com/QCYTSN/dsh-dafeiyu)）制作，完整许可声明见 `src/assets/dafeiyu/LICENSE-MIT.txt`。

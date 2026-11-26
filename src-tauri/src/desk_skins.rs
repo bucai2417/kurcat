@@ -242,7 +242,7 @@ pub fn delete_desk_skin(id: &str) -> Result<bool, String> {
 
 pub fn desk_skin_schema_guide() -> serde_json::Value {
     serde_json::json!({
-        "description": "KuroCat keyboard + mouse desk skin schema. Call upsert_desk_skin then switch_desk_skin to apply it live on the desktop.",
+        "description": "DIY-Cat keyboard + mouse desk skin schema. Call upsert_desk_skin then switch_desk_skin to apply it live on the desktop.",
         "keyboardFields": {
             "deckTop/deckSide/deckEdge": "Keyboard case top surface, side wall and rim outline (#rrggbb)",
             "bedFill": "Inner keybed plate colour behind the keycaps",

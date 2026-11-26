@@ -81,7 +81,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "list_cats",
-            "description": "List all available KuroCat desktop pet skins (built-in and custom cats) and show which cat is currently active on screen.",
+            "description": "List all available DIY-Cat desktop pet skins (built-in and custom cats) and show which cat is currently active on screen.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -199,7 +199,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "get_settings",
-            "description": "Read current KuroCat desktop pet settings (active cat, scale, bubbles, petting purr sound, always-on-top, click-through lock, MCP status).",
+            "description": "Read current DIY-Cat desktop pet settings (active cat, scale, bubbles, petting purr sound, always-on-top, click-through lock, MCP status).",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -969,7 +969,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
     })
 }
 
-/// Transport 1: Zero-dependency native Stdio MCP server (`KuroCatPet.exe --mcp`)
+/// Transport 1: Zero-dependency native Stdio MCP server (`DIY-Cat.exe --mcp`)
 pub fn run_stdio_mcp() {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -1086,7 +1086,7 @@ fn handle_http_conn(mut stream: TcpStream, enabled: &AtomicBool, on_change: &dyn
             &mut stream,
             "403 Forbidden",
             "application/json; charset=utf-8",
-            r#"{"error":"MCP server is disabled in KuroCat settings"}"#,
+            r#"{"error":"MCP server is disabled in DIY-Cat settings"}"#,
         );
         return;
     }

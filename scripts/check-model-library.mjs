@@ -10,6 +10,7 @@ const { parseModelPack, exportModelPack, modelInstallState, normalizeCatalogUrl,
 const { installTauriPreviewShim } = await import('../src/tauriPreview.ts');
 const example = JSON.parse(await readFile(new URL('../tests/fixtures/model-pack.kurocat.json', import.meta.url), 'utf8'));
 const clone = () => structuredClone(example);
+const { parseModelFiles } = await import('../src/modelImport.ts');
 
 // Every temporary test file is tracked and removed by exact path; no recursive cleanup.
 async function inStore(work) {
@@ -139,4 +140,21 @@ test('browser preview deletes only custom models, persists fallback and broadcas
     if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow;
     if (previousStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = previousStorage;
   }
+});
+
+
+test('batch import validates multiple files and catalogs together without losing Chinese', () => {
+  const second = clone(); second.skin.id = 'second-cat'; second.skin.name = '第二只猫';
+  const files = [{ name: '薄荷.kurocat.json', text: JSON.stringify(example) },
+    { name: 'catalog.json', text: JSON.stringify({ format: 'kurocat-catalog', version: 1, models: [second] }) }];
+  const packs = parseModelFiles(files);
+  assert.deepEqual(packs.map(p => p.skin.name), ['薄荷云朵', '第二只猫']);
+  assert.deepEqual(packs.map(p => p.skin.id), ['mint-cloud', 'second-cat']);
+  assert.throws(() => parseModelFiles([...files, { name: '坏模型.json', text: '{' }]), /坏模型.json/);
+  assert.throws(() => parseModelFiles([files[0], files[0]]), /重复模型 ID/);
+  assert.throws(() => parseModelFiles([]), /1–50/);
+  assert.throws(() => parseModelFiles(Array(51).fill(files[0])), /1–50/);
+  assert.throws(() => parseModelFiles([{ name: '中文.json', text: '猫'.repeat(90000) }]), /256 KB/, 'limit measures UTF-8 bytes');
+  const tooMany = Array.from({ length: 51 }, (_, i) => { const p = clone(); p.skin.id = 'cat-' + i; return p; });
+  assert.throws(() => parseModelFiles([{ name: 'catalog.json', text: JSON.stringify({ format: 'kurocat-catalog', version: 1, models: tooMany }) }]), /50/);
 });

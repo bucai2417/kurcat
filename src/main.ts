@@ -7,6 +7,7 @@ const isPreview = installTauriPreviewShim();
 const embedded = isPreview && !new URLSearchParams(location.search).has('desktop');
 
 import './style.css';
+import { PetGesture } from './petGesture';
 import { SettingsSync } from './settingsSync';
 import { modelActions, modelMode, modelModes } from './modelPack';
 import { setupModelLibrary } from './modelLibrary';
@@ -137,7 +138,7 @@ interface UpdateProgressEvent {
   info: UpdateInfo | null;
 }
 
-let appVersion = '4.8.0';
+let appVersion = '1.0.0';
 let latestUpdateInfo: UpdateInfo | null = null;
 let updateBusy = false;
 let dismissedVersion: string | null = null;
@@ -839,7 +840,7 @@ function syncMenuUI(): void {
   const headerEl = document.getElementById('menu-header');
   if (headerEl && activeCat) {
     const emoji = activeCat.emoji || '🐱';
-    headerEl.textContent = `${emoji} KuroCat ${activeCat.name}`;
+    headerEl.textContent = `${emoji} DIY-Cat ${activeCat.name}`;
     headerEl.style.color = activeCat.accentColor || '#c8f538';
   }
 
@@ -958,6 +959,12 @@ function pushHitRegions(): void {
         ry: r.height / 2 / vh,
       };
     }
+  }
+  regions.updateBox = null;
+  if (!updateToastEl.classList.contains('hidden')) {
+    const r = updateToastEl.getBoundingClientRect();
+    const vw = Math.max(1, window.innerWidth), vh = Math.max(1, window.innerHeight);
+    regions.updateBox = { cx: (r.left + r.width / 2) / vw, cy: (r.top + r.height / 2) / vh, rx: r.width / 2 / vw, ry: r.height / 2 / vh };
   }
   const json = JSON.stringify(regions);
   if (json === lastHitRegionsJson) return;
@@ -1140,7 +1147,7 @@ async function createDesktopShortcut(): Promise<void> {
       hint.textContent = '✓ 已创建';
       hint.classList.add('copied');
       setTimeout(() => {
-        hint.textContent = 'KuroCat';
+        hint.textContent = 'DIY-Cat';
         hint.classList.remove('copied');
       }, 1800);
     }
@@ -1165,6 +1172,7 @@ function hideUpdateToast(): void {
   }
   if (!updateToastEl.classList.contains('hidden')) {
     updateToastEl.classList.add('hidden');
+    pushHitRegions();
     void invoke('set_update_banner_open', { open: false });
     syncWin7OverlayFn?.(false);
   }
@@ -1190,6 +1198,7 @@ function showUpdateToast(
   btnToastOpenEl.classList.toggle('hidden', !(options.showOpen || options.showUnlock));
   btnToastOpenEl.textContent = options.showUnlock ? '解锁' : '发布页';
   updateToastEl.classList.remove('hidden');
+  pushHitRegions();
   void invoke('set_update_banner_open', { open: true });
   requestAnimationFrame(() => syncWin7OverlayFn?.(false));
 
@@ -1294,56 +1303,73 @@ async function triggerManualUpdateCheck(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
-  // Left-click drag to reposition the transparent window.
-  // Bound to BOTH canvases: the 3D canvas is stacked on top and would otherwise
-  // swallow every pointer event, leaving the 3D pet undraggable and unselectable.
-  let dragBusy = false;
-  const onCanvasPointerDown = async (e: MouseEvent, source: HTMLCanvasElement): Promise<void> => {
-    if (e.button !== 0 || dragBusy) return;
-    const menuClosed = closeContextMenu();
-    if (settings.clickThroughLocked && !altOverride && !e.altKey) return;
-    // Clicking the drink refills an empty cup instead of dragging the window.
-    if (active3d && engine3d) {
-      if (engine3d.hitTestProp(e.clientX, e.clientY)) {
-        const result = engine3d.clickProp();
-        if (result === 'refilled') {
-          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
-        } else if (result === 'sipped') {
-          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
-        }
-        return;
-      }
-    } else {
-      const logicalPt = engine.clientToLogical(e.clientX, e.clientY);
-      if (engine.hitTestProp(logicalPt.x, logicalPt.y)) {
-        const result = engine.clickProp();
-        if (result === 'refilled') {
-          showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
-        } else if (result === 'sipped') {
-          showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
-        }
-        return;
-      }
-    }
-    dragBusy = true;
-    source.classList.add('pet-dragging');
-    try {
-      await invoke('set_dragging', { dragging: true });
-      await menuClosed; // Restore the pet window before native dragging.
-      await getCurrentWindow().startDragging();
-    } catch (err) {
-      console.warn('pet dragging failed:', err);
-    } finally {
-      source.classList.remove('pet-dragging');
-      engine.onMouseUp('left');
-      engine3d?.onMouseUp('left');
-      await invoke('set_dragging', { dragging: false }).catch(() => {});
-      dragBusy = false;
-      void invoke('save_window_pos').catch(() => {});
-    }
+  const gesture = new PetGesture();
+  let dragSource: HTMLCanvasElement | null = null;
+  let propClick: (() => void) | null = null;
+  let pointerId: number | null = null;
+  let pressReady: Promise<number> = Promise.resolve(0);
+  const finishPress = (clicked = false): void => {
+    const click = propClick; propClick = null;
+    const source = dragSource; dragSource = null;
+    const id = pointerId; pointerId = null;
+    gesture.cancel(); source?.classList.remove('pet-dragging');
+    if (source && id !== null && source.hasPointerCapture(id)) source.releasePointerCapture(id);
+    engine.onMouseUp('left'); engine3d?.onMouseUp('left');
+    void invoke('set_dragging', { dragging: false }).catch(() => {});
+    if (clicked) click?.();
   };
-  canvas.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas));
-  canvas3d?.addEventListener('mousedown', (e) => void onCanvasPointerDown(e, canvas3d));
+  const bindDrag = (source: HTMLCanvasElement): void => {
+    source.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !e.isPrimary || (settings.clickThroughLocked && !altOverride && !e.altKey)) return;
+      finishPress();
+      const id = gesture.down(e.screenX, e.screenY); dragSource = source; pointerId = e.pointerId;
+      const target = active3d && engine3d ? engine3d : engine;
+      const point = engine.clientToLogical(e.clientX, e.clientY);
+      const overProp = active3d && engine3d ? engine3d.hitTestProp(e.clientX, e.clientY) : engine.hitTestProp(point.x, point.y);
+      if (overProp) propClick = () => {
+        const result = target.clickProp();
+        if (result === 'refilled') showUpdateToast('🥤 已续杯，猫猫又有饮料啦', { autoHideMs: 2400 });
+        else if (result === 'sipped') showUpdateToast('🐾 猫猫准备尝一口', { autoHideMs: 1800 });
+      };
+      source.setPointerCapture(e.pointerId);
+      // Keep the whole window interactive until release, even when leaving the cat silhouette.
+      pressReady = invoke<number>('set_dragging', { dragging: true }).catch(() => {
+        if (gesture.owns(id)) finishPress();
+        return 0;
+      });
+      void closeContextMenu(); e.preventDefault();
+    });
+    source.addEventListener('pointermove', (e) => {
+      if (pointerId !== e.pointerId) return;
+      if (!(e.buttons & 1)) { finishPress(); return; }
+      const id = gesture.move(e.screenX, e.screenY); if (id === null) return;
+      propClick = null; source.classList.add('pet-dragging');
+      const ready = pressReady;
+      void (async () => {
+        try {
+          const generation = await ready;
+          await closeContextMenu();
+          if (!generation || !gesture.owns(id)) return;
+          const completed = await invoke<boolean>('start_pet_drag', { generation });
+          if (completed && gesture.owns(id)) finishPress();
+        } catch (err) {
+          console.warn('pet dragging failed:', err);
+          if (gesture.owns(id)) finishPress();
+        }
+      })();
+    });
+    source.addEventListener('pointerup', (e) => {
+      if (pointerId !== e.pointerId) return;
+      const clicked = gesture.release(); finishPress(clicked);
+      void invoke('save_window_pos').catch(() => {});
+    });
+    for (const type of ['pointercancel', 'lostpointercapture']) source.addEventListener(type, () => {
+      if (dragSource === source) finishPress();
+    });
+  };
+  bindDrag(canvas); if (canvas3d) bindDrag(canvas3d);
+  window.addEventListener('blur', () => finishPress());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) finishPress(); });
 
   // Right-click opens sleek dark glass settings menu
   const onCanvasContextMenu = (e: MouseEvent): void => {
@@ -1424,7 +1450,7 @@ async function bootstrap(): Promise<void> {
       hideUpdateToast();
       return;
     }
-    const url = latestUpdateInfo?.releaseUrl || 'https://github.com/qianyiai/kurocat/releases/latest';
+    const url = latestUpdateInfo?.releaseUrl || 'https://github.com/bucai2417/kurcat/releases';
     void invoke('open_release_page', { url });
   });
 
@@ -1610,10 +1636,10 @@ async function bootstrap(): Promise<void> {
     },
     openExports: async () => { await invoke('open_model_exports'); },
     openPage: async url => { await invoke('open_release_page', { url }); },
-    install: async (packageValue, replace) => {
+    install: async (packageValue, replace, activate = true) => {
       const cat = await invoke<CatSkinConfig>('import_model_pack', { package: packageValue, replace });
       catList = catList.filter(c => c.id !== cat.id).concat(cat);
-      await settingsSync.update({ catBreed: cat.id, renderMode: modelMode(cat, effectiveMode()) });
+      if (activate) await settingsSync.update({ catBreed: cat.id, renderMode: modelMode(cat, effectiveMode()) });
     },
     export: async id => invoke<string>('export_model_pack', { id }),
     resize: () => { repositionMenu(); pushHitRegions(); },

@@ -72,6 +72,7 @@ function makeCanvas() {
     style: {}, width: 420, height: 440, clientWidth: 420, clientHeight: 440,
     parentElement: { clientWidth: 640, clientHeight: 420 },
     getContext: () => context,
+    toDataURL: () => 'data:image/png;base64,test',
     getBoundingClientRect() {
       return { left: parseFloat(this.style.left) || 0, top: parseFloat(this.style.top) || 0,
         width: parseFloat(this.style.width) || 420, height: parseFloat(this.style.height) || 440 };
@@ -98,6 +99,7 @@ const { clipAngryEyelid, STRIKE_DURATION, setDesktopPetInsets } = await import('
 const { InputSounds, normalizeInputSound } = await import('../src/inputSounds.ts');
 const { CatAudio } = await import('../src/audio.ts');
 const { SettingsSync } = await import('../src/settingsSync.ts');
+const { PetGesture } = await import('../src/petGesture.ts');
 const { TypingReactions, propReactionPose, PROP_REACTION_DURATION } = await import('../src/petReactions.ts');
 
 function engine3d() {
@@ -1155,5 +1157,86 @@ test('every shipped catalog package matches its standalone file after normalizat
   for (const cat of standalone) {
     assert.deepEqual(catalog.find(p => p.skin.id === cat.skin.id), parseModelPack(exportModelPack(cat.skin)));
     for (const mode of modelModes(cat.skin)) assert.ok(modelActions(cat.skin, mode).includes('tailGround'));
+  }
+});
+
+
+test('pet gesture separates click from drag and cancels stale press ownership', () => {
+  const g = new PetGesture();
+  const first = g.down(-420, 300);
+  assert.equal(g.move(-417, 302), null);
+  assert.equal(g.release(), true, 'small hand jitter remains a click');
+  assert.equal(g.owns(first), false);
+  const dragged = g.down(-420, 300);
+  assert.equal(g.move(-414, 300), dragged, 'threshold starts a drag exactly once');
+  assert.equal(g.move(-400, 300), null);
+  assert.equal(g.release(), false, 'dragging a prop never drinks it');
+  const cancelled = g.down(10, 10); g.cancel();
+  assert.equal(g.release(), false); assert.equal(g.move(30, 10), null);
+  const next = g.down(20, 20);
+  assert.equal(g.owns(cancelled), false, 'late IPC result cannot own the next press');
+  assert.equal(g.owns(next), true); assert.equal(g.move(20, 27), next);
+  const replacement = g.down(40, 40);
+  assert.equal(g.owns(next), false); assert.equal(g.owns(replacement), true);
+});
+
+test('library snapshots never schedule animation loops and wait for sprite decoding', async () => {
+  const oldRaf = globalThis.requestAnimationFrame;
+  const oldTimer = window.setTimeout;
+  const oldImage = globalThis.Image;
+  let decodeCount = 0; let failDecode = false; let snapshots = 0;
+  globalThis.Image = class {
+    complete = true; naturalWidth = 224; naturalHeight = 278; width = 224; height = 278;
+    async decode() { decodeCount++; if (failDecode) throw Error('image unavailable'); }
+  };
+  globalThis.requestAnimationFrame = () => { throw Error('preview started RAF'); };
+  window.setTimeout = () => { throw Error('preview started a render timer'); };
+  try {
+    const canvas = makeCanvas(); canvas.toDataURL = () => { snapshots++; return 'data:image/png;base64,test'; };
+    const flat = new KuroCatEngine(canvas, { embedded: true, previewOnly: true });
+    const spatial = new KuroCatEngine3D(makeCanvas(), { embedded: true, previewOnly: true });
+    const skin = DEFAULT_BUILTIN_CATS.find(c => c.id === 'black');
+    flat.start(); spatial.start();
+    assert.match(await flat.snapshot(skin), /^data:image[/]png/);
+    assert.match(spatial.snapshot(skin), /^data:image[/]png/);
+    assert.equal(decodeCount, 0, 'procedural cats need no sprite wait');
+    const whale = DEFAULT_BUILTIN_CATS.find(c => c.id === 'dafeiyu');
+    failDecode = true;
+    await assert.rejects(flat.snapshot(whale), /image unavailable/);
+    assert.equal(snapshots, 1, 'failed sprites must not become cached images');
+    failDecode = false;
+    assert.match(await flat.snapshot(whale), /^data:image[/]png/);
+    assert.equal(decodeCount, 8, 'all four sprites were retried');
+  } finally {
+    globalThis.requestAnimationFrame = oldRaf; window.setTimeout = oldTimer; globalThis.Image = oldImage;
+  }
+});
+
+test('3D ears flick independently, track the cursor and stay attached during emotion changes', () => {
+  for (const dt of [1 / 30, 1 / 60]) {
+    const e = engine3d(); let independent = false;
+    for (let time = 0; time < 8.6; time += dt) {
+      const before = e.ears.map(ear => ear.group.rotation.clone()); tick(e, dt, dt);
+      const normalized = e.ears.map(ear => -ear.s * ear.group.rotation.z - ear.tilt);
+      if (Math.abs(normalized[0] - normalized[1]) > 0.05) independent = true;
+      e.ears.forEach((ear, i) => {
+        nearVector(ear.group.position, new Vector3(ear.s * 0.295, 0.255, -0.015));
+        for (const axis of ['x', 'y', 'z']) {
+          assert.ok(Number.isFinite(ear.group.rotation[axis]));
+          assert.ok(Math.abs(ear.group.rotation[axis] - before[i][axis]) < 0.24, 'ear should turn without snapping');
+        }
+      });
+    }
+    assert.ok(independent, 'left and right ears should not always mirror');
+    e.cursorNdc.set(1, 0); e.cursorActiveAt = e.elapsed; tick(e, 0.4, dt);
+    assert.ok(e.ears.every(ear => ear.group.rotation.y > 0.16), 'ears turn toward cursor');
+    e.triggerIdleAction('nap'); tick(e, 1.6, dt);
+    assert.ok(e.ears.every(ear => ear.group.rotation.x > 0.06), 'ears droop while napping');
+    const sleepingZ = e.ears.map(ear => Math.abs(ear.group.rotation.z));
+    e.onKeyDown(65); e.onKeyUp(65); tick(e, 0.5, dt);
+    assert.ok(e.ears.every((ear, i) => Math.abs(ear.group.rotation.z) > sleepingZ[i] + 0.1), 'annoyed ears spread');
+    assert.ok(e.ears.every(ear => ear.group.rotation.x < -0.22), 'annoyed ears fold back');
+    e.triggerIdleAction('calm'); tick(e, 1.2, dt);
+    assert.ok(e.ears.every(ear => ear.group.rotation.x > -0.2), 'calming releases the backward fold');
   }
 });
