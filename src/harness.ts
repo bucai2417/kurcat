@@ -98,7 +98,7 @@ function applyLayout(): void {
   document.getElementById('naiwa-reference')!.hidden = !isFrog;
   document.getElementById('preview-comparison')!.classList.toggle('has-reference', isFrog);
   document.getElementById('preview-intro')!.textContent = isFrog
-    ? '奶蛙 · 参考图分层外观，坐姿双手敲键，后脚自然轻晃。'
+    ? '奶蛙 · 连续软手臂轻触鼠标，嘴边鼓腮生气，伏在键盘上睡觉。'
     : '直接敲键盘、点击鼠标，或选择下方动作查看互动。';
   engine.setKeyboardConfig(layout, orient, {
     scale: kbs,
@@ -508,11 +508,11 @@ function syncPanel(): void {
     if (action === 'stop') return;
     button.hidden = !actions.includes(action);
     button.textContent = modelRig(cat) === 'naiwa' && action === 'tailGround'
-      ? '鼓脸生气 · 跺脚' : modelActionLabel(cat, action);
+      ? '嘴边鼓腮 · 跺脚' : modelActionLabel(cat, action);
   });
   const rigInfo = document.getElementById('rig-info');
   if (rigInfo) rigInfo.textContent = modelRig(cat) === 'naiwa'
-    ? '奶蛙 · 手臂随动作柔软伸缩，生气会鼓脸、噘嘴和压低眼皮。普通输入用手，原尾巴按键用脚。打盹后敲键会生气，抚摸可安抚。'
+    ? '奶蛙 · 手臂、掌心和三指连续形变，点鼠标轻压、拿道具收拢。生气只在嘴边鼓腮。趴键盘睡觉后敲键可测试起床气，抚摸可安抚；普通输入用手，原尾巴按键用脚。'
     : '打盹后敲键可测试起床气；点击动作按钮可逐个预览。';
   const sound = document.getElementById('pet-sound');
   if (sound) { sound.textContent = `宠物声音：${soundEnabled ? '开' : '关'}`; sound.setAttribute('aria-pressed', String(soundEnabled)); }

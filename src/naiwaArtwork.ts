@@ -1,14 +1,15 @@
 /** Bundled artwork extracted from the user's turnaround. No runtime/network assets. */
 import bodyUrl from './assets/naiwa/body.png';
+import proneUrl from './assets/naiwa/prone.png';
 import bellyUrl from './assets/naiwa/belly-mask.png';
 import handUrl from './assets/naiwa/hand.png';
 import footUrl from './assets/naiwa/foot.png';
-export type NaiwaArtPart = 'body' | 'hand' | 'foot';
+export type NaiwaArtPart = 'body' | 'prone' | 'hand' | 'foot';
 type RGB = [number, number, number];
 export interface NaiwaArtPalette { body: RGB; shade: RGB; outline: RGB; belly: RGB; arm: RGB; paw: RGB; pawOutline: RGB }
 const defaults: NaiwaArtPalette = { body: [255,211,56], shade: [230,160,24], outline: [149,112,33],
   belly: [255,240,211], arm: [247,195,44], paw: [104,99,68], pawOutline: [73,74,49] };
-const urls = { body: bodyUrl, belly: bellyUrl, hand: handUrl, foot: footUrl };
+const urls = { body: bodyUrl, prone: proneUrl, belly: bellyUrl, hand: handUrl, foot: footUrl };
 let images: Record<keyof typeof urls, HTMLImageElement> | undefined;
 function sources() {
   if (!images) images = Object.fromEntries(Object.entries(urls).map(([key, url]) => {
@@ -26,7 +27,8 @@ const clamp = (n: number) => Math.max(0, Math.min(1, n));
 export function naiwaArtwork(part: NaiwaArtPart, p: NaiwaArtPalette): CanvasImageSource | null {
   const src = sources(), image = src[part];
   if (!image.complete || !image.naturalWidth) return null;
-  const zones = part === 'body' ? ['body','shade','outline','belly'] as const
+  const bodyPart = part === 'body' || part === 'prone';
+  const zones = bodyPart ? ['body','shade','outline','belly'] as const
     : ['paw','pawOutline'] as const;
   if (zones.every(k => p[k].every((v,i) => v === defaults[k][i]))) return image;
   if (part === 'body' && (!src.belly.complete || !src.belly.naturalWidth)) return image;
@@ -47,7 +49,7 @@ export function naiwaArtwork(part: NaiwaArtPart, p: NaiwaArtPalette): CanvasImag
     if (!pixels.data[i+3]) continue;
     const red = pixels.data[i], green = pixels.data[i+1];
     const weights: Partial<Record<keyof NaiwaArtPalette, number>> = {};
-    if (part === 'body') {
+    if (bodyPart) {
       const bib = (belly?.[i] ?? 0)/255, dark = clamp((221-green)/80);
       weights.belly = bib; weights.body = (1-bib)*(1-dark); weights.shade = (1-bib)*dark*.85;
       weights.outline = (1-bib)*dark*.15;
@@ -63,4 +65,27 @@ export function naiwaArtwork(part: NaiwaArtPart, p: NaiwaArtPalette): CanvasImag
     }
   }
   ctx.putImageData(pixels,0,0); entry[part] = canvas; return canvas;
+}
+
+// Reuse one small raster for the current pose. Additive premultiplied blending
+// keeps overlapping opaque skin opaque (two source-over half layers would be
+// only 75% opaque and reveal the keyboard through the body).
+let sleepCanvas: HTMLCanvasElement | undefined;
+export function naiwaSleepArtwork(p: NaiwaArtPalette, amount: number): CanvasImageSource | null {
+  const body = naiwaArtwork('body', p), prone = naiwaArtwork('prone', p);
+  if (!body || !prone) return body;
+  const t = clamp(amount);
+  if (t <= 0) return body;
+  if (t >= 1) return prone;
+  if (!sleepCanvas) {
+    sleepCanvas = document.createElement('canvas'); sleepCanvas.width = 230; sleepCanvas.height = 310;
+  }
+  const ctx = sleepCanvas.getContext('2d')!;
+  ctx.clearRect(0, 0, 230, 310);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1 - t;
+  ctx.drawImage(body, 0, 0, 230, 310);
+  ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = t;
+  ctx.drawImage(prone, 0, 0, 230, 310);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  return sleepCanvas;
 }

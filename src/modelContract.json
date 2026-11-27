@@ -345,8 +345,8 @@
       ],
       "inputMapping": {
         "keyboard": "双手敲键；仅原尾巴按键映射为脚踩（沿用 smart/custom/edge/off 设置）",
-        "mouse": "手点鼠标，持物手优先握道具；坐姿双脚在两侧轻摆",
-        "sleep": "tailGround 映射为双脚跺地；抚摸或 2–5 秒后安抚",
+        "mouse": "手臂、掌心和指尖连续形变，掌心随接触方向转动，指尖轻压鼠标；持物手优先握道具",
+        "sleep": "nap 映射为伏到键盘上睡觉；输入吵醒后 tailGround 映射为双脚跺地，抚摸或 2–5 秒后安抚",
         "petting": "短呱声 + 爱心 + 安抚",
         "typing": [
           "专注敲键",
@@ -358,7 +358,8 @@
       "actionLabels": {
         "tailGround": "跺脚抗议",
         "groom": "揉揉脸",
-        "cuddle": "抱肚撒娇"
+        "cuddle": "抱肚撒娇",
+        "nap": "趴键盘睡觉"
       },
       "sounds": [
         "croak",
@@ -377,12 +378,12 @@
           "footContactLeft",
           "footContactRight"
         ],
-        "notes": "后续可复用归一化 lift/squash/lean/tilt/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂需要连续形变，脸颊需要膨胀形态。当前不能导入 three-naiwa-v1 或 GLB。"
+        "notes": "后续可复用归一化 lift/squash/lean/tilt/sleep/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂、掌心与手指需要连续形变，脸颊只在嘴边局部膨胀，sleep 需要伏到键盘与平滑起身。当前不能导入 three-naiwa-v1 或 GLB。"
       },
       "notes": "不通过 ID/名称猜测骨架；profile.adapters 必须包含 canvas-naiwa-v1。无耳、无尾，猫咪花纹/斑点字段不会绘制。",
       "deformation": {
-        "arms": "连续软曲面，无固定肘部；随手掌自由弯曲、拉伸、变细和惯性回弹，手掌保持键鼠/道具接触",
-        "cheeks": "生气时脸部轮廓渐进鼓起，安抚后逐渐回落；搭配遮盖眼皮、噘嘴、脸红和腮部皱褶",
+        "arms": "手臂、掌心与三指连续曲面，无固定肘部或独立手掌贴片；随接触方向伸缩、转向和惯性回弹，点鼠标轻压、握道具收拢，指尖保持接触",
+        "cheeks": "嘴巴左右两侧各自鼓起小腮包，保持头部轮廓与五官位置，安抚后逐渐回落；搭配斜压眼皮、收紧嘴型、轻微泛红与短腮纹",
         "channels": [
           "armLeft",
           "armRight",
@@ -391,10 +392,12 @@
           "anger",
           "cheeks",
           "lids",
-          "mouthOpen"
+          "mouthOpen",
+          "sleep"
         ],
         "renderer": "src/naiwaRenderer.ts",
-        "armSurface": "src/naiwaDeform.ts"
+        "armSurface": "src/naiwaDeform.ts",
+        "sleep": "参考图坐姿与正面趴姿连续混合，头身一起降到键盘，双手支撑、闭眼呼吸；结束或打断时平滑恢复"
       }
     }
   }

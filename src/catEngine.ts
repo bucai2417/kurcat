@@ -2485,8 +2485,9 @@ export class KuroCatEngine {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const baseX = this.catCenterX + 26;
-    const baseY = this.catTopY + 26;
+    const frogMouth = this.catBreed === 'naiwa' ? this.naiwa.getMouthWorld(this.buildNaiwaLayout()) : null;
+    const baseX = frogMouth ? frogMouth.x + 24 : this.catCenterX + 26;
+    const baseY = frogMouth ? frogMouth.y - 34 : this.catTopY + 26;
     for (let i = 0; i < 3; i++) {
       const phase = (this.elapsed * 0.55 + i * 0.33) % 1;
       const alpha = Math.sin(phase * Math.PI) * 0.85;
@@ -3152,6 +3153,9 @@ export class KuroCatEngine {
           y: liveMouseY - 25.0 + anyClickPress * 2.2,
         };
       }
+      // Naiwa's small, continuous fingertips can rest just inside the upper
+      // shell. Most of both button plates stays visible, with no floating palm.
+      if (this.catBreed === 'naiwa') paw.target.y += isCatFacing ? 5 : 7;
       const stillHolding =
         this.mouseLeftDown ||
         this.mouseRightDown ||

@@ -37,7 +37,7 @@ registerHooks({
     if (url.startsWith('file:') && /\.(png|svg|webp)$/.test(url)) {
       return { format: 'module', shortCircuit: true, source: `export default ${JSON.stringify(url)};` };
     }
-    if (['modelContract.json', 'builtinCompanions.json'].some(name => url.endsWith('/src/' + name))) {
+    if (['modelContract.json', 'builtinCompanions.json', 'assets/naiwa/artwork.json'].some(name => url.endsWith('/src/' + name))) {
       return { format: 'module', shortCircuit: true, source: 'export default ' + readFileSync(fileURLToPath(url), 'utf8') + ';' };
     }
     if (url.startsWith('file:') && url.endsWith('.ts')) {
@@ -103,8 +103,8 @@ const { CatAudio, catAudio } = await import('../src/audio.ts');
 const { SettingsSync } = await import('../src/settingsSync.ts');
 const { PetGesture } = await import('../src/petGesture.ts');
 const { sampleNaiwaPose, FROG_ACTIONS } = await import('../src/naiwaPose.ts');
-const { deformNaiwaArm, naiwaCheekScale } = await import('../src/naiwaDeform.ts');
-const { naiwaArtwork, readyNaiwaArtwork } = await import('../src/naiwaArtwork.ts');
+const { deformNaiwaArm, naiwaCheekVolumes } = await import('../src/naiwaDeform.ts');
+const { naiwaArtwork, naiwaSleepArtwork, readyNaiwaArtwork } = await import('../src/naiwaArtwork.ts');
 const { propMouthContact, propLook } = await import('../src/propRenderer.ts');
 const { TypingReactions, propReactionPose, PROP_REACTION_DURATION } = await import('../src/petReactions.ts');
 
@@ -1318,26 +1318,35 @@ test('seated frog uses hands for ordinary keys, space and mouse in both keyboard
   }
 });
 
-test('frog feet only handle configured tail keys, transition across sides and release without drift', () => {
+test('frog feet only handle configured tail keys, transition across sides and release without drift', t => {
+  let clock = 1000;
+  t.mock.method(performance, 'now', () => clock);
+  // The tail uses milliseconds for its impact arc. Advancing dt without the
+  // clock leaves the foot stuck in the first 75 ms and makes this check flaky.
+  const advance = (e, seconds) => {
+    for (let left = seconds; left > 1e-8; left -= 1 / 60) {
+      const dt = Math.min(left, 1 / 60); clock += dt * 1000; e.update(dt, clock);
+    }
+  };
   const e = frog2d(); e.setTailKeyConfig('custom', ['a', 'l']);
-  e.onKeyDown(65, false); advancePet(e, 0.4);
+  e.onKeyDown(65, false); advance(e, 0.4);
   assert.equal(e.catTail.active, true); assert.equal(e.heldKeys.has(65), false);
   let l = e.buildNaiwaLayout();
   nearPoint(e.naiwa.getFootWorld(l.footKey.side, l), l.footKey, 0.06);
   const previous = Object.fromEntries(['left', 'right'].map(s => [s, e.naiwa.getFootWorld(s, l)]));
-  e.onKeyUp(65); e.onKeyDown(76, false); advancePet(e, 1 / 60); l = e.buildNaiwaLayout();
+  e.onKeyUp(65); e.onKeyDown(76, false); advance(e, 1 / 60); l = e.buildNaiwaLayout();
   for (const side of ['left', 'right']) {
     const point = e.naiwa.getFootWorld(side, l);
     assert.ok(Math.hypot(point.x - previous[side].x, point.y - previous[side].y) < l.bodyHeight * 0.20, 'side change must interpolate');
   }
-  e.onKeyUp(76); e.setTailKeyConfig('off', []); advancePet(e, 2);
+  e.onKeyUp(76); e.setTailKeyConfig('off', []); advance(e, 2);
   l = e.buildNaiwaLayout();
   for (const side of ['left', 'right']) {
     const p = e.naiwa.getFootWorld(side, l);
     assert.ok(Math.abs(p.x - l.centerX) < l.bodyHeight * 0.40);
     assert.ok(Math.abs(p.y - l.baseY) < l.bodyHeight * 0.065);
   }
-  e.setTailKeyConfig('custom', ['a']); e.onKeyDown(65, false); advancePet(e, 0.3);
+  e.setTailKeyConfig('custom', ['a']); e.onKeyDown(65, false); advance(e, 0.3);
   const milk = DEFAULT_BUILTIN_CATS.find(c => c.id === 'builtin-milk-cat'); e.setCatAppearance(milk.id, milk);
   assert.equal(e.catTail.reach, 0); assert.equal(e.catTail.active, false); e.stop();
 });
@@ -1417,6 +1426,30 @@ test('fluid arms deform in both directions, taper under extension and keep palm 
   }
 });
 
+test('mouse palms follow the approach and fingers remain joined to the liquid arm', () => {
+  for (const sign of [-1, 1]) {
+    const root = { x: sign * .24, y: -.43 }, target = { x: sign * .60, y: .08 };
+    const angle = Math.atan2(target.y - root.y, target.x - root.x) - Math.PI / 2;
+    for (const pose of [{}, { press: 1 }, { grip: 1 }]) {
+      const arm = deformNaiwaArm(root, target, angle, { x: 0, y: 0 }, pose);
+      const last = arm.points.at(-1), before = arm.points.at(-2);
+      nearPoint(last, arm.palm); nearPoint(arm.fingers[1].at(-1), target);
+      const tangent = { x: last.x - before.x, y: last.y - before.y };
+      const cosine = (tangent.x * arm.direction.x + tangent.y * arm.direction.y) / Math.hypot(tangent.x, tangent.y);
+      assert.ok(cosine > .99, 'no corner between forearm and palm');
+      for (const finger of arm.fingers) {
+        assert.ok(Math.hypot(finger[0].x - last.x, finger[0].y - last.y) < last.radius, 'finger roots overlap palm');
+        for (let i = 1; i < finger.length; i++) assert.ok(Math.hypot(finger[i].x - finger[i-1].x, finger[i].y - finger[i-1].y) < finger[i].radius + finger[i-1].radius);
+      }
+      let projection = -Infinity;
+      for (const point of arm.points) {
+        const next = (point.x - root.x) * arm.direction.x + (point.y - root.y) * arm.direction.y;
+        assert.ok(next >= projection, 'resting mouse reach has no backward hook'); projection = next;
+      }
+    }
+  }
+});
+
 test('fluid arm inertia settles without moving its hand contact and gestures remain interruptible', () => {
   for (const dt of [1 / 30, 1 / 60]) {
     const e = frog2d(); e.triggerIdleAction('wave'); advancePet(e, .5, dt);
@@ -1438,7 +1471,7 @@ test('fluid arm inertia settles without moving its hand contact and gestures rem
   }
 });
 
-test('angry cheeks inflate and deflate smoothly without shifting the mouth contact', () => {
+test('mouth-local cheeks inflate and deflate without shifting eyes or the mouth contact', () => {
   for (const dt of [1 / 30, 1 / 60]) {
     const e = frog2d(); const l = e.buildNaiwaLayout();
     const mouth = e.naiwa.getMouthWorld(l);
@@ -1448,9 +1481,15 @@ test('angry cheeks inflate and deflate smoothly without shifting the mouth conta
     assert.ok(early > 0 && early < .4, 'no instant pop to fully inflated');
     for (let i = 0; i < .5 / dt; i++) e.naiwa.update(dt, 1000 + i * dt * 1000, l);
     const full = e.naiwa.expression.cheeks;
-    assert.ok(full > .85 && e.naiwa.lids > .65);
-    assert.ok(naiwaCheekScale(-.61, full) > 1.25, 'face silhouette visibly widens');
-    assert.equal(naiwaCheekScale(-.82, full), 1); assert.equal(naiwaCheekScale(-.30, full), 1);
+    assert.ok(full > .85 && e.naiwa.lids > .4 && e.naiwa.lids < .6, 'slanted lids leave an angry gaze visible');
+    const volumes = naiwaCheekVolumes(full), relaxed = naiwaCheekVolumes(0);
+    assert.equal(volumes.length, 2); assert.equal(volumes[0].x, -volumes[1].x);
+    for (let i = 0; i < volumes.length; i++) {
+      const v = volumes[i];
+      assert.ok(v.rx > relaxed[i].rx && v.ry > relaxed[i].ry);
+      assert.ok(Math.abs(v.x) - v.rx > .04, 'separate cheeks beside the mouth');
+      assert.ok(Math.abs(v.x) + v.rx < .19 && v.y - v.ry > -.01, 'below eyes, within the original face');
+    }
     nearPoint(e.naiwa.getMouthWorld(l), mouth);
     l.anger = 0; e.naiwa.update(dt, 1700, l);
     assert.ok(e.naiwa.expression.cheeks > .6 && e.naiwa.expression.cheeks < full);
@@ -1459,6 +1498,43 @@ test('angry cheeks inflate and deflate smoothly without shifting the mouth conta
     l.anger = 1; e.naiwa.update(.1, 3100, l); e.setPrivacyMode(true);
     assert.equal(e.naiwa.expression.cheeks, 0);
     e.naiwa.resetContacts(); assert.equal(e.naiwa.expression.anger, 0); e.stop();
+  }
+});
+
+test('frog lowers onto the keyboard and smoothly returns from natural, stopped and interrupted naps', () => {
+  for (const dt of [1/30, 1/60]) for (const wake of ['natural', 'key', 'mouse', 'wheel', 'stop', 'drink']) {
+    const e = frog2d(); e.setPropConfig(propConfig('coffee', 'right'));
+    const standing = e.naiwa.getMouthWorld(e.buildNaiwaLayout());
+    e.triggerIdleAction('nap'); let previous = standing;
+    const step = seconds => {
+      for (let t = 0; t < seconds - 1e-8; t += dt) {
+        advancePet(e, dt, dt);
+        const l = e.buildNaiwaLayout(), mouth = e.naiwa.getMouthWorld(l);
+        assert.ok(Math.hypot(mouth.x - previous.x, mouth.y - previous.y) < l.bodyHeight * .17, wake + ': no head teleport');
+        for (const side of ['left','right']) {
+          const arm = e.naiwa.getLimbWorld(side, 'arm', l);
+          assert.ok(arm.reachable && Number.isFinite(arm.end.x + arm.end.y), wake + ': reachable hand');
+        }
+        previous = mouth;
+      }
+    };
+    step(3.8);
+    const l = e.buildNaiwaLayout(), asleep = e.naiwa.getMouthWorld(l);
+    assert.ok(asleep.y - standing.y > l.bodyHeight * .48, 'head reaches keyboard level');
+    assert.ok(Math.abs(asleep.y - l.baseY) < l.bodyHeight * .10);
+    assert.ok(e.naiwa.pose.sleep > .99 && e.naiwa.lids > .97);
+    for (const side of ['left','right']) {
+      const hand = e.naiwa.getHandWorld(side, l);
+      assert.ok(Math.abs(hand.y - l.baseY - l.bodyHeight * .055) < .5, 'hands stay braced on keys');
+    }
+    if (wake === 'key') e.onKeyDown(65, false);
+    if (wake === 'mouse') e.onMouseDown('left');
+    if (wake === 'wheel') e.onMouseWheel();
+    if (wake === 'stop') e.stopCurrentAction();
+    if (wake === 'drink') e.clickProp();
+    step(wake === 'natural' ? 15 : 1.5);
+    assert.ok(e.naiwa.pose.sleep < .01, wake + ': returns to awake pose');
+    e.onKeyUp(65); e.onMouseUp('left'); e.stop();
   }
 });
 
@@ -1475,10 +1551,10 @@ test('manual action stop works repeatedly with auto-idle disabled, including dri
   e.stop();
 });
 
-test('frog artwork decodes all parts, propagates failure, warps the body and caches recoloring', async () => {
+test('frog artwork keeps the head intact, blends opaque sleep poses and caches recoloring', async () => {
   const e = frog2d(); e.render();
   const images = fakeImages.filter(img => img.src?.includes('/naiwa/'));
-  assert.equal(images.length, 4);
+  assert.equal(images.length, 5);
   const originalCreate = document.createElement;
   let fail = true, decodes = 0, rasterizations = 0, written;
   try {
@@ -1488,14 +1564,25 @@ test('frog artwork decodes all parts, propagates failure, warps the body and cac
       img.decode = async () => { decodes++; if (fail) throw Error('failed Naiwa artwork'); };
     }
     await assert.rejects(readyNaiwaArtwork(), /failed Naiwa artwork/);
-    fail = false; await readyNaiwaArtwork(); assert.equal(decodes, 8);
+    fail = false; await readyNaiwaArtwork(); assert.equal(decodes, 10);
     const body = images.find(img => img.src.endsWith('/body.png'));
     assert.equal(naiwaArtwork('body', e.naiwa.colors), body, 'original palette uses original pixels');
     const recorded = makeContext(true); e.naiwa.expression.cheeks = .95;
     e.naiwa.drawBodyArtwork(recorded);
-    const strips = recorded.calls.filter(call => call[0] === 'drawImage');
-    assert.ok(strips.length > 100 && strips.every(call => call[1] === body));
-    assert.ok(strips.some(call => call[8] > .9), 'puffed face draws wider image strips');
+    const draws = recorded.calls.filter(call => call[0] === 'drawImage');
+    assert.deepEqual(draws, [['drawImage', body, -.39, -.82, .78, .86]], 'anger never stretches or slices the head');
+    const prone = images.find(img => img.src.endsWith('/prone.png'));
+    assert.equal(naiwaSleepArtwork(e.naiwa.colors, 0), body);
+    assert.equal(naiwaSleepArtwork(e.naiwa.colors, 1), prone);
+    const composite = [];
+    document.createElement = () => ({ width: 0, height: 0, getContext: () => ({
+      clearRect() {}, globalAlpha: 1, globalCompositeOperation: 'source-over',
+      drawImage(image) { composite.push({ image, alpha: this.globalAlpha, mode: this.globalCompositeOperation }); },
+    }) });
+    const mixed = naiwaSleepArtwork(e.naiwa.colors, .5);
+    assert.equal(mixed.width, 230); assert.equal(mixed.height, 310);
+    assert.deepEqual(composite, [{ image: body, alpha: .5, mode: 'source-over' }, { image: prone, alpha: .5, mode: 'lighter' }]);
+    assert.equal(naiwaSleepArtwork(e.naiwa.colors, .7), mixed, 'reuse one small surface while sleeping');
     document.createElement = () => {
       rasterizations++; const canvas = makeCanvas(), ctx = makeContext();
       ctx.getImageData = () => ({ data: new Uint8ClampedArray([104, 99, 68, 200]), width: 1, height: 1 });

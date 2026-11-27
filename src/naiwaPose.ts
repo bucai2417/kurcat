@@ -28,6 +28,8 @@ export interface NaiwaPose {
   cheeks: number;
   mouthOpen: number;
   bellyPat: number;
+  /** Weight of the supported, forward-lying keyboard sleep pose. */
+  sleep: number;
   hands: { left: FrogPoint; right: FrogPoint };
   feet: { left: FrogPoint; right: FrogPoint };
 }
@@ -39,7 +41,7 @@ export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
   const t = clamp(input.progress);
   const envelope = smooth(t / 0.16) * smooth((1 - t) / 0.18);
   const p: NaiwaPose = {
-    lift: 0, squash: 0, lean: 0, tilt: 0, lids: 0, cheeks: 0, mouthOpen: 0, bellyPat: 0,
+    lift: 0, squash: 0, lean: 0, tilt: 0, lids: 0, cheeks: 0, mouthOpen: 0, bellyPat: 0, sleep: 0,
     hands: { left: { x: -0.26, y: 0.075 }, right: { x: 0.26, y: 0.075 } },
     feet: { left: { x: -0.30, y: 0.015 }, right: { x: 0.30, y: 0.015 } },
   };
@@ -99,18 +101,30 @@ export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
       p.lids = envelope * 0.65; break;
     case 'tilt': p.tilt = 0.14 * envelope; break;
     case 'slowBlink': p.lids = Math.pow(Math.sin(t * Math.PI), 2); break;
-    case 'nap': p.lids = envelope; p.squash = envelope * 0.035; break;
+    case 'nap': {
+      // Hands brace first, then the body slumps forward onto the keyboard.
+      // A long plateau leaves time to breathe; natural waking reverses the fold.
+      p.sleep = smooth(t / .24) * smooth((1 - t) / .20);
+      p.lids = smooth(t / .13) * smooth((1 - t) / .12);
+      hand('left', -.29, .055, p.sleep);
+      hand('right', .29, .055, p.sleep);
+      p.feet.left.x += (-.34 - p.feet.left.x) * p.sleep;
+      p.feet.left.y += (-.025 - p.feet.left.y) * p.sleep;
+      p.feet.right.x += (.34 - p.feet.right.x) * p.sleep;
+      p.feet.right.y += (.065 - p.feet.right.y) * p.sleep;
+      break;
+    }
   }
   if (!input.drinking && !input.kind) {
     p.lean += Math.sin(input.seconds * 7) * clamp(input.groove) * 0.045;
     p.squash += Math.sin(input.seconds * 11) * clamp(input.excitement) * 0.016;
     p.cheeks = clamp(input.anger) * 0.7;
-    p.lids = Math.max(clamp(input.anger) * 0.75, clamp(input.petting) * 0.8, clamp(input.typing) * 0.18);
+    p.lids = Math.max(clamp(input.anger) * 0.48, clamp(input.petting) * 0.8, clamp(input.typing) * 0.18);
   }
   // Wake-up tantrum is a separate state, NOT an idle action named tailGround.
   const stomp = clamp(input.stomp);
   if (stomp > 0) {
-    p.lids = Math.max(p.lids, stomp * 0.72);
+    p.lids = Math.max(p.lids, stomp * 0.48);
     p.cheeks = Math.max(p.cheeks, stomp * 0.85);
     p.feet.left.y = p.feet.right.y = 0.015 - clamp(input.stompLift) * stomp * 0.085;
     p.squash += (1 - clamp(input.stompLift)) * stomp * 0.035;

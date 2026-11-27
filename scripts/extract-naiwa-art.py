@@ -94,6 +94,33 @@ if num>1: mask=(lab==(1+np.argmax(stats[1:,cv2.CC_STAT_AREA]))).astype(np.uint8)
 mask=cv2.GaussianBlur(mask,(3,3),.45)
 save('foot',foot,mask)
 
+# Front prone pose from the same sheet. Remove baked facial features and leave
+# forearms/hands to the continuous runtime surface, so sleeping has no fixed wrists.
+prone_face = np.zeros(src.shape[:2], np.uint8)
+for ex in [140, 242]: cv2.ellipse(prone_face, (ex,533), (24,28), 0,0,360,255,-1)
+cv2.ellipse(prone_face, (191,575), (43,12), 0,0,360,255,-1)
+prone_clean = cv2.inpaint(src, prone_face, 7, cv2.INPAINT_TELEA)
+prone_alpha = pathmask(1536,1024,[
+ ('moveTo',(205,468)),('cubicTo',(148,463,116,483,100,513)),
+ ('cubicTo',(91,536,91,553,95,571)),('cubicTo',(99,594,119,599,171,599)),
+ ('cubicTo',(235,602,279,600,298,589)),('cubicTo',(309,578,307,556,293,528)),
+ ('cubicTo',(276,490,251,469,205,468)),('closeSubpath',())])
+prone_box=(80,465,310,603); x0,y0,x1,y1=prone_box
+save('prone', prone_clean[y0:y1,x0:x1], prone_alpha[y0:y1,x0:x1])
+
+# Normalized skin boundaries let the runtime blend one solid silhouette, without
+# transparent outlines from crossfading two differently shaped poses.
+def contour(name):
+    alpha = np.array(Image.open(out / (name + '.png')))[:, :, 3]
+    h, w = alpha.shape
+    bounds=[]
+    occupied=np.flatnonzero(np.any(alpha>32,axis=1))
+    for y in np.linspace(occupied[0], occupied[-1], 41):
+        row=np.flatnonzero(alpha[round(y)]>32)
+        bounds.append([round(y/(h-1),5),round(float(row[0])/(w-1),5) if len(row) else .5,
+                       round(float(row[-1])/(w-1),5) if len(row) else .5])
+    return bounds
+
 # Eye and mouth source retained for documentation and offline comparisons.
 Image.fromarray(src).resize((1152,768),Image.Resampling.LANCZOS).save(out/'reference.webp',quality=90,method=6)
 (out/'artwork.json').write_text(json.dumps({
@@ -101,7 +128,9 @@ Image.fromarray(src).resize((1152,768),Image.Resampling.LANCZOS).save(out/'refer
  'sourceSize':[1536,1024], 'bodyCrop':list(box),
  'bodyRect':[-.39,-.82,.78,.86],
  'facePivot':[0,-.653], 'eyes':[[-.136,-.709],[.126,-.709]],
- 'defaultPose':'seated', 'parts':['body','belly-mask','hand','foot'],
- 'notes':'Reference-derived body/hands/feet with continuous fluid arms and deformable cheeks. No ears or tail. Runtime recolors material zones; no external images in skin packages.'
+ 'defaultPose':'seated', 'parts':['body','prone','belly-mask','hand','foot'],
+ 'sleepContours':{'body':contour('body'),'prone':contour('prone')},
+ 'proneCrop':list(prone_box), 'proneRect':[-.39,-.43,.78,.466],
+ 'notes':'Reference-derived seated/prone body and feet; hand is an authoring reference. Runtime arms, palms and fingers form one surface; puffing is local to the mouth corners. No ears or tail. Runtime recolors material zones; no external images in skin packages.'
 },ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print('Wrote Naiwa layered artwork to',out)
