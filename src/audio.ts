@@ -1,3 +1,5 @@
+import type { FrogSound } from './naiwaPose';
+
 export class CatAudio {
   private ctx: AudioContext | null = null;
   private enabled = true;
@@ -5,10 +7,13 @@ export class CatAudio {
   private masterGain: GainNode | null = null;
   private currentIntensity = 0;
   private outputConnected = false;
+  private voices = new Set<{ source: OscillatorNode; gain: GainNode }>();
+  private lastVoiceAt = new Map<FrogSound, number>();
 
   public setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     if (!enabled) {
+      this.stopPetVoices();
       this.currentIntensity = 0;
       if (this.masterGain && this.ctx) {
         this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
@@ -35,6 +40,42 @@ export class CatAudio {
   public unlock(): void {
     const ctx = this.getContext();
     if (ctx?.state === 'suspended') void ctx.resume().catch(() => {});
+  }
+
+  /** Original short synthesized frog sounds; never queue audio while the browser is locked. */
+  public playFrogSound(kind: FrogSound): boolean {
+    if (!this.enabled) return false;
+    const ctx = this.getContext();
+    if (!ctx || ctx.state !== 'running' || this.voices.size >= 3) return false;
+    const now = ctx.currentTime;
+    const cooldown = kind === 'happy' ? 2.8 : kind === 'surprise' ? 1.2 : 0.18;
+    if (now - (this.lastVoiceAt.get(kind) ?? -100) < cooldown) return false;
+    const spec = { croak: [300, 110, 0.24, 0.065], happy: [240, 410, 0.20, 0.045],
+      surprise: [470, 165, 0.18, 0.05], stomp: [110, 45, 0.12, 0.085] }[kind];
+    const [startHz, endHz, duration, volume] = spec;
+    const source = ctx.createOscillator(), gain = ctx.createGain();
+    source.type = kind === 'stomp' ? 'sine' : 'triangle';
+    source.frequency.setValueAtTime(startHz, now);
+    source.frequency.exponentialRampToValueAtTime(endHz, now + duration);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(volume, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    source.connect(gain); gain.connect(ctx.destination);
+    const voice = { source, gain };
+    source.onended = () => { source.disconnect(); gain.disconnect(); this.voices.delete(voice); };
+    this.voices.add(voice); this.lastVoiceAt.set(kind, now);
+    source.start(now); source.stop(now + duration + 0.02);
+    return true;
+  }
+
+  /** Model switches, privacy and mute must also silence already-started one-shots. */
+  public stopPetVoices(): void {
+    for (const { source, gain } of this.voices) {
+      source.onended = null;
+      try { source.stop(); } catch { /* already ended */ }
+      source.disconnect(); gain.disconnect();
+    }
+    this.voices.clear(); this.lastVoiceAt.clear();
   }
 
   private ensurePurrGraph(): boolean {

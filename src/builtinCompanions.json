@@ -1,0 +1,106 @@
+[
+  {
+    "id": "builtin-milk-cat",
+    "name": "奶猫",
+    "emoji": "😹",
+    "builtin": true,
+    "furColor": "#f2de8e",
+    "furSecondaryColor": "#e6ce78",
+    "outlineColor": "#6f684a",
+    "legLineColor": "rgba(111, 104, 74, 0.55)",
+    "pattern": "solid",
+    "maskColor": null,
+    "foreheadBridgeColor": null,
+    "flankColor": null,
+    "bellyBibColor": "#efe4ce",
+    "stripeColor": null,
+    "calicoPatchColor": null,
+    "earOuterColor": "#e9d184",
+    "earTipColor": "#dcc57e",
+    "earInnerColor": "#d9c078",
+    "earTuftColor": "#f2de8e",
+    "tailColor": "#e9d07a",
+    "tailTipColor": "#d9be6e",
+    "tailFluffy": false,
+    "tailStripes": false,
+    "eyeColorTop": "#5e9450",
+    "eyeColorBottom": "#a9cb7c",
+    "pupilColor": "#14170f",
+    "eyeCatchlight": true,
+    "eyeRimColor": "rgba(90, 116, 70, 0.85)",
+    "squintColor": "#3e5c34",
+    "squintGlowColor": "rgba(180, 220, 150, 0.55)",
+    "noseColor": "#e2c982",
+    "mouthColor": "rgba(96, 82, 60, 0.80)",
+    "blushColor": "#f0ce93",
+    "whiskerColor": "rgba(120, 112, 78, 0.18)",
+    "armColor": "#ebd584",
+    "pawColor": "#7b7355",
+    "pawOutlineColor": "#5d5741",
+    "armCreaseColor": "rgba(140, 128, 84, 0.35)",
+    "accentColor": "#f5c542",
+    "accentSideColor": "#c99a1e",
+    "spots": [
+      {
+        "part": "body",
+        "x": 0,
+        "y": 0.18,
+        "rx": 0.72,
+        "ry": 0.62,
+        "rotation": 0,
+        "color": "#efe4ce",
+        "opacity": 1
+      },
+      {
+        "part": "head",
+        "x": 0,
+        "y": 0.62,
+        "rx": 0.42,
+        "ry": 0.22,
+        "rotation": 0,
+        "color": "#f4ead8",
+        "opacity": 0.75
+      }
+    ],
+    "modelProfile": {
+      "adapters": [
+        "canvas-cat-v1",
+        "three-cat-v1"
+      ],
+      "behaviorContract": "cat-v1",
+      "revision": 1,
+      "description": "奶油金色毛发、绿色眼睛和奶白胸腹，保留原奶猫设计。"
+    }
+  },
+  {
+    "id": "builtin-naiwa",
+    "name": "奶蛙",
+    "emoji": "🐸",
+    "pattern": "solid",
+    "furColor": "#ffd338",
+    "furSecondaryColor": "#e6a018",
+    "outlineColor": "#957021",
+    "bellyBibColor": "#fff0d3",
+    "armColor": "#f7c32c",
+    "pawColor": "#686344",
+    "pawOutlineColor": "#494a31",
+    "eyeColorTop": "#57913d",
+    "eyeColorBottom": "#a6c65d",
+    "pupilColor": "#14170f",
+    "eyeCatchlight": true,
+    "mouthColor": "#4b3516",
+    "blushColor": "#f0ce93",
+    "accentColor": "#f5c542",
+    "accentSideColor": "#c99a1e",
+    "builtin": true,
+    "modelProfile": {
+      "adapters": [
+        "canvas-naiwa-v1"
+      ],
+      "behaviorContract": "cat-v1",
+      "author": "奶蛙",
+      "description": "参考设计图的金黄奶蛙；圆润坐姿、自然操作键鼠，双手敲键和持物，侧身伸脚替代尾巴按键；无耳无尾。",
+      "revision": 3
+    }
+  }
+]

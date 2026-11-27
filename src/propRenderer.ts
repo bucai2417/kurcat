@@ -80,6 +80,14 @@ export function propLook(kind: PropKind): PropLook {
   return LOOKS[kind];
 }
 
+/** Contact in the same local coordinates used to draw the prop. */
+export function propMouthContact(kind: PropKind): { x: number; y: number } {
+  const look = LOOKS[kind];
+  return kind === 'boba'
+    ? { x: look.width * 0.1 + 1.55, y: -look.height - 11 }
+    : { x: 0, y: -look.height };
+}
+
 /**
  * Draws the drink prop. Origin is the prop's base centre, +Y is down.
  *

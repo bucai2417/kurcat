@@ -17,7 +17,27 @@
         "cuddle",
         "tailGround",
         "calm"
-      ]
+      ],
+      "rig": "cat"
+    },
+    "canvas-naiwa-v1": {
+      "mode": "2d",
+      "actions": [
+        "drink",
+        "stretch",
+        "wave",
+        "tilt",
+        "slowBlink",
+        "groom",
+        "nap",
+        "cuddle",
+        "tailGround",
+        "calm",
+        "frogHop",
+        "frogCroak",
+        "bellyPat"
+      ],
+      "rig": "naiwa"
     },
     "three-cat-v1": {
       "mode": "3d",
@@ -36,7 +56,8 @@
         "listen",
         "shimmy",
         "pawCheck"
-      ]
+      ],
+      "rig": "cat"
     }
   },
   "specialModels": {
@@ -103,7 +124,10 @@
     "roll": "地上打滚",
     "listen": "侧耳听",
     "shimmy": "扭扭身",
-    "pawCheck": "看看爪子"
+    "pawCheck": "看看爪子",
+    "frogHop": "蓄力小跳",
+    "frogCroak": "鼓腮呱呱",
+    "bellyPat": "拍拍肚皮"
   },
   "skinRules": {
     "requiredColors": [
@@ -174,5 +198,204 @@
     "maxModels": 50,
     "deleteTool": "delete_cat",
     "updatePolicy": "Explicit replace required; compare revision and normalized content; never update automatically."
+  },
+  "rigs": {
+    "cat": {
+      "name": "猫咪",
+      "status": "available",
+      "adapters": [
+        "canvas-cat-v1",
+        "three-cat-v1"
+      ],
+      "skinImport": true,
+      "parts": [
+        "body",
+        "head",
+        "earLeft",
+        "earRight",
+        "eyeLeft",
+        "eyeRight",
+        "lidLeft",
+        "lidRight",
+        "armLeft",
+        "armRight",
+        "pawLeft",
+        "pawRight",
+        "tail"
+      ],
+      "skinFields": [
+        "furColor",
+        "furSecondaryColor",
+        "outlineColor",
+        "legLineColor",
+        "maskColor",
+        "foreheadBridgeColor",
+        "flankColor",
+        "bellyBibColor",
+        "stripeColor",
+        "calicoPatchColor",
+        "earOuterColor",
+        "earTipColor",
+        "earInnerColor",
+        "earTuftColor",
+        "tailColor",
+        "tailTipColor",
+        "eyeColorTop",
+        "eyeColorBottom",
+        "pupilColor",
+        "eyeRimColor",
+        "squintColor",
+        "squintGlowColor",
+        "noseColor",
+        "mouthColor",
+        "blushColor",
+        "whiskerColor",
+        "armColor",
+        "pawColor",
+        "pawOutlineColor",
+        "armCreaseColor",
+        "accentColor",
+        "accentSideColor",
+        "tailFluffy",
+        "tailStripes",
+        "eyeCatchlight",
+        "pattern",
+        "spots"
+      ],
+      "inputMapping": {
+        "keyboard": "pawStrike + tailKey",
+        "mouse": "pawGrip",
+        "sleep": "tailGround",
+        "petting": "purr + heart + calm"
+      },
+      "notes": "内置程序骨架；颜色、花纹和斑点皮肤包，不接受任意网格或自定义骨骼。"
+    },
+    "dafeiyu": {
+      "name": "大肥鱼",
+      "status": "available-fixed-art",
+      "adapters": [],
+      "builtinIds": [
+        "dafeiyu"
+      ],
+      "modes": [
+        "2d"
+      ],
+      "skinImport": false,
+      "skinFields": [],
+      "parts": [
+        "spriteBody",
+        "handLeft",
+        "handRight",
+        "whaleTail"
+      ],
+      "actions": [
+        "drink",
+        "stretch",
+        "wave"
+      ],
+      "notes": "内置图片 + 程序手臂绘制器，可切换和互动；当前不开放换肤导入导出，不能使用猫咪适配器冒充。"
+    },
+    "naiwa": {
+      "name": "奶蛙",
+      "status": "available",
+      "adapters": [
+        "canvas-naiwa-v1"
+      ],
+      "builtinIds": [
+        "builtin-naiwa"
+      ],
+      "skinImport": true,
+      "skinFields": [
+        "furColor",
+        "furSecondaryColor",
+        "outlineColor",
+        "bellyBibColor",
+        "armColor",
+        "pawColor",
+        "pawOutlineColor",
+        "eyeColorTop",
+        "eyeColorBottom",
+        "pupilColor",
+        "eyeCatchlight",
+        "mouthColor",
+        "blushColor"
+      ],
+      "parts": [
+        "body",
+        "belly",
+        "eyeLeft",
+        "eyeRight",
+        "lidLeft",
+        "lidRight",
+        "cheekLeft",
+        "cheekRight",
+        "armLeft",
+        "armRight",
+        "handLeft",
+        "handRight",
+        "thighLeft",
+        "thighRight",
+        "footLeft",
+        "footRight"
+      ],
+      "absentParts": [
+        "ears",
+        "tail",
+        "whiskers"
+      ],
+      "inputMapping": {
+        "keyboard": "双手敲键；仅原尾巴按键映射为脚踩（沿用 smart/custom/edge/off 设置）",
+        "mouse": "手点鼠标，持物手优先握道具；坐姿双脚在两侧轻摆",
+        "sleep": "tailGround 映射为双脚跺地；抚摸或 2–5 秒后安抚",
+        "petting": "短呱声 + 爱心 + 安抚",
+        "typing": [
+          "专注敲键",
+          "左右律动",
+          "兴奋踮脚",
+          "鼓腮不满"
+        ]
+      },
+      "actionLabels": {
+        "tailGround": "跺脚抗议",
+        "groom": "揉揉脸",
+        "cuddle": "抱肚撒娇"
+      },
+      "sounds": [
+        "croak",
+        "happy",
+        "surprise",
+        "stomp"
+      ],
+      "future3d": {
+        "status": "not-implemented",
+        "adapter": null,
+        "poseContract": "src/naiwaPose.ts",
+        "requiredAnchors": [
+          "mouth",
+          "gripLeft",
+          "gripRight",
+          "footContactLeft",
+          "footContactRight"
+        ],
+        "notes": "后续可复用归一化 lift/squash/lean/tilt/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂需要连续形变，脸颊需要膨胀形态。当前不能导入 three-naiwa-v1 或 GLB。"
+      },
+      "notes": "不通过 ID/名称猜测骨架；profile.adapters 必须包含 canvas-naiwa-v1。无耳、无尾，猫咪花纹/斑点字段不会绘制。",
+      "deformation": {
+        "arms": "连续软曲面，无固定肘部；随手掌自由弯曲、拉伸、变细和惯性回弹，手掌保持键鼠/道具接触",
+        "cheeks": "生气时脸部轮廓渐进鼓起，安抚后逐渐回落；搭配遮盖眼皮、噘嘴、脸红和腮部皱褶",
+        "channels": [
+          "armLeft",
+          "armRight",
+          "handLeft",
+          "handRight",
+          "anger",
+          "cheeks",
+          "lids",
+          "mouthOpen"
+        ],
+        "renderer": "src/naiwaRenderer.ts",
+        "armSurface": "src/naiwaDeform.ts"
+      }
+    }
   }
 }

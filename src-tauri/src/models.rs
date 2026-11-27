@@ -1,4 +1,4 @@
-//! Versioned, data-only packages for the built-in procedural cat renderers.
+//! Versioned, data-only packages for the built-in cat and naiwa renderers.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -36,9 +36,18 @@ fn color(v: &Value) -> bool {
 }
 pub fn validate_profile(profile: &ModelProfile) -> Result<(), String> {
     let c = contract();
-    if profile.behavior_contract != "cat-v1" || profile.adapters.is_empty() || profile.adapters.len() > 2 ||
-        profile.adapters.iter().any(|a| c["adapters"].get(a.as_str()).is_none()) ||
-        (profile.adapters.len() == 2 && profile.adapters[0] == profile.adapters[1]) { return Err("Unsupported adapter or behavior contract".into()); }
+    if profile.behavior_contract != c["behaviorContract"].as_str().unwrap() {
+        return Err(format!("不支持的行为版本：{}；当前支持 {}", profile.behavior_contract, c["behaviorContract"].as_str().unwrap()));
+    }
+    if profile.adapters.is_empty() || profile.adapters.len() > 2 { return Err("profile.adapters 需要 1–2 个适配器".into()); }
+    let mut modes = std::collections::HashSet::new();
+    for adapter in &profile.adapters {
+        let Some(info) = c["adapters"].get(adapter.as_str()) else {
+            let supported = c["adapters"].as_object().unwrap().keys().cloned().collect::<Vec<_>>().join("、");
+            return Err(format!("不支持的模型适配器：{}。当前支持：{}。请检查拼写或更新 DIY-Cat；奶蛙目前仅支持 2D。", adapter, supported));
+        };
+        if !modes.insert(info["mode"].as_str().unwrap()) { return Err("同一个 2D/3D 模式只能声明一个适配器".into()); }
+    }
     for field in [&profile.author, &profile.license].into_iter().flatten() { text(&json!(field), 100)?; }
     if let Some(revision) = profile.revision {
         if revision == 0 || revision > 2147483647 { return Err("模型修订号需要 1–2147483647 的整数".into()); }
@@ -159,7 +168,15 @@ pub fn mode(cat: &CatSkinConfig, preferred: &str) -> String {
 pub fn actions(id: &str, preferred: &str) -> Value {
     let c = contract();
     if id == "dafeiyu" { return c["specialModels"]["dafeiyu"]["actions"].clone(); }
-    let actual = cats::all_cats().iter().find(|cat| cat.id == id).map(|cat| mode(cat, preferred)).unwrap_or_else(|| preferred.into());
+    let all = cats::all_cats();
+    let cat = all.iter().find(|cat| cat.id == id);
+    let actual = cat.map(|cat| mode(cat, preferred)).unwrap_or_else(|| preferred.into());
+    if let Some(adapter) = cat
+        .and_then(|cat| cat.model_profile.as_ref())
+        .and_then(|p| p.adapters.iter().find(|a| c["adapters"][a.as_str()]["mode"] == actual))
+    {
+        return c["adapters"][adapter.as_str()]["actions"].clone();
+    }
     c["adapters"][if actual == "3d" { "three-cat-v1" } else { "canvas-cat-v1" }]["actions"].clone()
 }
 
@@ -190,6 +207,40 @@ mod tests {
         let mut only_three = example();
         only_three["profile"]["adapters"] = json!(["three-cat-v1"]);
         assert_eq!(mode(&validate(only_three).unwrap(), "2d"), "3d");
+    }
+
+    #[test]
+    fn original_frog_package_and_legacy_milk_cat_keep_distinct_rigs() {
+        let package: Value = serde_json::from_str(include_str!("../../tests/fixtures/naiwa.kurocat.json"))
+            .expect("original UTF-8 frog package");
+        let frog = validate(package.clone()).unwrap();
+        assert_eq!(frog.name, "奶蛙");
+        assert_eq!(frog.model_profile.as_ref().unwrap().adapters, vec!["canvas-naiwa-v1".to_string()]);
+        assert_eq!(frog.model_profile.as_ref().unwrap().author.as_deref(), Some("奶蛙"));
+        assert_eq!(mode(&frog, "3d"), "2d");
+        let c = contract();
+        let actions = c["adapters"]["canvas-naiwa-v1"]["actions"].as_array().unwrap();
+        for action in ["drink", "tailGround", "calm", "frogHop", "frogCroak", "bellyPat"] {
+            assert!(actions.contains(&json!(action)));
+        }
+        let normalized = serde_json::to_value(&frog).unwrap();
+        let roundtrip = json!({"format": "kurocat-model", "version": 1,
+            "profile": frog.model_profile.clone(), "skin": normalized});
+        assert_eq!(validate(roundtrip).unwrap().name, "奶蛙");
+        // User's older milk-cat skin also uses the ID naiwa, without an adapter.
+        let mut legacy = frog.clone();
+        legacy.model_profile = None;
+        legacy.name = "奶猫".into();
+        assert_eq!(legacy.id, "naiwa");
+        assert_eq!(mode(&legacy, "3d"), "3d");
+        let builtins = cats::builtin_cats();
+        let ids: std::collections::HashSet<_> = builtins.iter().map(|cat| &cat.id).collect();
+        assert_eq!(ids.len(), builtins.len());
+        assert!(builtins.iter().any(|cat| cat.id == "builtin-milk-cat" && cat.name == "奶猫"));
+        assert!(builtins.iter().any(|cat| cat.id == "builtin-naiwa" && mode(cat, "3d") == "2d"));
+        let mut duplicate_mode = package;
+        duplicate_mode["profile"]["adapters"] = json!(["canvas-cat-v1", "canvas-naiwa-v1"]);
+        assert!(validate(duplicate_mode).unwrap_err().contains("同一个 2D/3D 模式"));
     }
 
     #[test]

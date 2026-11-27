@@ -7,6 +7,9 @@ import { LIGHT_EFFECTS, LIGHT_PRESETS, LIGHT_ZONES } from './keyboardLight';
 import { PROP_KINDS, PROP_SIDES } from './prop';
 import type { KeycapOverride } from './deskSkin';
 import { DEFAULT_BUILTIN_CATS } from './catSkins';
+import { modelActions, modelActionLabel, modelRig } from './modelPack';
+import { catAudio } from './audio';
+import naiwaReferenceUrl from './assets/naiwa/reference.webp';
 
 const HARNESS_DIY: Record<string, Record<string, KeycapOverride>> = {
   wasd: {
@@ -45,10 +48,13 @@ let orient: KeyboardOrientation = params.get('orient') === 'viewer' ? 'viewer' :
 let mouse = (params.get('mouse') as MouseOrientation) || 'auto';
 let kbs = Number(params.get('kbs') ?? (layout === '108' ? 0.85 : 1));
 let propSide: 'left' | 'right' = (params.get('prop') || '').split(',')[1] === 'left' ? 'left' : 'right';
-let currentCatId = params.get('breed') || 'black';
+// Legacy preview URL only; imported model IDs never determine their rig.
+let currentCatId = params.get('breed') === 'naiwa' ? 'builtin-naiwa' : params.get('breed') || 'black';
 
 engine.setCatAppearance(currentCatId, DEFAULT_BUILTIN_CATS.find((c) => c.id === currentCatId) ?? null);
 engine.setRenderScale(Number(params.get('scale') ?? 1));
+// `?idle=0` freezes idle behaviours so a still pose can be captured for review.
+if (params.get('idle') === '0') engine.setIdleAutoEnabled(false);
 
 const skinId = params.get('skin');
 const initialSkin = BUILTIN_DESK_SKINS.find((s) => s.id === skinId) ?? BUILTIN_DESK_SKINS[0];
@@ -88,6 +94,12 @@ if (params.get('prop')) {
 // The logical canvas grows with the 108 deck, so the CSS box must follow or the
 // render will letterbox and break pointer mapping.
 function applyLayout(): void {
+  const isFrog = modelRig(DEFAULT_BUILTIN_CATS.find(c => c.id === currentCatId)) === 'naiwa';
+  document.getElementById('naiwa-reference')!.hidden = !isFrog;
+  document.getElementById('preview-comparison')!.classList.toggle('has-reference', isFrog);
+  document.getElementById('preview-intro')!.textContent = isFrog
+    ? '奶蛙 · 参考图分层外观，坐姿双手敲键，后脚自然轻晃。'
+    : '直接敲键盘、点击鼠标，或选择下方动作查看互动。';
   engine.setKeyboardConfig(layout, orient, {
     scale: kbs,
     mouseOrientation: mouse,
@@ -104,8 +116,8 @@ function applyLayout(): void {
     : 44;
   const gap = 14;
   const hintH = 24;
-  const availW = Math.max(260, window.innerWidth - 40);
-  const availH = Math.max(240, window.innerHeight - panelH - stagePadY - gap - hintH);
+  const availW = Math.max(180, (document.getElementById('live-preview')?.clientWidth ?? window.innerWidth) - 20);
+  const availH = Math.min(520, Math.max(360, window.innerHeight - panelH - stagePadY - gap - hintH - 70));
   const fit = Math.min(1.6, availW / size.w, availH / size.h);
   canvas.style.width = `${Math.round(size.w * fit)}px`;
   canvas.style.height = `${Math.round(size.h * fit)}px`;
@@ -189,6 +201,8 @@ function keyEventToVk(e: KeyboardEvent): number | null {
 
 window.addEventListener('keydown', (e) => {
   if (isPanelTarget(e.target)) return;
+  cancelDemo();
+  catAudio.unlock();
   const vk = keyEventToVk(e);
   if (vk === null) return;
   e.preventDefault();
@@ -197,7 +211,6 @@ window.addEventListener('keydown', (e) => {
   engine.onKeyDown(vk, repeat);
 });
 window.addEventListener('keyup', (e) => {
-  if (isPanelTarget(e.target)) return;
   const vk = keyEventToVk(e);
   if (vk === null) return;
   pressed.delete(vk);
@@ -233,11 +246,14 @@ canvas.addEventListener('mousemove', (e) => {
 // Mirror the desktop app's global cursor hook so the cat grips the mouse and leans
 // toward it — including when the drink sits on the left and the mouse moves right.
 window.addEventListener('mousemove', (e) => {
+  if (isPanelTarget(e.target)) return;
   engine.onGlobalMouseMove(e.clientX / window.innerWidth, e.clientY / window.innerHeight);
 });
 
 canvas.addEventListener('mousedown', (e) => {
+  cancelDemo();
   e.preventDefault();
+  catAudio.unlock();
   const p = canvasLogical(e);
   if (e.button === 0 && engine.hitTestProp(p.x, p.y)) {
     const r = engine.clickProp();
@@ -251,7 +267,7 @@ canvas.addEventListener('mousedown', (e) => {
   else engine.onMouseDown('middle');
 });
 
-canvas.addEventListener('mouseup', (e) => {
+window.addEventListener('mouseup', (e) => {
   if (e.button === 0) engine.onMouseUp('left');
   else if (e.button === 2) engine.onMouseUp('right');
   else engine.onMouseUp('middle');
@@ -259,31 +275,81 @@ canvas.addEventListener('mouseup', (e) => {
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('wheel', (e) => {
+  cancelDemo();
   e.preventDefault();
   engine.onMouseWheel();
 }, { passive: false });
 
 window.addEventListener('mouseleave', () => engine.onWindowCursor(0.5, 0.5, false));
+window.addEventListener('blur', () => {
+  cancelDemo();
+  for (const vk of pressed) engine.onKeyUp(vk);
+  pressed.clear();
+  for (const button of ['left', 'right', 'middle'] as const) engine.onMouseUp(button);
+  engine.onWindowCursor(0.5, 0.5, false);
+});
 
 // ---- Control panel ---------------------------------------------------------
 
 const panel = document.getElementById('panel') as HTMLDivElement | null;
-const statusEl = document.getElementById('status') as HTMLSpanElement | null;
+let soundEnabled = true;
+const demoTimers = new Set<number>();
+const demoKeys = new Set<number>();
+let demoMouse = false;
+let demoTail: { mode: typeof engine.tailKeyConfig.mode; ids: string[] } | null = null;
+
+function cancelDemo(): void {
+  for (const timer of demoTimers) window.clearTimeout(timer);
+  demoTimers.clear();
+  for (const vk of demoKeys) if (!pressed.has(vk)) engine.onKeyUp(vk);
+  demoKeys.clear();
+  if (demoMouse) engine.onMouseUp('left');
+  demoMouse = false;
+  if (demoTail) engine.setTailKeyConfig(demoTail.mode, demoTail.ids);
+  demoTail = null;
+}
+function demoAfter(ms: number, fn: () => void): void {
+  const timer = window.setTimeout(() => { demoTimers.delete(timer); fn(); }, ms);
+  demoTimers.add(timer);
+}
+function playInputDemo(kind: string): void {
+  engine.stopCurrentAction();
+  engine.setIdleAutoEnabled(false);
+  (document.getElementById('harness-auto') as HTMLInputElement).checked = false;
+  demoTail = { mode: engine.tailKeyConfig.mode, ids: [...engine.tailKeyConfig.ids] };
+  engine.setTailKeyConfig(kind === 'foot' ? 'custom' : 'off', kind === 'foot' ? ['space'] : []);
+  if (kind === 'mouse') {
+    demoMouse = true; engine.onMouseDown('left');
+    demoAfter(650, () => { engine.onMouseUp('left'); demoMouse = false; });
+  } else {
+    const keys = kind === 'foot' ? [32, 32] : [65, 70, 74, 76, 80, 32];
+    keys.forEach((vk, i) => {
+      demoAfter(i * 380, () => { demoKeys.add(vk); engine.onKeyDown(vk, false); });
+      demoAfter(i * 380 + 220, () => { demoKeys.delete(vk); engine.onKeyUp(vk); });
+    });
+  }
+  setStatus(kind === 'mouse' ? '演示点鼠标：观察手臂侧伸和回弹' : kind === 'foot'
+    ? '演示原尾巴按键：奶蛙侧身伸脚，完成后恢复原按键设置' : '演示双手敲键：观察手臂随接触位置伸缩');
+  demoAfter(kind === 'keys' ? 3000 : 1700, () => { cancelDemo(); setStatus('演示完成，可继续敲键、点鼠标或切换动作'); });
+}
 
 function isPanelTarget(t: EventTarget | null): boolean {
   return t instanceof HTMLElement && panel?.contains(t) === true;
 }
 
 function setStatus(text: string): void {
+  const statusEl = document.getElementById('status');
   if (statusEl) statusEl.textContent = text;
 }
 
 function buildPanel(): void {
   if (!panel) return;
   panel.innerHTML = `
-    <div class="row"><strong>DIY-Cat 预览</strong><span id="status" class="status">直接敲键盘、点鼠标、摸猫头、点饮品</span></div>
+    <div class="row"><strong>DIY-Cat 预览</strong><span id="status" class="status" role="status" aria-live="polite">敲键盘、点鼠标、抚摸头部或点击饮品</span></div>
     <div class="row">
-      <label>猫咪</label><span id="cats"></span>
+      <label>模型</label><span id="cats"></span>
+    </div>
+    <div class="row"><span id="rig-info" class="status"></span>
     </div>
     <div class="row">
       <label>配列</label>
@@ -311,14 +377,30 @@ function buildPanel(): void {
       <label>亮度</label><input type="range" id="bright" min="10" max="100" step="5" /><span id="bright-v" class="val"></span>
     </div>
     <div class="row">
-      <label>待机动作</label>
+      <label>输入演示</label>
+      <button data-demo="keys">双手敲键</button><button data-demo="mouse">点鼠标</button>
+      <button data-demo="foot">原尾巴按键</button>
+    </div>
+    <div class="row">
+      <label>动作与表情</label>
       <button data-idle="drink">🥤 喝一口</button>
       <button data-idle="stretch">🙆 伸懒腰</button>
       <button data-idle="wave">👋 挥手</button>
       <button data-idle="groom">👅 洗脸</button>
       <button data-idle="nap">😴 打盹</button>
       <button data-idle="cuddle">💗 撒娇</button>
-      <button data-idle="stop">✋ 停</button>
+      <button data-idle="tilt">歪头看你</button>
+      <button data-idle="slowBlink">慢眨眼</button>
+      <button data-idle="frogHop">蓄力小跳</button>
+      <button data-idle="frogCroak">鼓腮呱呱</button>
+      <button data-idle="bellyPat">拍拍肚皮</button>
+      <button data-idle="tailGround">拍地抗议</button>
+      <button data-idle="calm">安抚起床气</button>
+      <button data-idle="stop">停止动作</button>
+    </div>
+    <div class="row">
+      <label for="harness-auto">随机待机</label><input id="harness-auto" type="checkbox" ${params.get('idle') === '0' ? '' : 'checked'} />
+      <button id="pet-sound" data-sound="toggle" aria-pressed="true">宠物声音：开</button>
     </div>
     <div class="row">
       <label>键帽DIY</label><span id="diy"></span>
@@ -332,7 +414,11 @@ function buildPanel(): void {
   panel.addEventListener('click', (e) => {
     const t = (e.target as HTMLElement).closest<HTMLElement>('button');
     if (!t) return;
-    if (t.dataset.cat) {
+    cancelDemo();
+    catAudio.unlock();
+    if (t.dataset.demo) {
+      playInputDemo(t.dataset.demo);
+    } else if (t.dataset.cat) {
       const found = DEFAULT_BUILTIN_CATS.find((c) => c.id === t.dataset.cat) ?? null;
       currentCatId = found?.id ?? 'black';
       engine.setCatAppearance(currentCatId, found);
@@ -366,12 +452,18 @@ function buildPanel(): void {
       propSide = t.dataset.side === 'left' ? 'left' : 'right';
       engine.setPropConfig({ ...engine.getPropConfig(), side: propSide });
       applyLayout();
+    } else if (t.dataset.sound) {
+      soundEnabled = !soundEnabled; catAudio.setEnabled(soundEnabled); syncPanel();
     } else if (t.dataset.idle) {
       const kind = t.dataset.idle;
-      if (kind === 'stop') engine.setIdleAutoEnabled(false);
-      else {
-        engine.setIdleAutoEnabled(true);
-        engine.triggerIdleAction(kind);
+      if (kind !== 'calm') engine.stopCurrentAction();
+      if (kind === 'stop') {
+        engine.setIdleAutoEnabled(false);
+        (document.getElementById('harness-auto') as HTMLInputElement).checked = false;
+        setStatus('已停止动作和随机待机');
+      } else {
+        const started = engine.triggerIdleAction(kind, true);
+        setStatus(started ? `正在演示：${t.textContent}` : '当前状态无法触发，请稍后再试');
       }
       syncPanel();
     } else if (t.dataset.diy) {
@@ -400,11 +492,30 @@ function buildPanel(): void {
     if (v) v.textContent = `${bright.value}%`;
   });
 
+  document.getElementById('harness-auto')?.addEventListener('change', e => {
+    cancelDemo();
+    engine.setIdleAutoEnabled((e.target as HTMLInputElement).checked);
+  });
   syncPanel();
 }
 
 function syncPanel(): void {
   if (!panel) return;
+  const cat = DEFAULT_BUILTIN_CATS.find(c => c.id === currentCatId);
+  const actions = modelActions(cat, '2d');
+  panel.querySelectorAll<HTMLButtonElement>('[data-idle]').forEach(button => {
+    const action = button.dataset.idle!;
+    if (action === 'stop') return;
+    button.hidden = !actions.includes(action);
+    button.textContent = modelRig(cat) === 'naiwa' && action === 'tailGround'
+      ? '鼓脸生气 · 跺脚' : modelActionLabel(cat, action);
+  });
+  const rigInfo = document.getElementById('rig-info');
+  if (rigInfo) rigInfo.textContent = modelRig(cat) === 'naiwa'
+    ? '奶蛙 · 手臂随动作柔软伸缩，生气会鼓脸、噘嘴和压低眼皮。普通输入用手，原尾巴按键用脚。打盹后敲键会生气，抚摸可安抚。'
+    : '打盹后敲键可测试起床气；点击动作按钮可逐个预览。';
+  const sound = document.getElementById('pet-sound');
+  if (sound) { sound.textContent = `宠物声音：${soundEnabled ? '开' : '关'}`; sound.setAttribute('aria-pressed', String(soundEnabled)); }
   const size = engine.getLogicalSize();
   const kbSlider = document.getElementById('kbscale') as HTMLInputElement | null;
   if (kbSlider) {
@@ -493,6 +604,8 @@ function syncPanel(): void {
   document.title = `DIY-Cat Harness ${size.w}x${size.h}`;
 }
 
+(document.getElementById('reference-image') as HTMLImageElement).src = naiwaReferenceUrl;
+(document.getElementById('reference-link') as HTMLAnchorElement).href = naiwaReferenceUrl;
 buildVkTable();
 buildPanel();
 applyLayout();

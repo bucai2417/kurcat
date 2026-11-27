@@ -13,6 +13,8 @@ import {
 import { catAudio } from './audio';
 import { resolveCustomSkin, type CatSkinConfig, type ResolvedSkin } from './catSkins';
 import { DaFeiYuRenderer, type DaFeiYuLayout } from './dafeiyuRenderer';
+import { NaiwaRenderer, type NaiwaLayout, type NaiwaPaw } from './naiwaRenderer';
+import { FROG_ACTIONS, FROG_DURATIONS, type FrogAction } from './naiwaPose';
 import {
   buildHitRegions,
   clampKeyboardScale,
@@ -48,14 +50,14 @@ import {
   type PropConfig,
   type PropKind,
 } from './prop';
-import { drawProp, propLook } from './propRenderer';
+import { drawProp, propLook, propMouthContact } from './propRenderer';
 import { TypingReactions, neutralReaction, drawReactionMark } from './petReactions';
 
 const propLookHeight = (kind: PropKind): number => propLook(kind).height;
 
 export const LOGICAL_W = 420;
 export const LOGICAL_H = 440;
-export type CatBreed = 'black' | 'ragdoll' | 'dafeiyu';
+export type CatBreed = 'black' | 'ragdoll' | 'dafeiyu' | 'naiwa';
 export type KeyboardOrientation = 'cat' | 'viewer';
 
 // ---- Tail-key data shared with the 3D engine (no behaviour lives here) ----
@@ -138,7 +140,7 @@ type ParticleShape = 'bubble' | 'steam' | 'heart' | 'spark' | 'pearl';
 type ReactionKind = 'satisfied' | 'lick' | 'shake' | 'happy' | 'burp';
 
 /** Idle behaviours the pet picks from when the user is away. */
-export type IdleActionKind = 'drink' | 'stretch' | 'groom' | 'nap' | 'cuddle' | 'wave' | 'tilt' | 'slowBlink';
+export type IdleActionKind = 'drink' | 'stretch' | 'groom' | 'nap' | 'cuddle' | 'wave' | 'tilt' | 'slowBlink' | FrogAction;
 
 /** Old names kept working for menu / MCP payloads already in the wild. */
 const IDLE_ALIASES: Record<string, IdleActionKind> = {
@@ -189,6 +191,8 @@ const LIGHT_IDLE_FRAME_MS = 66;
 export class KuroCatEngine {
   private canvas: HTMLCanvasElement;
   private readonly previewOnly: boolean;
+  // Thumbnails share the audio singleton, but must never start or silence the live pet.
+  private get petAudio() { return this.previewOnly ? null : catAudio; }
   private ctx: CanvasRenderingContext2D;
   private rafId: number | null = null;
   private idleFrameTimer: number | null = null;
@@ -269,6 +273,7 @@ export class KuroCatEngine {
   private renderScale = 1.0;
   private embedded = false;
   private dafeiyu = new DaFeiYuRenderer();
+  private naiwa = new NaiwaRenderer();
   private catTail = {
     heldVks: new Set<number>(),
     targetX: 320,
@@ -295,7 +300,11 @@ export class KuroCatEngine {
     this.wakeRendering();
     this.privacyMode = active;
     this.dafeiyu.onPrivacyModeChanged(active);
+    this.naiwa.onPrivacyModeChanged(active);
     if (active) {
+      this.petAudio?.stopPetVoices();
+      this.petAudio?.setPurrIntensity(0);
+      this.endIdleAction();
       this.resetWakeReaction();
       this.typingReactions.reset();
       this.typingPose = neutralReaction();
@@ -468,13 +477,19 @@ export class KuroCatEngine {
       rx: box.width / 2 / vw,
       ry: box.height / 2 / vh,
     };
-    return buildHitRegions(
+    const regions = buildHitRegions(
       this.metrics,
       this.mouseFacing,
       this.propConfig.enabled,
       this.propConfig.side === 'left' ? 'left' : 'right',
       petBox,
     );
+    if (this.catBreed === 'naiwa') {
+      const l = this.buildNaiwaLayout();
+      regions.cat = { cx: l.centerX / l.logicalW, cy: (l.baseY - l.bodyHeight * 0.40) / l.logicalH,
+        rx: l.bodyHeight * 0.41 / l.logicalW, ry: l.bodyHeight * 0.46 / l.logicalH };
+    }
+    return regions;
   }
 
   public setLightConfig(raw: unknown): void {
@@ -544,6 +559,19 @@ export class KuroCatEngine {
     this.wakeRendering();
   }
 
+  /** Explicitly stop a manual gesture, drink or tantrum, even with auto-idle off.
+   * Keep input contacts and renderer interpolation so the hands can settle naturally. */
+  public stopCurrentAction(): void {
+    this.endIdleAction();
+    this.drinker.reset(this.propConfig);
+    this.propFizz = 0; this.drinkFeedback = null;
+    this.resetWakeReaction();
+    this.petAudio?.stopPetVoices();
+    this.petAudio?.setPurrIntensity(0);
+    this.nextIdleActionAt = this.elapsed + this.idleDelaySec;
+    this.wakeRendering();
+  }
+
   /** How many seconds of silence before a random idle action fires. */
   public setIdleDelaySec(sec: number): void {
     if (!Number.isFinite(sec)) return;
@@ -565,7 +593,9 @@ export class KuroCatEngine {
       if (!this.propConfig.enabled) return false;
       return this.triggerSip() || this.clickProp() !== 'ignored';
     }
-    if (!['stretch', 'groom', 'nap', 'cuddle', 'wave', 'tilt', 'slowBlink'].includes(kind)) return false;
+    const frogAction = FROG_ACTIONS.includes(kind as FrogAction);
+    if (frogAction && this.catBreed !== 'naiwa') return false;
+    if (!frogAction && !['stretch', 'groom', 'nap', 'cuddle', 'wave', 'tilt', 'slowBlink'].includes(kind)) return false;
     if (this.idleAction || this.drinker.drinking) return false;
 
     // The whale girl has her own rig: she waves and stretches with her hands.
@@ -578,7 +608,7 @@ export class KuroCatEngine {
       return true;
     }
 
-    const duration = kind === 'slowBlink' ? 2.4 : kind === 'tilt' ? 2.2 :
+    const duration = frogAction ? FROG_DURATIONS[kind as FrogAction] : kind === 'slowBlink' ? 2.4 : kind === 'tilt' ? 2.2 :
       kind === 'nap'
         ? 8 + Math.random() * 4
         : kind === 'groom'
@@ -644,15 +674,34 @@ export class KuroCatEngine {
   }
 
   public setCatAppearance(breedId: string, skin?: CatSkinConfig | null): void {
-    if (this.activeModelId !== breedId) {
+    const frogRig = skin?.modelProfile?.adapters.includes('canvas-naiwa-v1') === true;
+    if (this.activeModelId !== breedId || (this.catBreed === 'naiwa') !== frogRig) {
+      this.petAudio?.stopPetVoices();
+      this.petAudio?.setPurrIntensity(0);
+      this.heldKeys.clear(); this.catTail.heldVks.clear(); this.catTailHeldAt.clear();
+      this.catTail.active = false; this.catTail.reach = this.catTail.hover = this.catTail.impactSquash = 0;
+      this.naiwa.resetContacts();
+      this.recentKeyTimes.length = 0;
+      for (const anim of this.keyAnims.values()) { anim.pressed = false; anim.pressAmount = 0; }
+      for (const paw of [this.leftPaw, this.rightPaw]) { paw.mode = 'idle'; paw.idleWeight = 1; }
+      this.mouseLeftDown = this.mouseRightDown = false;
       this.resetWakeReaction();
       this.endIdleAction();
+      this.drinker.reset(this.propConfig);
+      this.propPose = { x: 0, y: 0, rot: 0, active: false, lift: 0, handX: 0, handY: 0 };
+      this.propArmAlpha = 0; this.propFizz = 0;
+      this.reaction = null; this.drinkFeedback = null;
       this.activeModelId = breedId;
     }
     if (breedId === 'dafeiyu') {
       this.catBreed = 'dafeiyu';
       this.customSkin = null;
-      catAudio.setPurrIntensity(0);
+      this.petAudio?.setPurrIntensity(0);
+    } else if (frogRig) {
+      // Frog rig: the skin supplies colours; reference artwork and soft deformation own the silhouette.
+      this.catBreed = 'naiwa';
+      this.customSkin = skin ? resolveCustomSkin(skin) : null;
+      this.naiwa.setSkin(this.customSkin);
     } else if ((breedId === 'black' || breedId === 'ragdoll') && (!skin || skin.builtin)) {
       this.catBreed = breedId;
       this.customSkin = null;
@@ -747,6 +796,58 @@ export class KuroCatEngine {
       ],
       poseLean: this.fishPose.lean + this.typingPose.lean * 70 + this.typingPose.yaw * 20,
       poseLift: this.fishPose.lift - this.typingPose.squash * 100 - this.typingPose.pitch * 20,
+    };
+  }
+
+  private buildNaiwaLayout(): NaiwaLayout {
+    const eyeNorm = (v: number, scale: number) => Math.max(-1, Math.min(1, v / scale));
+    const pawState = (paw: PawState): NaiwaPaw => ({
+      x: paw.pos.x,
+      y: paw.pos.y,
+      press: paw.mode === 'poke' ? 0.6 : 0,
+      active: paw.mode !== 'idle' || paw.idleWeight < 0.6,
+      mode: paw.mode,
+    });
+    return {
+      logicalW: this.logicalW,
+      logicalH: this.logicalH,
+      centerX: this.catCenterX,
+      baseY: this.kbCenterY - this.kbHeight * 0.43,
+      // Foreshortened low torso stays close to the desk, including wide keyboards.
+      bodyHeight: 244 + Math.max(0, this.kbWidth - 266) * 0.18,
+      breath: Math.sin(this.elapsed * 2.1),
+      bodyBob: this.bodyBob,
+      lean: this.spineLean * 0.5 + this.typingSway * 0.35,
+      hunch: Math.max(0, this.idlePose.hunch * 0.8 + this.typingHunch * 0.22),
+      tilt: this.idlePose.headTilt + this.faceTurnX * 0.004,
+      squint: Math.max(this.idlePose.squint, this.petEnergy * 0.8),
+      headTurn: eyeNorm(this.faceTurnX, 4),
+      eyeLookX: eyeNorm(this.eyeLookX, 7),
+      eyeLookY: eyeNorm(this.eyeLookY, 5.2),
+      leftPaw: pawState(this.leftPaw),
+      rightPaw: pawState(this.rightPaw),
+      footKey: { x: this.catTail.targetX, y: this.catTail.targetY - this.catTail.hover,
+        reach: this.catTail.reach, press: this.catTail.impactSquash,
+        side: this.catTail.targetX < this.catCenterX ? 'left' : 'right' },
+      poseHands: [],
+      poseLean: 0,
+      poseLift: 0,
+      drinkActive: this.drinker.phase !== 'rest',
+      drinkSip: this.drinker.phase === 'sip' ? 1 : this.drinker.phase === 'lift' ? 0.5 : 0,
+      drinkHandX: this.propPose.handX,
+      drinkHandY: this.propPose.handY,
+      drinkSide: this.getPropAnchor().side,
+      privacyMode: this.privacyMode,
+      petEnergy: this.petEnergy,
+      typingHeat: this.typingHunch,
+      anger: Math.max(this.annoyance, this.groundTail.amount),
+      groove: this.typingReactions.kind === 'groove' ? this.typingPose.amount : 0,
+      excitement: this.typingReactions.kind === 'excited' ? this.typingPose.amount : 0,
+      groundAmount: this.groundTail.amount,
+      groundLift: this.groundTail.lift,
+      seconds: this.elapsed,
+      idleKind: this.idleAction?.kind ?? null,
+      idleT: this.idleAction ? Math.min(1, this.idleAction.t / this.idleAction.duration) : 0,
     };
   }
 
@@ -1016,6 +1117,7 @@ export class KuroCatEngine {
   /** Render once for the library; never starts an animation or changes the live pet. */
   public async snapshot(skin: CatSkinConfig): Promise<string> {
     if (skin.id === 'dafeiyu') await this.dafeiyu.ready();
+    if (skin.modelProfile?.adapters.includes('canvas-naiwa-v1')) await this.naiwa.ready();
     this.setCatAppearance(skin.id, skin); this.setIdleAutoEnabled(false);
     this.update(1 / 60, 0); this.render();
     return this.canvas.toDataURL('image/png');
@@ -1038,6 +1140,8 @@ export class KuroCatEngine {
   }
 
   public stop(): void {
+    this.petAudio?.stopPetVoices();
+    this.petAudio?.setPurrIntensity(0);
     this.resetWakeReaction();
     this.endIdleAction();
     if (this.rafId !== null) cancelAnimationFrame(this.rafId);
@@ -1107,6 +1211,7 @@ export class KuroCatEngine {
   }
 
   private getLiveCurledPawPos(paw: PawState, breath: number): Vec2 {
+    if (this.catBreed === 'naiwa') return this.naiwa.getHandWorld(paw.side, this.buildNaiwaLayout());
     // Bent forearm elbow -> cute curled paw sitting near lower belly (matches 8.3s / 10.6s!)
     const sp = this.spinePoint(0.84, breath);
     const bob = Math.sin(this.elapsed * 12 + (paw.side === 'left' ? 0 : Math.PI)) * (1.5 + this.typingEnergy * 2.0);
@@ -1230,7 +1335,7 @@ export class KuroCatEngine {
 
     if (spec.id === 'space') {
       if (activelyMousing) {
-        chosen = this.rightPaw;
+        chosen = this.freePaw;
       } else {
         this.lastSpacePaw = this.lastSpacePaw === 'left' ? 'right' : 'left';
         chosen = this.lastSpacePaw === 'left' ? this.leftPaw : this.rightPaw;
@@ -1245,13 +1350,17 @@ export class KuroCatEngine {
       const rY = spec.rowY ?? spec.row;
       targetPoint = this.projectKeyboardPoint(spaceU, rY + 0.50);
     } else if (activelyMousing) {
-      chosen = this.rightPaw;
+      chosen = this.freePaw;
     } else if (screenKeyCol < splitCol) {
       chosen = this.leftPaw;
     } else {
       chosen = this.rightPaw;
     }
 
+    // The hand holding a drink stays attached; ordinary typing uses the free hand.
+    if (this.catBreed === 'naiwa' && this.drinker.phase !== 'rest' && chosen.side === this.getPropAnchor().side) {
+      chosen = chosen.side === 'left' ? this.rightPaw : this.leftPaw;
+    }
     const sideSign = chosen.side === 'left' ? -1 : 1;
     this.strikeRockVel += sideSign * (1.75 + this.typingEnergy * 1.25);
     if (!activelyMousing) {
@@ -1351,6 +1460,10 @@ export class KuroCatEngine {
     const paw = this.mousePaw;
     const other = paw === this.leftPaw ? this.rightPaw : this.leftPaw;
     if (other.mode === 'mouse') other.mode = 'idle';
+    if (this.catBreed === 'naiwa' && paw.mode !== 'mouse' && paw.mode !== 'poke') {
+      paw.pos = this.naiwa.getHandWorld(paw.side, this.buildNaiwaLayout());
+      paw.vel = { x: 0, y: 0 };
+    }
     paw.mode = 'mouse';
     if (squash > 0) paw.impactSquash = squash;
     paw.lastActiveAt = now;
@@ -1557,6 +1670,7 @@ export class KuroCatEngine {
           if (this.petStrokeCount >= REQUIRED_STROKES) {
             this.petEnergy = Math.min(1, this.petEnergy + dist * 0.015);
             this.calmSleepReaction();
+            if (this.catBreed === 'naiwa' && !this.privacyMode) this.petAudio?.playFrogSound('happy');
             if (this.idleAction?.kind === 'nap') this.interruptIdleAction();
           }
         }
@@ -1667,10 +1781,6 @@ export class KuroCatEngine {
     const anchor = this.getPropAnchor();
     const drinker = this.drinker;
     const pose = this.propPose;
-    const tiltForPhase =
-      drinker.phase === 'sip'
-        ? Math.sin(drinker.phaseProgress * Math.PI) * 0.5
-        : 0;
 
     ctx.save();
     if (pose.active) {
@@ -1682,7 +1792,7 @@ export class KuroCatEngine {
     drawProp(ctx, {
       kind: this.propConfig.kind,
       level: drinker.level,
-      tilt: tiltForPhase,
+      tilt: 0, // propPose already owns rotation; a second tilt breaks mouth/hand contacts.
       side: anchor.side,
       fizz: this.propFizz,
       time: this.elapsed,
@@ -1885,18 +1995,22 @@ export class KuroCatEngine {
     // Where the CUP LIP should touch the face — tracked live so it follows the lean.
     // The whale girl has her own rig, so ask her renderer where her mouth is.
     const mouth =
-      this.catBreed === 'dafeiyu'
-        ? this.dafeiyu.getMouthWorld(performance.now(), this.buildDaFeiYuLayout())
-        : this.getMouthPoint();
-    const lipX = mouth.x + dir * 10;
+      this.catBreed === 'naiwa'
+        ? this.naiwa.getMouthWorld(this.buildNaiwaLayout())
+        : this.catBreed === 'dafeiyu'
+          ? this.dafeiyu.getMouthWorld(performance.now(), this.buildDaFeiYuLayout())
+          : this.getMouthPoint();
+    const straw = this.propConfig.kind === 'boba';
+    const lipX = mouth.x + dir * (straw || this.catBreed === 'naiwa' ? 2 : 10);
     const lipY = mouth.y + 2;
-    const tiltMax = isEat ? 0.34 : 0.62;
+    const contact = propMouthContact(this.propConfig.kind);
+    const tiltMax = isEat ? 0.34 : straw ? 0.12 : 0.62;
     // Rotation for a given lift factor (negative when the cup leans in toward the cat).
     const tiltAt = (t: number) => -dir * tiltMax * t;
     // Origin that puts the rotated lip exactly on (lipX, lipY).
     const originFor = (rot: number) => ({
-      x: lipX - Math.sin(rot) * cupH,
-      y: lipY + Math.cos(rot) * cupH,
+      x: lipX - (Math.cos(rot) * contact.x - Math.sin(rot) * contact.y),
+      y: lipY - (Math.sin(rot) * contact.x + Math.cos(rot) * contact.y),
     });
 
     let x = a.x;
@@ -1937,7 +2051,7 @@ export class KuroCatEngine {
     const gripY = y + Math.cos(rot) * gripLocalY;
     const active = ph !== 'rest';
 
-    // Fast exponential follow (~same responsiveness as the mouse paw) instead of a slow lerp.
+    // Smooth reaching/releasing, but keep a closed grip pinned to the moving cup.
     let targetX = gripX;
     let targetY = gripY;
     if (ph === 'return' && p > 0.55) {
@@ -1949,6 +2063,9 @@ export class KuroCatEngine {
     if (!active) {
       this.propHand.x = shoulder.x;
       this.propHand.y = shoulder.y;
+    } else if (ph === 'lift' || ph === 'sip' || (ph === 'return' && p <= 0.55)) {
+      this.propHand.x = gripX;
+      this.propHand.y = gripY;
     } else {
       const k = 1 - Math.exp(-36 * dt);
       this.propHand.x += (targetX - this.propHand.x) * k;
@@ -2098,6 +2215,7 @@ export class KuroCatEngine {
 
   private beginSleepReaction(): void {
     if (!this.sleepReaction.start(this.elapsed)) return;
+    if (this.catBreed === 'naiwa' && !this.privacyMode) this.petAudio?.playFrogSound('surprise');
     this.typingReactions.reset(); this.catTail.active = false;
     this.catTail.heldVks.clear(); this.catTailHeldAt.clear();
     this.annoyance = 0.88; this.dizzy = 0;
@@ -2164,6 +2282,7 @@ export class KuroCatEngine {
     };
 
     if (this.idleAction) {
+      const previousT = this.idleAction.t / this.idleAction.duration;
       this.idleAction.t += dt;
       const t = Math.min(1, this.idleAction.t / this.idleAction.duration);
       // Envelope so every pose eases in and out instead of popping.
@@ -2171,6 +2290,15 @@ export class KuroCatEngine {
 
       if (this.catBreed === 'dafeiyu') {
         this.updateFishPose(t, envelope);
+      } else if (this.catBreed === 'naiwa') {
+        // Independent frog channels: never drive invisible cat ears, paws or tail.
+        const kind = this.idleAction.kind;
+        if (kind === 'nap') squintTarget = envelope;
+        const cues = kind === 'frogCroak' ? [0.10, 0.43, 0.76] : kind === 'frogHop' ? [0.70] : kind === 'bellyPat' ? [0.20, 0.52, 0.84] : [];
+        if (!this.privacyMode && cues.some(cue => previousT < cue && t >= cue)) {
+          this.petAudio?.playFrogSound(kind === 'frogCroak' ? 'croak' : 'stomp');
+          if (kind === 'frogHop') this.groundImpactAt = this.elapsed;
+        }
       } else {
         switch (this.idleAction.kind) {
         case 'stretch': {
@@ -2319,6 +2447,7 @@ export class KuroCatEngine {
       return;
     }
     const pool: IdleActionKind[] = ['cuddle', 'stretch', 'groom', 'wave', 'tilt', 'slowBlink', 'nap', 'nap'];
+    if (this.catBreed === 'naiwa') pool.push(...FROG_ACTIONS);
     if (this.propConfig.enabled && this.drinker.level > 0.05) pool.push('drink');
     const kind = pool[Math.floor(Math.random() * pool.length)];
     if (kind === 'drink') {
@@ -2605,7 +2734,10 @@ export class KuroCatEngine {
     this.elapsed += dt;
     this.lightEngine.advance(dt);
     this.groundTail = this.sleepReaction.sample(this.elapsed);
-    if (this.groundTail.impact) this.groundImpactAt = this.elapsed;
+    if (this.groundTail.impact) {
+      this.groundImpactAt = this.elapsed;
+      if (this.catBreed === 'naiwa' && !this.privacyMode) this.petAudio?.playFrogSound('stomp');
+    }
     if (this.groundTail.settled) {
       this.annoyance = this.dizzy = 0; this.angerSteam.length = 0;
       this.typingReactions.reset();
@@ -2619,8 +2751,10 @@ export class KuroCatEngine {
       if (drank) {
         this.wakeRendering(now);
         if (this.propConfig.kind === 'cola') this.propFizz = 1;
-        if (this.propConfig.kind === 'boba' || this.propConfig.kind === 'pudding') {
-          catAudio.setPurrIntensity(0.5);
+        if (this.catBreed === 'naiwa') {
+          if (!this.privacyMode) this.petAudio?.playFrogSound(this.propConfig.kind === 'cola' ? 'surprise' : 'happy');
+        } else if (this.catBreed !== 'dafeiyu' && (this.propConfig.kind === 'boba' || this.propConfig.kind === 'pudding')) {
+          this.petAudio?.setPurrIntensity(0.5);
         }
         this.spawnDrinkParticles(this.propConfig.kind, 18);
         this.showDrinkFeedback(this.propConfig.kind);
@@ -2836,8 +2970,8 @@ export class KuroCatEngine {
     else if (rx === 'lick') this.headTilt += Math.sin(this.elapsed * 8) * 0.025;
     const wantPrivacy = this.privacyMode ? 1 : 0;
     this.privacyClose += (wantPrivacy - this.privacyClose) * (1 - Math.exp(-14 * dt));
-    catAudio.setPurrIntensity(
-      this.catBreed !== 'dafeiyu' && !this.privacyMode && this.squintAmount > 0.25 ? this.squintAmount : 0,
+    this.petAudio?.setPurrIntensity(
+      this.catBreed !== 'dafeiyu' && this.catBreed !== 'naiwa' && !this.privacyMode && this.squintAmount > 0.25 ? this.squintAmount : 0,
     );
     if (this.catBreed === 'dafeiyu') {
       this.dafeiyu.update(dt, now, this.buildDaFeiYuLayout());
@@ -2974,6 +3108,8 @@ export class KuroCatEngine {
       const desiredY = b.targetY - age * 10;
       b.y += (desiredY - b.y) * (1 - Math.exp(-16 * dt));
     }
+
+    if (this.catBreed === 'naiwa') this.naiwa.update(dt, now, this.buildNaiwaLayout());
   }
 
   private latestHeldKeyFor(
@@ -3051,7 +3187,9 @@ export class KuroCatEngine {
       paw.target = this.getLiveCurledPawPos(paw, 0);
     } else if (paw.mode === 'idle') {
       const baseSp = this.spinePoint(1.0, 0);
-      paw.target = { x: baseSp.x + (paw.side === 'left' ? -19 : 19), y: baseSp.y };
+      paw.target = this.catBreed === 'naiwa'
+        ? this.naiwa.getHandWorld(paw.side, this.buildNaiwaLayout())
+        : { x: baseSp.x + (paw.side === 'left' ? -19 : 19), y: baseSp.y };
     }
 
     const wantIdle = paw.mode === 'idle' ? 1 : 0;
@@ -3119,6 +3257,27 @@ export class KuroCatEngine {
 
     const breath = Math.sin(this.elapsed * 2.1) * 1.0;
     const purrShift = this.squintAmount > 0.4 ? Math.sin(this.elapsed * 22) * 0.45 * this.squintAmount : 0;
+
+    if (this.catBreed === 'naiwa') {
+      const now = performance.now();
+      const layout = this.buildNaiwaLayout();
+      this.drawKeyboard(ctx);
+      this.naiwa.renderBody(ctx, now, layout);
+      this.drawProp(ctx);
+      this.drawMiniMouse(ctx);
+      this.naiwa.renderForeground(ctx, this.lastDt, now, layout);
+      this.drawParticles(ctx);
+      if (this.showKeyBubbles && !this.privacyMode) {
+        this.drawKeyBubbles(ctx);
+        this.drawMouseBadges(ctx);
+      }
+      this.drawDrinkFeedback(ctx);
+      this.drawSleepZzz(ctx);
+      this.drawAngerAndDizzy(ctx);
+      this.drawWakeReaction(ctx);
+      ctx.restore();
+      return;
+    }
 
     if (this.catBreed === 'dafeiyu') {
       const now = performance.now();
@@ -3194,13 +3353,16 @@ export class KuroCatEngine {
     if (this.privacyMode) return;
     const angry = this.sleepReaction.active(this.elapsed);
     const text = angry ? '还没睡够呢！' : this.elapsed < this.soothedUntil ? '好啦，原谅你了' :
-      !this.drinkFeedback && this.typingPose.amount > 0.35 ? ({ focus: '认真陪你打字', groove: '跟着节奏摇摆', excited: '越打越起劲！', grumpy: '爪爪忙不过来啦' }[this.typingReactions.kind!] ?? '') : '';
+      !this.drinkFeedback && this.typingPose.amount > 0.35 ? ({ focus: '认真陪你打字', groove: '跟着节奏摇摆', excited: '越打越起劲！', grumpy: this.catBreed === 'naiwa' ? '手忙脚乱啦' : '爪爪忙不过来啦' }[this.typingReactions.kind!] ?? '') : this.catBreed === 'naiwa' && this.idleAction ?
+        ({ frogHop: '蓄力——蹦！', frogCroak: '呱，陪你一会儿', bellyPat: '肚皮小鼓手' } as Record<string, string>)[this.idleAction.kind] ?? '' : '';
     if (text) drawPetCaption(ctx, text, this.catCenterX, Math.max(22, this.catTopY - 18), 16, angry);
     const age = this.elapsed - this.groundImpactAt;
     if (age >= 0 && age < 0.38) {
       const p = age / 0.38;
       const hip = this.spinePoint(0.84, 0);
-      const x = Math.min(this.logicalW - 24, hip.x + 137), y = this.catBaseY + 4;
+      const contacts = this.catBreed === 'naiwa' ? (['left', 'right'] as const).map(side => this.naiwa.getFootWorld(side, this.buildNaiwaLayout())) :
+        [{ x: Math.min(this.logicalW - 24, hip.x + 137), y: this.catBaseY + 4 }];
+      for (const { x, y } of contacts) {
       ctx.save(); ctx.globalAlpha = 1 - p;
       ctx.strokeStyle = '#f99c38'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.ellipse(x, y, 9 + p * 22, 3 + p * 5, 0, 0, Math.PI * 2); ctx.stroke();
@@ -3209,6 +3371,7 @@ export class KuroCatEngine {
         ctx.lineTo(x + side * (20 + p * 12), y - 12 - p * 12); ctx.stroke();
       }
       ctx.restore();
+      }
     }
   }
 

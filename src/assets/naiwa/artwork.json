@@ -1,0 +1,41 @@
+{
+  "source": "User-provided Naiwa turnaround and expression sheet",
+  "sourceSize": [
+    1536,
+    1024
+  ],
+  "bodyCrop": [
+    110,
+    30,
+    340,
+    340
+  ],
+  "bodyRect": [
+    -0.39,
+    -0.82,
+    0.78,
+    0.86
+  ],
+  "facePivot": [
+    0,
+    -0.653
+  ],
+  "eyes": [
+    [
+      -0.136,
+      -0.709
+    ],
+    [
+      0.126,
+      -0.709
+    ]
+  ],
+  "defaultPose": "seated",
+  "parts": [
+    "body",
+    "belly-mask",
+    "hand",
+    "foot"
+  ],
+  "notes": "Reference-derived body/hands/feet with continuous fluid arms and deformable cheeks. No ears or tail. Runtime recolors material zones; no external images in skin packages."
+}

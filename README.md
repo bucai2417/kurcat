@@ -2,11 +2,21 @@
 
 > **当前版本：1.0.0** · [项目仓库](https://github.com/bucai2417/kurcat) · [下载与发布记录](https://github.com/bucai2417/kurcat/releases) · [GitHub Actions 构建](#github-actions-build)
 
-轻量级 **Windows（Win10/11；Win7/8.1 实验包）/ macOS（10.15+ Apple Silicon & Intel）/ Linux（银河麒麟 KylinOS / Ubuntu / UOS）** 透明置顶桌面打字猫咪伴侣（开箱自带 **6 款手绘猫咪皮肤 + 🐳 大肥鱼（鲸鱼娘）**：经典小黑猫、暖奶茶布偶猫、大橘猫、三花猫、奶牛猫、暹罗猫、大肥鱼，支持**输密码自动闭眼/捂眼防偷窥**，并原生内置 **MCP 协议服务端**，支持用 AI 一句话定制或新增更多你自己的猫咪！），基于 **Tauri v2（Rust 全局原生钩子 + 内置 MCP 引擎 + HTML5 Canvas 2D + Three.js 3D）** 打造。桌面版支持透明窗口与全局键鼠监听；系统运行库要求以对应平台构建产物为准。
+轻量级 **Windows（Win10/11；Win7/8.1 实验包）/ macOS（10.15+ Apple Silicon & Intel）/ Linux（银河麒麟 KylinOS / Ubuntu / UOS）** 透明置顶桌面打字猫咪伴侣（开箱自带 **7 款猫咪皮肤 + 🐸 奶蛙 + 🐳 大肥鱼（鲸鱼娘）**：经典小黑猫、暖奶茶布偶猫、大橘猫、三花猫、奶牛猫、暹罗猫、奶猫、奶蛙、大肥鱼，支持**输密码自动闭眼/捂眼防偷窥**，并原生内置 **MCP 协议服务端**，支持用 AI 一句话定制或新增更多你自己的猫咪！），基于 **Tauri v2（Rust 全局原生钩子 + 内置 MCP 引擎 + HTML5 Canvas 2D + Three.js 3D）** 打造。桌面版支持透明窗口与全局键鼠监听；系统运行库要求以对应平台构建产物为准。
 
 DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，版本从 **1.0.0** 开始。程序检查更新和下载安装均使用 `bucai2417/kurcat` 的正式 Releases，仅识别 `DIY-Cat-` 开头的发布包，不把旧 KuroCat 4.x / 5.x 版本当成更新。已有设置目录、MCP 服务 ID `kurocat` 与 `.kurocat.json` 模型格式保留兼容。
 
-## 新增功能
+## 未发布更新（Unreleased）
+
+以下变更属于当前源码分支，安装包请以 GitHub Actions 和 Releases 实际产物为准；不改变已发布的 1.0.0 标签。
+
+- **奶蛙与奶猫内置**：奶猫沿用猫咪 2D / 3D 骨架；奶蛙使用专用 2D 适配器和参考图拆分素材，坐着操作键鼠。普通按键（包括空格）和鼠标由手完成，仅配置的原尾巴按键改成脚踩，双脚平时在两侧轻摆。
+- **柔软手臂与鼓脸表情**：奶蛙双臂随手掌位置弯曲、伸缩、转向并回弹，没有固定弯折的肘部。键鼠和杯子接触点独立约束。生气时脸部轮廓逐渐鼓起，眼皮压低遮住眼睛，配合噘嘴、脸红与腮部皱褶；安抚后逐渐回落。
+- **奶蛙专属行为**：鼓腮呱叫、蓄力小跳、拍肚皮、坐姿摆脚；起床气改为跺脚。合成呱声、开心声、惊讶声和跺脚声受“呼噜 / 呱声”开关控制，关闭立即停止，键鼠音效仍独立控制。
+- **导入与 MCP 骨架说明**：支持 `canvas-naiwa-v1` + `cat-v1` 的原奶蛙包；无 profile 的旧“naiwa”奶猫保持猫咪骨架。MCP 新增 `get_builtin_rigs`，列明 cat / naiwa / dafeiyu 可用模式、换肤字段、部件、动作与形变通道。当前没有 3D 奶蛙或任意 GLB 加载器。
+- **HTML 动作对照**：预览页提供参考图、双手敲键、点鼠标、原尾巴按键、鼓脸生气与停止动作按钮，关闭随机待机后仍可反复触发和停止手动动作。
+
+## 已有功能
 
 - **睡眠被打断后的起床气**：猫咪打盹时，键盘按下、鼠标按下或滚轮会把它吵醒。2D / 3D 都会生气拍尾，尾巴先抬起蓄力、快速落地、再回弹，落地点带冲击反馈，并显示清晰中文气泡。随机 **2–5 秒**恢复，继续输入不会延长；来回抚摸头部可提前安抚。普通移动鼠标不会吵醒。
 - **更清晰的互动反馈**：起床气、安抚、道具与连续打字使用高对比文字；同一时刻按优先级显示，避免文字重叠。隐私模式会清理并暂停这些输入反应。
@@ -14,7 +24,7 @@ DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，
 - **拖动与点击分离**：从猫咪或道具区域按住拖动；原地点击道具才会使用。增加释放、失焦与取消后的状态清理，Windows 拖动检查真实鼠标按键，更新提示只占用自身命中区域。
 - **会表达情绪的 3D 耳朵**：左右耳独立轻抖、朝向鼠标，侧耳听、打盹、抚摸和生气分别有平滑过渡的耳朵姿态。
 - **GitHub 模型发布**：默认读取 `bucai2417/kurcat/main/model-store/catalog.json`。UI 提供上传入口；将 `.kurocat.json` 上传到 `model-store/` 后，**Publish model catalog** 工作流自动校验并提交目录，回到模型库刷新即可安装。发布和下架步骤见 [模型包文档](docs/model-packs.md#发布-github-模型目录)。
-- **统一模型能力契约**：UI、MCP、OBS 根据适配器提供的能力选择 2D / 3D 模式和动作。版本 1 包含现有程序化猫咪的外观配置，继承其完整互动；任意 GLB / VRM / Live2D 骨架文件接入尚未实现。详细格式、动作列表及后续接入设计见 [模型包文档](docs/model-packs.md)，可试用 [薄荷云朵示例](model-store/mint-cloud.kurocat.json)。
+- **统一模型能力契约**：UI、MCP、OBS 根据适配器提供的能力选择 2D / 3D 模式和动作。版本 1 包含内置猫咪与奶蛙的外观配置，继承其完整互动；任意 GLB / VRM / Live2D 骨架文件接入尚未实现。详细格式、动作列表及后续接入设计见 [模型包文档](docs/model-packs.md)，可试用 [薄荷云朵示例](model-store/mint-cloud.kurocat.json)。
 
 ### 模型商城与创作
 
@@ -101,8 +111,8 @@ macOS 首次运行需在“系统设置 → 隐私与安全性”中为 **DIY-Ca
   </tr>
 </table>
 
-- **7 款内置皮肤（6 款猫咪 + 🐳 大肥鱼鲸鱼娘）+ MCP 无限自定义**：
-  - **🐈‍⬛ 经典小黑猫** / **🐱 暖奶茶布偶猫** / **🍊 大橘猫**（虎斑 `M` 额纹 + 环纹尾） / **🌸 三花猫** / **🐄 奶牛猫**（燕尾服 + 白手套） / **🤎 暹罗猫**（挖煤重点色） / **🐳 大肥鱼（鲸鱼娘）**（三肢同步键鼠 + 鲸鱼尾拍打右侧功能键带水花特效 + 稳定 4 表情与手速腮红），右键或系统托盘 0.1 秒一键无缝切换。
+- **9 款内置模型（7 款猫咪 + 🐸 奶蛙 + 🐳 大肥鱼鲸鱼娘）+ MCP 自定义**：
+  - **🐈‍⬛ 经典小黑猫** / **🐱 暖奶茶布偶猫** / **🍊 大橘猫**（虎斑 `M` 额纹 + 环纹尾） / **🌸 三花猫** / **🐄 奶牛猫**（燕尾服 + 白手套） / **🤎 暹罗猫**（挖煤重点色） / **😹 奶猫** / **🐸 奶蛙**（2D 坐姿、软手臂与鼓脸表情） / **🐳 大肥鱼（鲸鱼娘）**（三肢同步键鼠 + 鲸鱼尾拍打右侧功能键带水花特效 + 稳定 4 表情与手速腮红），右键或系统托盘 0.1 秒一键无缝切换。
   - **🙈 系统级输密码自动闭眼 / 捂眼防偷窥**：Windows（UI Automation `CurrentIsPassword` + Win32 `ES_PASSWORD`）与 macOS（`IsSecureEventInputEnabled` + `AXSecureTextField`）自动感知密码输入框，Rust 底层钩子直接拦截真实按键不外传——猫咪温柔闭眼、大肥鱼双手捂眼并覆盖键盘防窥遮罩，可右键/托盘随时开关。
   - **🤖 原生内置 MCP 服务（AI 一句话捏自己的猫）**：无需装 Node.js 或 Python，直接把自家猫照片发给 **Claude Desktop / Cursor / Antigravity / Windsurf / Cline**，AI 通过内置 MCP 工具自动生成橘猫（虎斑 `M` 额纹 + 环纹尾）、三花猫、奶牛猫、暹罗猫、英短蓝猫或带专属胎记斑块的独一无二桌宠，**0.4 秒热更新到桌面、无需重启**！
 - **65% / 108 键全尺寸可选 + 键盘正反视角可选 + 鼠标左右键独立识别**：
@@ -196,6 +206,7 @@ DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP
 
 | 工具名 | 功能说明 |
 | --- | --- |
+| `get_builtin_rigs` | 设计前查询 cat / naiwa / dafeiyu 的部件、可导入字段、动作映射、形变与模式限制 |
 | `get_model_contract` | 读取模型包/修订规则、适配器、动作与反应契约、默认 GitHub 目录和发布入口 |
 | `import_model_pack` | 导入 `package` 对象；`replace` / `activate` 默认 false，已有 ID 需显式替换 |
 | `export_model_pack` | 按 `id` 导出 JSON 内容，由客户端保存为 UTF-8 文件 |
@@ -204,7 +215,7 @@ DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP
 | `switch_resource` / `delete_resource_pack` | 按 `kind`、`mode` 切换键鼠；删除后回退至桌面主题 |
 | `list_cats` / `get_cat_schema` | 查看所有外观、当前模型、花色参数、斑点坐标与品种模板 |
 | `upsert_cat` / `switch_cat` / `delete_cat` | 新增或修改外观、切换模型、删除自定义外观或重置内置外观 |
-| `get_settings` / `update_settings` | 查询或修改模式、缩放、气泡、呼噜、项圈、耳机、尾巴控制、键鼠音效、置顶、穿透等设置 |
+| `get_settings` / `update_settings` | 查询或修改模式、缩放、气泡、呼噜 / 呱声、项圈、耳机、尾巴控制、键鼠音效、置顶、穿透等设置 |
 | `set_prop` / `get_prop` / `trigger_prop_sip` | 设置道具种类、位置、开关，查询配置，触发饮用 |
 | `get_desk_schema` / `list_desk_skins` | 查询键鼠主题参数与皮肤列表 |
 | `upsert_desk_skin` / `switch_desk_skin` / `delete_desk_skin` | 管理键鼠主题 |
@@ -214,7 +225,7 @@ DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP
 | `set_keycaps` / `get_keycaps` / `clear_keycaps` | 通过 `mode` 分开管理 2D / 3D 键帽，含顶面、侧面、图例与文字色 |
 | `set_lighting` / `get_lighting` | 设置与查询 RGB 效果、配色、亮度、速度和边缘灯带 |
 
-动作是否可用取决于当前模型与模式；请求被保存不代表动画已播放，隐私模式或正在进行的冲突动作可能阻止执行。`update_settings.inputSound` 包含 `keyboard`、`mouse`、`profile`、`volume`；`soundEnabled` 仅控制呼噜。模型包完整示例及扩展设计见 [接入文档](docs/model-packs.md)。
+动作是否可用取决于当前模型与模式；请求被保存不代表动画已播放，隐私模式或正在进行的冲突动作可能阻止执行。`update_settings.inputSound` 包含 `keyboard`、`mouse`、`profile`、`volume`；`soundEnabled` 控制猫咪呼噜与奶蛙合成声音，关闭立即停止；键盘和鼠标音效单独设置。模型包完整示例及扩展设计见 [接入文档](docs/model-packs.md)。
 
 自定义猫咪配置保存在：
 - **Windows**：`%APPDATA%\kuro-cat-pet\cats.json`
@@ -246,13 +257,15 @@ npm run dev
 然后打开 **<http://127.0.0.1:1420/>** —— 页面会自动安装一个 Tauri 预览垫片（`src/tauriPreview.ts`），用 localStorage 模拟设置读写与事件总线。你可以直接体验：
 
 - **右键猫咪**打开完整右键菜单（配列 / 外观 / 键帽 DIY / 灯光 / 道具 / 缩放）
-- **切换 7 款猫咪**：小黑猫 / 布偶猫 / 大肥鱼 / 大橘猫 / 三花猫 / 奶牛猫 / 暹罗猫
+- **切换 9 款模型**：小黑猫 / 布偶猫 / 大肥鱼 / 大橘猫 / 三花猫 / 奶牛猫 / 暹罗猫 / 奶猫 / 奶蛙
 - **🎨 键帽设计器**：点键、换色、加 Emoji、写自定义文字
 - **灯光**：9 种效果 + 单色/多选/随机配色 + 边缘灯带
 - **道具**：点杯子，猫会伸手把杯子端到嘴边喝一口，喷粒子、液面下降
 - **键盘/鼠标输入**：敲键盘、点鼠标左右键都能看到反应
 
 > 预览模式下设置会存进浏览器 localStorage，刷新后保留；桌面端图标 / 托盘 / 点击穿透等原生能力仍然需要真正打包。想重置预览状态可在 DevTools 执行 `localStorage.removeItem('kurocat-preview-v1')` 后刷新。
+
+奶蛙对照预览：`http://127.0.0.1:1420/harness.html?breed=builtin-naiwa&idle=0`；奶猫预览：`http://127.0.0.1:1420/harness.html?breed=builtin-milk-cat`。奶蛙页可展开参考图，对比双手敲键、鼠标、脚踩、生气鼓脸及道具动作。已有依赖时只需运行 `npm run dev`；不需要打包。
 
 另外还提供了一个参数化工装页：`http://127.0.0.1:1420/harness.html?layout=108&light=wave&mode=palette&edge=1&prop=coffee,right`，适合快速比对单点效果。
 

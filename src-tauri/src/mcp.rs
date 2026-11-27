@@ -32,6 +32,7 @@ const VALID_KEY_IDS: &[&str] = &[
 
 fn tool_definitions() -> Value {
     json!([
+        {"name":"get_builtin_rigs","description":"Discover actual built-in rigs BEFORE designing skins: cat (2D/3D), naiwa 奶蛙 (2D; seated hand typing/mouse use; feet replace tail keys, no tail/ears), dafeiyu 大肥鱼 (fixed 2D art, NOT skin-importable). Returns supported fields, parts, deformation channels (fluid arms, puffed cheeks), action labels, input mapping and future-3D limitations.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_resource_contract","description":"Get the versioned keyboard/mouse resource schema and supported 2D/3D modes; appearance-only packages inherit fixed interaction geometry.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"list_resources","description":"List installed custom keyboard/mouse packages and independent mode selections. Built-in themes remain available through desk tools.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"import_resource_pack","description":"Validate and install a DIY-Cat keyboard or mouse package. Existing IDs require explicit replace; package kind cannot change.","inputSchema":{"type":"object","required":["package"],"properties":{"package":{"type":"object"},"replace":{"type":"boolean","default":false}},"additionalProperties":false}},
@@ -40,7 +41,7 @@ fn tool_definitions() -> Value {
         {"name":"switch_resource","description":"Use an installed keyboard/mouse independently in 2D or 3D, without switching pet mode. Empty id restores the desk theme for that slot.","inputSchema":{"type":"object","required":["kind","mode","id"],"properties":{"kind":{"type":"string","enum":["keyboard","mouse"]},"mode":{"type":"string","enum":["2d","3d"]},"id":{"type":"string"}},"additionalProperties":false}},
         {
             "name": "get_model_contract",
-            "description": "Get model package version, renderer adapters, supported reactions, action labels, metadata/revision rules, default GitHub catalog, publishing links and explicit-update policy. Packages customize built-in procedural cats; raw GLB/VRM/Live2D rigs are not supported.",
+            "description": "Get model package version, renderer adapters, supported reactions, action labels, metadata/revision rules, default GitHub catalog, publishing links and explicit-update policy. Packages customize built-in cat (2D/3D) or naiwa (2D) rigs; raw GLB/VRM/Live2D rigs are not supported.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -49,7 +50,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "import_model_pack",
-            "description": "Validate and install a version 1 data-only cat model package. Optional profile.revision and description are preserved. Existing IDs require replace:true, including downgrades; built-in IDs are protected. Optionally activate with a compatible render mode.",
+            "description": "Validate and install a version 1 data-only cat or naiwa model package. Optional profile.revision and description are preserved. Existing IDs require replace:true, including downgrades; built-in IDs are protected. Optionally activate with a compatible render mode.",
             "inputSchema": {
                 "type": "object",
                 "required": [
@@ -282,14 +283,14 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "trigger_idle_action",
-            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tail tantrum; calm soothes it. An action may be ignored while privacy or an incompatible interaction is active.",
+            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tantrum (tail slap for cats, foot stomp for naiwa); calm soothes it. Naiwa additionally supports frogHop, frogCroak and bellyPat. An action may be ignored while privacy or an incompatible interaction is active.",
             "inputSchema": {
                 "type": "object",
                 "required": ["kind"],
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["drink", "stretch", "wave", "tilt", "slowBlink", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck", "tailGround", "calm"]
+                        "enum": ["drink", "stretch", "wave", "tilt", "slowBlink", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck", "tailGround", "calm", "frogHop", "frogCroak", "bellyPat", "sleep"]
                     }
                 }
             }
@@ -410,7 +411,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "update_settings",
-            "description": "Update live settings: model/render mode (falls back to a supported adapter), collar, headphones, tail keys, independent keyboard/mouse sound profiles, purring, window and keyboard layout preferences. Use dedicated tools for props, idle, mood and lighting.",
+            "description": "Update live settings: model/render mode (falls back to a supported adapter), collar, headphones, tail keys, independent keyboard/mouse sound profiles, pet sounds (purring/frog calls), window and keyboard layout preferences. Use dedicated tools for props, idle, mood and lighting.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -419,7 +420,7 @@ fn tool_definitions() -> Value {
                     "headphoneMode": {"type":"string","enum":["auto","on","off"]},
                     "tailKeyMode": {"type":"string","enum":["smart","custom","edge","off"]},
                     "tailKeyIds": {"type":"array","items":{"type":"string"}},
-                    "inputSound": {"type":"object","description":"Independent keyboard/mouse effects; soundEnabled controls purring.","properties":{"keyboard":{"type":"boolean"},"mouse":{"type":"boolean"},"profile":{"type":"string","enum":["linear","tactile","clicky","silent"]},"volume":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false},
+                    "inputSound": {"type":"object","description":"Independent keyboard/mouse effects; soundEnabled controls pet sounds (purring/frog calls).","properties":{"keyboard":{"type":"boolean"},"mouse":{"type":"boolean"},"profile":{"type":"string","enum":["linear","tactile","clicky","silent"]},"volume":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false},
                     "catBreed": { "type": "string" },
                     "scale": { "type": "number", "minimum": 0.2, "maximum": 1.5 },
                     "keyboardLayout": { "type": "string", "enum": ["65", "108"] },
@@ -490,6 +491,7 @@ fn execute_tool(name: &str, args: &Value, on_change: &dyn Fn()) -> Value {
             save_settings(&s); on_change(); ok_text(json!({"selected":s.desk_accessories}))
         },
         "get_model_contract" => ok_text(models::contract()),
+        "get_builtin_rigs" => ok_text(models::contract()["rigs"].clone()),
         "import_model_pack" => {
             let Some(package) = args.get("package") else { return err_text("Missing package object"); };
             match models::install(package.clone(), args["replace"].as_bool().unwrap_or(false)) {
@@ -969,7 +971,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
                     "name": SERVER_NAME,
                     "version": SERVER_VERSION
                 },
-                "instructions": "Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
+                "instructions": "First use get_builtin_rigs to discover skin-importable cat/naiwa rigs and fixed-art dafeiyu. Naiwa is 2D only, uses hands for typing/mouse/props and feet only for tail-key taps, and adds frogHop/frogCroak/bellyPat actions. Milk cat is a cat skin, not a frog. Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
             }))
         }
         "ping" => Ok(json!({})),

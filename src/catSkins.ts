@@ -1,3 +1,4 @@
+import companions from './builtinCompanions.json';
 export interface CatSpot {
   part: 'head' | 'body' | 'leftArm' | 'rightArm';
   x: number;
@@ -12,7 +13,7 @@ export interface CatSpot {
 export type CatPattern = 'solid' | 'bicolor' | 'tuxedo' | 'tabby' | 'calico' | 'siamese';
 
 export interface ModelProfile {
-  adapters: ('canvas-cat-v1' | 'three-cat-v1')[];
+  adapters: ('canvas-cat-v1' | 'canvas-naiwa-v1' | 'three-cat-v1')[];
   behaviorContract: 'cat-v1';
   author?: string;
   license?: string;
@@ -197,6 +198,7 @@ export function resolveCustomSkin(raw: CatSkinConfig): ResolvedSkin {
 }
 
 export const DEFAULT_BUILTIN_CATS: CatSkinConfig[] = [
+  ...companions as CatSkinConfig[],
   {
     id: 'black',
     name: '小黑猫',

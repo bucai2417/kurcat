@@ -3,7 +3,7 @@ import { parseModelFiles } from './modelImport';
 import type { CatSkinConfig } from './catSkins';
 import {
   MODEL_CONTRACT, DEFAULT_MODEL_CATALOG, MODEL_PUBLISH_PAGE, MODEL_GUIDE_PAGE,
-  fetchModelCatalog, normalizeCatalogUrl, modelActions, modelModes, modelInstallState,
+  fetchModelCatalog, normalizeCatalogUrl, modelActions, modelActionLabel, modelModes, modelInstallState,
   type ModelMode, type ModelPack, type ModelInstallState,
 } from './modelPack';
 interface LibraryHost {
@@ -41,11 +41,10 @@ export function setupModelLibrary(host: LibraryHost): () => void {
   });
   let pending: ModelPack | null = null; let busy = false; let deleteId: string | null = null;
   let catalog: ModelPack[] | null = null; let catalogSource = ''; let stamp = '';
-  const labels = MODEL_CONTRACT.actionLabels as Record<string, string>;
   source.value = DEFAULT_MODEL_CATALOG;
   try { const saved = localStorage.getItem(SOURCE_KEY); if (saved) source.value = normalizeCatalogUrl(saved); } catch { /* Use default if storage or saved URL is invalid. */ }
   const modes = (cat: CatSkinConfig) => modelModes(cat).map(m => m.toUpperCase()).join(' / ');
-  const actions = (cat: CatSkinConfig) => [...new Set(modelModes(cat).flatMap(mode => modelActions(cat, mode)))].map(a => labels[a] ?? a).join('、');
+  const actions = (cat: CatSkinConfig) => [...new Set(modelModes(cat).flatMap(mode => modelActions(cat, mode)))].map(a => modelActionLabel(cat, a)).join('、');
   function message(text: string, error = false): void {
     status.textContent = text; status.classList.toggle('model-error', error); host.resize();
   }
@@ -152,7 +151,7 @@ export function setupModelLibrary(host: LibraryHost): () => void {
   function update(): void {
     const { cat, mode } = host.current(); renderLists();
     el('model-current').textContent = cat ? cat.name + ' · ' + modes(cat) : '尚未加载模型';
-    el('model-capabilities').textContent = cat ? '当前模式动作：' + (modelActions(cat, mode).map(a => labels[a] ?? a).join('、') || '当前预览不支持此模型的动作') : '';
+    el('model-capabilities').textContent = cat ? '当前模式动作：' + (modelActions(cat, mode).map(a => modelActionLabel(cat, a, mode)).join('、') || '当前预览不支持此模型的动作') : '';
     el('panel-models').setAttribute('aria-busy', String(busy));
     for (const input of el('panel-models').querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>('button, input, select')) input.disabled = busy || input.dataset.unavailable === 'true';
     exportBtn.disabled = busy || !cat || cat.id === 'dafeiyu';

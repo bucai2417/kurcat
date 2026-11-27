@@ -14,7 +14,7 @@ registerHooks({
     return next(specifier, context);
   },
   load(url, context, next) {
-    if (['modelContract.json', 'resourceContract.json'].some(name => url === new URL(name, src).href)) {
+    if (['modelContract.json', 'resourceContract.json', 'builtinCompanions.json'].some(name => url === new URL(name, src).href)) {
       return { format: 'module', shortCircuit: true, source: 'export default ' + readFileSync(fileURLToPath(url), 'utf8') + ';' };
     }
     if (url.startsWith(src) && url.endsWith('.ts')) {

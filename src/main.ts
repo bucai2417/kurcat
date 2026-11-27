@@ -9,7 +9,7 @@ const embedded = isPreview && !new URLSearchParams(location.search).has('desktop
 import './style.css';
 import { PetGesture } from './petGesture';
 import { SettingsSync } from './settingsSync';
-import { modelActions, modelMode, modelModes } from './modelPack';
+import { modelActions, modelActionLabel, modelMode, modelModes } from './modelPack';
 import { setupModelLibrary } from './modelLibrary';
 import { setupResourceLibrary } from './resourceLibrary';
 import { parseResourcePack, composeDeskSkin, resourceSlot, type ResourcePack, type ResourceSelections } from './resourcePack';
@@ -917,7 +917,11 @@ function syncMenuUI(): void {
     renderStatus.textContent = '3D 加载失败，当前显示 2D 兼容预览。请检查显卡或 WebGL 支持后重启；3D 专属动作暂不可用。';
   }
   const allowedActions = modelActions(activeCat, webgl3dUnavailable ? '2d' : effectiveMode());
-  document.querySelectorAll<HTMLButtonElement>('[data-idleaction]').forEach(btn => { btn.hidden = !allowedActions.includes(btn.dataset.idleaction ?? ''); });
+  document.querySelectorAll<HTMLButtonElement>('[data-idleaction]').forEach(btn => {
+    const action = btn.dataset.idleaction ?? '';
+    btn.hidden = !allowedActions.includes(action);
+    btn.textContent = modelActionLabel(activeCat, action, webgl3dUnavailable ? '2d' : effectiveMode());
+  });
   syncModelLibrary();
   syncResourceLibrary();
   const keycapHint = document.getElementById('kce-hint');

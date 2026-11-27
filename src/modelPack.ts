@@ -24,9 +24,15 @@ export function parseModelPack(value: unknown): ModelPack {
   if (!record(value) || value.format !== contract.format || value.version !== 1) throw Error('需要版本 1 的 .kurocat.json 模型包');
   if (new TextEncoder().encode(JSON.stringify(value)).length > contract.maxBytes) throw Error('模型包不能超过 256 KB');
   const p = value.profile;
-  if (!record(p) || p.behaviorContract !== 'cat-v1' || !Array.isArray(p.adapters) || p.adapters.length < 1 || p.adapters.length > 2 ||
-      new Set(p.adapters).size !== p.adapters.length || p.adapters.some(a => typeof a !== 'string' || !Object.hasOwn(contract.adapters, a))) throw Error('不支持的模型适配器或行为版本');
-  const profile: ModelProfile = { adapters: [...p.adapters], behaviorContract: 'cat-v1' };
+  if (!record(p)) throw Error('缺少 profile 模型配置');
+  if (p.behaviorContract !== contract.behaviorContract) throw Error('不支持的行为版本：' + String(p.behaviorContract) + '；当前支持 ' + contract.behaviorContract);
+  if (!Array.isArray(p.adapters) || p.adapters.length < 1 || p.adapters.length > 2) throw Error('profile.adapters 需要 1–2 个适配器');
+  const supported = Object.keys(contract.adapters);
+  const unknown = p.adapters.filter(a => typeof a !== 'string' || !Object.hasOwn(contract.adapters, a));
+  if (unknown.length) throw Error('不支持的模型适配器：' + unknown.map(String).join('、') + '。当前支持：' + supported.join('、') + '。请检查拼写或更新 DIY-Cat；奶蛙目前仅支持 2D。');
+  const adapters = p.adapters as ModelProfile['adapters'];
+  if (new Set(adapters.map(a => contract.adapters[a].mode)).size !== adapters.length) throw Error('同一个 2D/3D 模式只能声明一个适配器');
+  const profile: ModelProfile = { adapters: [...adapters], behaviorContract: 'cat-v1' };
   for (const k of ['author', 'license'] as const) if (p[k] != null) profile[k] = text(p[k], k, 100);
   if (p.revision != null) {
     if (!Number.isSafeInteger(p.revision) || Number(p.revision) < 1 || Number(p.revision) > 2147483647) throw Error('模型修订号需要 1–2147483647 的整数');
@@ -77,7 +83,10 @@ export function modelMode(cat: CatSkinConfig | undefined, preferred: ModelMode):
 export function modelActions(cat: CatSkinConfig | undefined, preferred: ModelMode): string[] {
   if (!modelModes(cat).includes(preferred)) return [];
   if (cat?.id === 'dafeiyu') return contract.specialModels.dafeiyu.actions;
-  return contract.adapters[preferred === '2d' ? 'canvas-cat-v1' : 'three-cat-v1'].actions;
+  const adapters = cat?.modelProfile?.adapters ?? ['canvas-cat-v1', 'three-cat-v1'];
+  const adapter = adapters.find(a => contract.adapters[a]?.mode === preferred)
+    ?? (preferred === '2d' ? 'canvas-cat-v1' : 'three-cat-v1');
+  return contract.adapters[adapter].actions;
 }
 export function exportModelPack(cat: CatSkinConfig): ModelPack {
   if (cat.id === 'dafeiyu') throw Error('大肥鱼使用专用绘制器，暂不支持导出为猫咪模型包');
@@ -152,4 +161,16 @@ export function modelInstallState(pack: ModelPack, installed: CatSkinConfig[]): 
     if (b.profile.revision < a.profile.revision) return 'local-newer';
   } catch { /* Legacy custom skins can be replaced explicitly. */ }
   return 'different';
+}
+
+export function modelRig(cat?: CatSkinConfig, preferred: ModelMode = '2d'): keyof typeof contract.rigs {
+  if (cat?.id === 'dafeiyu') return 'dafeiyu';
+  const mode = modelMode(cat, preferred);
+  const adapter = cat?.modelProfile?.adapters.find(a => contract.adapters[a]?.mode === mode);
+  return adapter ? contract.adapters[adapter].rig as keyof typeof contract.rigs : 'cat';
+}
+export function modelActionLabel(cat: CatSkinConfig | undefined, action: string, mode: ModelMode = '2d'): string {
+  const rig = contract.rigs[modelRig(cat, mode)];
+  const overrides = 'actionLabels' in rig ? rig.actionLabels as Record<string, string> : {};
+  return overrides[action] ?? (contract.actionLabels as Record<string, string>)[action] ?? action;
 }

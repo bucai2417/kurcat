@@ -156,7 +156,8 @@ pub fn sanitize_cat_id(raw: &str) -> String {
 }
 
 pub fn builtin_cats() -> Vec<CatSkinConfig> {
-    vec![
+    let mut cats: Vec<CatSkinConfig> = serde_json::from_str(include_str!("../../src/builtinCompanions.json")).expect("bundled companions");
+    cats.extend(vec![
         CatSkinConfig {
             model_profile: None,
             id: "black".to_string(),
@@ -465,7 +466,8 @@ pub fn builtin_cats() -> Vec<CatSkinConfig> {
             accent_side_color: Some("#2563eb".to_string()),
             spots: vec![],
         },
-    ]
+    ]);
+    cats
 }
 
 pub fn load_custom_cats() -> Vec<CatSkinConfig> {
@@ -545,6 +547,8 @@ pub fn cat_exists(id: &str) -> bool {
 
 pub fn cat_schema_guide() -> serde_json::Value {
     serde_json::json!({
+        "rigs": crate::models::contract()["rigs"].clone(),
+        "rigGuide": "Call get_builtin_rigs before designing a skin. Cat supports canvas-cat-v1/three-cat-v1; naiwa requires canvas-naiwa-v1 and behaviorContract cat-v1. Dafeiyu is fixed art, not importable. Rig identity is NOT inferred from id or name. Frog has no ears/tail: ordinary keys (including space) and mouse use fluid arms/hands; only configured tail keys and tailGround use feet. Angry cheeks inflate smoothly. Prefer import_model_pack for validation and explicit conflict handling.",
         "description": "DIY-Cat Custom Cat Skin Schema. Pass any custom cat JSON to upsert_cat (with activate: true) to immediately add and render it live on the user's desktop!",
         "patterns": {
             "solid": "Single coat color (e.g., British Shorthair blue, white Persian, golden chinchilla, black cat)",
