@@ -352,7 +352,7 @@
       "inputMapping": {
         "keyboard": "双手敲键；仅原尾巴按键映射为脚踩（沿用 smart/custom/edge/off 设置）",
         "mouse": "手臂、掌心和指尖连续形变，掌心随接触方向转动，指尖轻压鼠标；持物手优先握道具",
-        "sleep": "nap 映射为伏到键盘上睡觉；输入吵醒后 tailGround 映射为双脚跺地，抚摸或 2–5 秒后安抚",
+        "sleep": "nap 映射为坐姿打盹与嘴角流口水；输入吵醒后 tailGround 映射为双脚跺地，抚摸或 2–5 秒后安抚",
         "petting": "眯眼 + 爱心 + 安抚（无专属音效）",
         "typing": [
           "专注敲键",
@@ -365,7 +365,7 @@
         "tailGround": "跺脚抗议",
         "groom": "揉揉脸",
         "cuddle": "抱肚撒娇",
-        "nap": "趴键盘睡觉"
+        "nap": "坐着打盹 · 流口水"
       },
       "sounds": [],
       "future3d": {
@@ -379,7 +379,7 @@
           "footContactLeft",
           "footContactRight"
         ],
-        "notes": "后续可复用归一化 lift/squash/lean/tilt/sleep/gaze/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂、掌心与手指需要连续形变，脸颊只在嘴边局部膨胀，sleep 需要伏到键盘与平滑起身。当前不能导入 three-naiwa-v1 或 GLB。",
+        "notes": "后续可复用归一化 lift/squash/lean/tilt/sleep/drool/gaze/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂、掌心与手指需要连续形变，脸颊只在嘴边局部膨胀，sleep 保持坐姿，drool 随睡意出现、醒来收回。Blender 建模初版位于 art/naiwa/，含 64 骨骼和 7 段动作，可在 naiwa3d.html 独立预览；桌宠模型库当前不能导入 three-naiwa-v1 或 GLB。",
         "designDoc": "docs/naiwa-3d-design.md"
       },
       "notes": "不通过 ID/名称猜测骨架；profile.adapters 必须包含 canvas-naiwa-v1。无耳、无尾，猫咪花纹/斑点字段不会绘制。",
@@ -402,7 +402,7 @@
         ],
         "renderer": "src/naiwaRenderer.ts",
         "armSurface": "src/naiwaDeform.ts",
-        "sleep": "参考图坐姿与低矮宽趴姿连续混合，前臂向内摊放、下巴靠近键盘、闭眼呼吸；结束或打断时平滑恢复"
+        "sleep": "保持参考图坐姿，缓慢点头、闭眼呼吸、嘴角流口水；结束或打断时平滑恢复"
       },
       "soundNotes": "奶蛙互动保持静音；键盘和鼠标音效由独立开关控制。"
     }

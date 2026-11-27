@@ -1,0 +1,175 @@
+{
+  "file": "naiwa.glb",
+  "bytes": 6831844,
+  "meshCount": 11,
+  "vertexCount": 67198,
+  "triangleCount": 132256,
+  "embeddedImages": [
+    {
+      "width": 2048,
+      "height": 1024
+    }
+  ],
+  "bones": 64,
+  "clips": {
+    "idle": {
+      "seconds": 4,
+      "channels": 199,
+      "largestVertexStep": 0.03668,
+      "largestStepFrame": 65,
+      "largestStepPoint": [
+        0.19401587842971002,
+        2.1816701610320766,
+        0.281993513415044
+      ],
+      "min": [
+        -0.8958914343052151,
+        -0.07045132738954352,
+        -0.5532302874749708
+      ],
+      "max": [
+        0.8917169493026763,
+        2.40883157761901,
+        1.0868958100319808
+      ]
+    },
+    "typing": {
+      "seconds": 3,
+      "channels": 199,
+      "largestVertexStep": 0.04248,
+      "largestStepFrame": 52,
+      "largestStepPoint": [
+        0.19499999284744263,
+        2.2282268023598486,
+        0.25552117671763613
+      ],
+      "min": [
+        -0.895886692979094,
+        -0.07045132689139014,
+        -0.5530511321197422
+      ],
+      "max": [
+        0.8916977732325584,
+        2.40883157761901,
+        1.0868698839608402
+      ]
+    },
+    "mouse": {
+      "seconds": 3,
+      "channels": 199,
+      "largestVertexStep": 0.04248,
+      "largestStepFrame": 52,
+      "largestStepPoint": [
+        0.19499999284744263,
+        2.228226802359869,
+        0.25552117671762486
+      ],
+      "min": [
+        -1.14460073043064,
+        -0.07045132689139014,
+        -0.5530511321197422
+      ],
+      "max": [
+        0.8916977732325584,
+        2.40883157761901,
+        1.0868689411724886
+      ]
+    },
+    "sway": {
+      "seconds": 5,
+      "channels": 199,
+      "largestVertexStep": 0.04288,
+      "largestStepFrame": 81,
+      "largestStepPoint": [
+        0.18824843571027985,
+        2.191064622191596,
+        0.2807558813527001
+      ],
+      "min": [
+        -0.8958913521275763,
+        -0.07045132721016929,
+        -0.553270900977571
+      ],
+      "max": [
+        0.8917169697950711,
+        2.40883157761901,
+        1.0875328357866108
+      ]
+    },
+    "wave": {
+      "seconds": 4,
+      "channels": 199,
+      "largestVertexStep": 0.11517,
+      "largestStepFrame": 22,
+      "largestStepPoint": [
+        0.9699011278013815,
+        1.5802115444853784,
+        0.6715616318956712
+      ],
+      "min": [
+        -0.8958866921255509,
+        -0.07045132738954352,
+        -0.5530540824679246
+      ],
+      "max": [
+        1.621622654539785,
+        2.40883157761901,
+        1.0868698985049046
+      ]
+    },
+    "nap": {
+      "seconds": 6,
+      "channels": 199,
+      "largestVertexStep": 0.02488,
+      "largestStepFrame": 145,
+      "largestStepPoint": [
+        0.12573129007993758,
+        1.8970070688134961,
+        0.2890929075319273
+      ],
+      "min": [
+        -0.8963393789294066,
+        -0.07045132689139173,
+        -0.5530511321292056
+      ],
+      "max": [
+        0.8919464948471832,
+        2.408976727991251,
+        1.0868689411724886
+      ]
+    },
+    "angry": {
+      "seconds": 3,
+      "channels": 199,
+      "largestVertexStep": 0.04285,
+      "largestStepFrame": 29,
+      "largestStepPoint": [
+        -0.5843747183509819,
+        0.05314586637022893,
+        0.5196193792480351
+      ],
+      "min": [
+        -0.8961168871411507,
+        -0.07045131513412559,
+        -0.5530511321197422
+      ],
+      "max": [
+        0.8919162220586534,
+        2.40883157761901,
+        1.0918297916659547
+      ]
+    }
+  },
+  "checks": [
+    "embedded PNG integrity and UV/material binding (no GPU rendering)",
+    "normalized weights",
+    "64-bone skin",
+    "required sockets",
+    "7 named clips and durations",
+    "finite sampled deformation at 30 fps",
+    "bounded frame-to-frame motion",
+    "sleep eyelid closure and drool",
+    "idle drool reset",
+    "no studio camera/light"
+  ]
+}

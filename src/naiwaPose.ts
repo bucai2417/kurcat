@@ -27,8 +27,10 @@ export interface NaiwaPose {
   cheeks: number;
   mouthOpen: number;
   bellyPat: number;
-  /** Weight of the supported, forward-lying keyboard sleep pose. */
+  /** Weight of seated dozing; feet stay planted and the body never folds flat. */
   sleep: number;
+  /** Mouth-corner saliva grows only after the eyes have closed. */
+  drool: number;
   /** Eye lead for curiosity gestures; the body follows a little later. */
   gaze: number;
   hands: { left: FrogPoint; right: FrogPoint };
@@ -42,7 +44,7 @@ export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
   const t = clamp(input.progress);
   const envelope = smooth(t / 0.16) * smooth((1 - t) / 0.18);
   const p: NaiwaPose = {
-    lift: 0, squash: 0, lean: 0, tilt: 0, lids: 0, cheeks: 0, mouthOpen: 0, bellyPat: 0, sleep: 0, gaze: 0,
+    lift: 0, squash: 0, lean: 0, tilt: 0, lids: 0, cheeks: 0, mouthOpen: 0, bellyPat: 0, sleep: 0, drool: 0, gaze: 0,
     hands: { left: { x: -0.26, y: 0.075 }, right: { x: 0.26, y: 0.075 } },
     feet: { left: { x: -0.30, y: 0.015 }, right: { x: 0.30, y: 0.015 } },
   };
@@ -129,16 +131,15 @@ export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
     case 'tilt': p.tilt = 0.14 * envelope; break;
     case 'slowBlink': p.lids = Math.pow(Math.sin(t * Math.PI), 2); break;
     case 'nap': {
-      // Hands brace first, then the body slumps forward onto the keyboard.
-      // A long plateau leaves time to breathe; natural waking reverses the fold.
-      p.sleep = smooth(t / .24) * smooth((1 - t) / .20);
+      // Keep the seated silhouette and floor contacts. A slow nod accompanies
+      // breathing; drool starts after settling and retracts before waking.
+      p.sleep = smooth(t / .22) * smooth((1 - t) / .20);
       p.lids = smooth(t / .13) * smooth((1 - t) / .12);
-      hand('left', -.23, .045, smooth(t / .14) * smooth((1 - t) / .25));
-      hand('right', .23, .045, smooth(t / .14) * smooth((1 - t) / .25));
-      p.feet.left.x += (-.34 - p.feet.left.x) * p.sleep;
-      p.feet.left.y += (-.025 - p.feet.left.y) * p.sleep;
-      p.feet.right.x += (.34 - p.feet.right.x) * p.sleep;
-      p.feet.right.y += (.065 - p.feet.right.y) * p.sleep;
+      p.drool = smooth((t - .20) / .16) * smooth((.94 - t) / .18);
+      p.squash = p.sleep * (.012 + .008 * (1 + Math.sin(input.seconds * 1.5)));
+      p.lean = Math.sin(input.seconds * .85) * p.sleep * .018;
+      hand('left', -.25, .065, p.sleep);
+      hand('right', .25, .065, p.sleep);
       break;
     }
   }

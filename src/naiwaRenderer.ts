@@ -3,7 +3,7 @@
  */
 import artwork from './assets/naiwa/artwork.json';
 import type { ResolvedSkin } from './catSkins';
-import { naiwaArtwork, naiwaSleepArtwork, readyNaiwaArtwork } from './naiwaArtwork';
+import { naiwaArtwork, readyNaiwaArtwork } from './naiwaArtwork';
 import { deformNaiwaArm, naiwaCheekVolumes, type NaiwaRibbonPoint } from './naiwaDeform';
 
 export interface NaiwaPaw {
@@ -134,12 +134,13 @@ export class NaiwaRenderer {
   private initialized = false;
   private poseKind: string | undefined;
   private poseSeconds = 0;
-  private poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0, gaze: 0 };
+  private poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0, drool: 0, gaze: 0 };
   public ready(): Promise<void> { return readyNaiwaArtwork(); }
   public setSkin(skin: ResolvedSkin | null): void { this.colors = palette(skin); }
   public resetContacts(): void {
     this.initialized = false; this.poseKind = undefined;
-    this.poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0, gaze: 0 };
+    this.pose.drool = 0;
+    this.poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0, drool: 0, gaze: 0 };
     this.expression = { anger: 0, cheeks: 0 };
     for (const side of SIDES) {
       this.footContacts[side].weight = 0; this.arms[side].lag = { x: 0, y: 0 };
@@ -147,7 +148,7 @@ export class NaiwaRenderer {
     }
   }
   public onPrivacyModeChanged(active: boolean): void {
-    if (active) { this.lids = 1; this.expression = { anger: 0, cheeks: 0 }; }
+    if (active) { this.pose.drool = 0; this.poseBlend.drool = 0; this.lids = 1; this.expression = { anger: 0, cheeks: 0 }; }
   }
 
   private transform(l: NaiwaLayout) {
@@ -155,8 +156,7 @@ export class NaiwaRenderer {
     const idleBob = l.drinkActive || l.privacyMode ? 0 : Math.sin(l.seconds * 2.1) * 0.003 + l.bodyBob / l.bodyHeight;
     const reach = l.drinkActive ? 0 : Math.max(this.footContacts.left.weight, this.footContacts.right.weight);
     const turn = l.drinkActive ? 0 : this.footContacts.right.weight - this.footContacts.left.weight;
-    // The front prone artwork lowers the torso and head together. Keep world
-    // anchors in the same frame so hands can brace on the keyboard throughout.
+    // Seated sleep shares the same silhouette, shoulders and feet as waking.
     const sleep = clamp(this.pose.sleep), breath = Math.sin(l.seconds * 1.7) * sleep * .003;
     return { x: l.centerX - (turn * .045 + sleep * .012) * l.bodyHeight,
       y: l.baseY + ((idleBob + l.hunch * .012) * (1 - sleep) - this.pose.lift + sleep * .015) * l.bodyHeight,
@@ -180,7 +180,7 @@ export class NaiwaRenderer {
   }
   private face(l: NaiwaLayout) {
     const sleep = clamp(this.pose.sleep);
-    return { x: (l.drinkActive ? 0 : l.headTurn * 0.012) - sleep * .014, y: -0.653 + sleep * .588,
+    return { x: (l.drinkActive ? 0 : l.headTurn * 0.012) - sleep * .014, y: -0.653 + sleep * .008,
       angle: 0 };
   }
   public getMouthWorld(l: NaiwaLayout): FrogPoint {
@@ -198,13 +198,14 @@ export class NaiwaRenderer {
       stomp: l.groundAmount, stompLift: l.groundLift, drinking: l.drinkActive, privacy: l.privacyMode });
     const kind = l.privacyMode ? 'privacy' : l.drinkActive ? 'drink' : l.idleKind ?? 'rest';
     const dt = Math.max(0, Math.min(0.1, l.seconds - this.poseSeconds));
-    for (const key of ['lift', 'squash', 'lean', 'tilt', 'sleep', 'gaze'] as const) {
+    for (const key of ['lift', 'squash', 'lean', 'tilt', 'sleep', 'drool', 'gaze'] as const) {
       if (this.poseKind !== undefined && kind !== this.poseKind) this.poseBlend[key] = this.pose[key] - next[key];
       // Preserve the current body pose when a hop/gesture is interrupted. Mouth
       // solving and rendering can both sample a frame without advancing twice.
       this.poseBlend[key] *= Math.exp(-(key === 'sleep' ? 8 : 16) * dt);
       next[key] += this.poseBlend[key];
     }
+    if (l.privacyMode) { next.drool = 0; this.poseBlend.drool = 0; }
     this.pose = next; this.poseKind = kind; this.poseSeconds = l.seconds;
   }
   public update(dt: number, now: number, l: NaiwaLayout): void {
@@ -243,13 +244,10 @@ export class NaiwaRenderer {
       const contact = paw.active && (paw.mode === 'poke' || paw.mode === 'mouse');
       const sign = side === 'left' ? -1 : 1;
       const sleep = clamp(this.pose.sleep);
-      const brace = this.toLocal({ x: l.centerX + l.bodyHeight * sign * .23,
-        y: l.baseY + l.bodyHeight * .045 }, l);
       const resting = this.pose.hands[side];
       const handTarget = holding
         ? this.toLocal({ x: l.drinkHandX, y: l.drinkHandY }, l)
-        : contact ? this.toLocal(paw, l) : { x: resting.x + (brace.x - resting.x) * sleep,
-          y: resting.y + (brace.y - resting.y) * sleep };
+        : contact ? this.toLocal(paw, l) : resting;
       const rest = this.pose.feet[side];
       const footRest = this.toWorld(rest, l);
       const contactState = this.footContacts[side];
@@ -289,8 +287,8 @@ export class NaiwaRenderer {
       end: this.toWorld(chain.end, l), reachable: chain.reachable };
   }
   private shoulder(side: Side): FrogPoint {
-    const sleep = clamp(this.pose.sleep), sign = side === 'left' ? -1 : 1;
-    return { x: sign * (.24 + sleep * .10), y: -.43 + sleep * .30 };
+    const sign = side === 'left' ? -1 : 1;
+    return { x: sign * .24, y: -.43 };
   }
   private limb(side: Side, limb: 'arm' | 'leg') {
     const sign = side === 'left' ? -1 : 1;
@@ -381,31 +379,10 @@ export class NaiwaRenderer {
 
   /** Keep the source silhouette and its lighting intact; cheeks are local face volumes. */
   private drawBodyArtwork(ctx: CanvasRenderingContext2D): boolean {
-    const sleep = clamp(this.pose.sleep);
-    const image = sleep > 0 ? naiwaSleepArtwork(this.colors, sleep) : naiwaArtwork('body', this.colors);
+    const image = naiwaArtwork('body', this.colors);
     if (!image) return false;
-    // Blend in an isolated surface so the torso never becomes see-through.
-    const [ax, ay, aw, ah] = artwork.bodyRect, [bx, by, bw, bh] = artwork.proneRect;
-    const left = ax + (bx - ax) * sleep, width = aw + (bw - aw) * sleep;
-    const top = ay + (by - ay) * sleep, height = ah + (bh - ah) * sleep;
-    if (sleep > 0 && sleep < 1) {
-      // A solid interpolated boundary hides the two source outlines. Filling the
-      // new skin area first also prevents background showing at unequal edges.
-      const contour = artwork.sleepContours.body.map((row, i) => {
-        const prone = artwork.sleepContours.prone[i];
-        return { y: top + (row[0] + (prone[0] - row[0]) * sleep) * height,
-          left: left + (row[1] + (prone[1] - row[1]) * sleep) * width,
-          right: left + (row[2] + (prone[2] - row[2]) * sleep) * width };
-      });
-      ctx.save(); ctx.beginPath(); ctx.moveTo(contour[0].left, contour[0].y);
-      for (const point of contour.slice(1)) ctx.lineTo(point.left, point.y);
-      for (const point of contour.slice().reverse()) ctx.lineTo(point.right, point.y);
-      ctx.closePath(); ctx.clip();
-      const skin = ctx.createLinearGradient(0, top, 0, top + height);
-      skin.addColorStop(0, css(this.colors.light)); skin.addColorStop(.55, css(this.colors.body));
-      skin.addColorStop(1, css(this.colors.shade)); ctx.fillStyle = skin; ctx.fill();
-      ctx.drawImage(image, left, top, width, height); ctx.restore();
-    } else ctx.drawImage(image, left, top, width, height);
+    const [x, y, width, height] = artwork.bodyRect;
+    ctx.drawImage(image, x, y, width, height);
     return true;
   }
 
@@ -418,7 +395,7 @@ export class NaiwaRenderer {
     ctx.save(); this.applyRoot(ctx, l); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     // Hind limbs are folded behind the torso, visibly joined at the hips.
     for (const side of SIDES) {
-      ctx.save(); ctx.globalAlpha = 1 - clamp(this.pose.sleep);
+      ctx.save(); ctx.globalAlpha = 1;
       this.drawLimb(ctx, side, 'leg'); ctx.restore();
     }
     if (!this.drawBodyArtwork(ctx)) {
@@ -450,7 +427,7 @@ export class NaiwaRenderer {
     }
     this.drawFace(ctx, l);
     for (const side of SIDES) if (this.footContacts[side].weight <= 0.03) {
-      ctx.save(); ctx.globalAlpha = 1 - clamp(this.pose.sleep); this.drawFoot(ctx, side, l); ctx.restore();
+      ctx.save(); ctx.globalAlpha = 1; this.drawFoot(ctx, side, l); ctx.restore();
     }
     // A lifted foot passes in front of the hip before reaching a key.
     for (const side of SIDES) if (this.footContacts[side].weight > 0.03) {
@@ -486,7 +463,7 @@ export class NaiwaRenderer {
       if (l.petEnergy > 0.05) {
         ctx.fillStyle = css(p.blush, clamp(l.petEnergy) * 0.45); ellipse(ctx, sign * 0.16, 0.017, 0.026, 0.012);
       }
-      this.drawEye(ctx, sign * (.131 + this.pose.sleep * .060), -.056 - this.pose.sleep * .026, sign, l);
+      this.drawEye(ctx, sign * .131, -.056, sign, l);
       if (angry > .02) {
         ctx.strokeStyle = css(p.mouth, angry * .45); ctx.lineWidth = .0022;
         ctx.beginPath(); ctx.moveTo(sign * .052, .008);
@@ -500,6 +477,20 @@ export class NaiwaRenderer {
       const width = .080 - angry * .050, y = .009 + angry * .009;
       ctx.beginPath(); ctx.moveTo(-width, y);
       ctx.bezierCurveTo(-width * .30, .020 - angry * .023, width * .30, .020 - angry * .023, width, y); ctx.stroke();
+    }
+    // Draw in the mouth's local frame so the strand follows every nod. The
+    // end bead remains attached; interruption smoothly retracts without particles.
+    const drool = l.privacyMode || l.drinkActive ? 0 : clamp(this.pose.drool);
+    if (drool > .005) {
+      const x = .075, y = .010, length = drool * (.115 + Math.sin(l.seconds * 1.5) * .008);
+      const tipX = x + Math.sin(l.seconds * 1.2) * .007 * drool;
+      ctx.save(); ctx.globalAlpha *= drool;
+      ctx.strokeStyle = 'rgba(106,185,210,0.85)'; ctx.lineWidth = .009;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.bezierCurveTo(x - .003, y + length * .3, tipX, y + length * .7, tipX, y + length); ctx.stroke();
+      ctx.fillStyle = 'rgba(168,226,240,0.95)'; ellipse(ctx, tipX, y + length, .010 * drool, .014 * drool);
+      ctx.strokeStyle = 'rgba(245,255,255,0.9)'; ctx.lineWidth = .0025;
+      ctx.beginPath(); ctx.moveTo(x - .002, y + .006); ctx.lineTo(tipX - .002, y + length * .82); ctx.stroke();
+      ctx.restore();
     }
     ctx.restore();
   }

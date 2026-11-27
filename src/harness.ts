@@ -98,7 +98,7 @@ function applyLayout(): void {
   document.getElementById('naiwa-reference')!.hidden = !isFrog;
   document.getElementById('preview-comparison')!.classList.toggle('has-reference', isFrog);
   document.getElementById('preview-intro')!.textContent = isFrog
-    ? '奶蛙 · 放松趴睡、左右晃身、好奇探头和交替摆脚；互动无专属音效。'
+    ? '奶蛙 · 坐姿打盹与流口水、左右晃身、好奇探头和交替摆脚；互动无专属音效。'
     : '直接敲键盘、点击鼠标，或选择下方动作查看互动。';
   engine.setKeyboardConfig(layout, orient, {
     scale: kbs,
@@ -515,7 +515,7 @@ function syncPanel(): void {
   });
   const rigInfo = document.getElementById('rig-info');
   if (rigInfo) rigInfo.textContent = modelRig(cat) === 'naiwa'
-    ? '奶蛙 · 低身趴睡，前臂向内摊放；试试左右晃身、好奇探头、交替摆脚。睡觉后敲键可测试起床气，抚摸可安抚。普通输入用手，原尾巴按键用脚；奶蛙互动无专属音效。'
+    ? '奶蛙 · 坐着打盹，闭眼点头并流口水；试试左右晃身、好奇探头、交替摆脚。睡觉后敲键可测试起床气，抚摸可安抚。普通输入用手，原尾巴按键用脚；奶蛙互动无专属音效。'
     : '打盹后敲键可测试起床气；点击动作按钮可逐个预览。';
   const sound = document.getElementById('pet-sound');
   if (sound) {

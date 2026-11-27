@@ -1512,11 +1512,11 @@ test('mouth-local cheeks inflate and deflate without shifting eyes or the mouth 
   }
 });
 
-test('frog lowers onto the keyboard and smoothly returns from natural, stopped and interrupted naps', () => {
+test('frog sleeps seated with drool and smoothly wakes from natural, stopped and interrupted naps', () => {
   for (const dt of [1/30, 1/60]) for (const wake of ['natural', 'key', 'mouse', 'wheel', 'stop', 'drink']) {
     const e = frog2d(); e.setPropConfig(propConfig('coffee', 'right'));
     const standing = e.naiwa.getMouthWorld(e.buildNaiwaLayout());
-    e.triggerIdleAction('nap'); let previous = standing;
+    e.triggerIdleAction('nap'); e.idleAction.duration = 12; let previous = standing;
     const step = seconds => {
       for (let t = 0; t < seconds - 1e-8; t += dt) {
         advancePet(e, dt, dt);
@@ -1529,14 +1529,17 @@ test('frog lowers onto the keyboard and smoothly returns from natural, stopped a
         previous = mouth;
       }
     };
-    step(3.8);
+    step(4.5);
     const l = e.buildNaiwaLayout(), asleep = e.naiwa.getMouthWorld(l);
-    assert.ok(asleep.y - standing.y > l.bodyHeight * .48, 'head reaches keyboard level');
-    assert.ok(Math.abs(asleep.y - l.baseY) < l.bodyHeight * .10);
+    assert.ok(Math.abs(asleep.y - standing.y) < l.bodyHeight * .09, 'head remains above the seated belly');
+    assert.ok(asleep.y < l.baseY - l.bodyHeight * .50);
+    assert.ok(e.naiwa.pose.drool > .9, 'drool grows after settling');
     assert.ok(e.naiwa.pose.sleep > .99 && e.naiwa.lids > .97);
     for (const side of ['left','right']) {
       const hand = e.naiwa.getHandWorld(side, l);
-      assert.ok(Math.abs(hand.y - l.baseY - l.bodyHeight * .045) < .5, 'hands stay braced on keys');
+      assert.ok(Math.abs(hand.y - l.baseY) < l.bodyHeight * .12, 'hands rest without reaching across the belly');
+      const foot = e.naiwa.getFootWorld(side, l);
+      assert.ok(Math.abs(foot.y - l.baseY) < l.bodyHeight * .07, 'feet remain planted');
     }
     if (wake === 'key') e.onKeyDown(65, false);
     if (wake === 'mouse') e.onMouseDown('left');
@@ -1545,7 +1548,19 @@ test('frog lowers onto the keyboard and smoothly returns from natural, stopped a
     if (wake === 'drink') e.clickProp();
     step(wake === 'natural' ? 15 : 1.5);
     assert.ok(e.naiwa.pose.sleep < .01, wake + ': returns to awake pose');
+    assert.ok(e.naiwa.pose.drool < .01, wake + ': saliva retracts on waking');
     e.onKeyUp(65); e.onMouseUp('left'); e.stop();
+  }
+});
+
+test('frog drool clears immediately on privacy and contact reset', () => {
+  for (const mode of ['privacy', 'reset']) {
+    const e = frog2d(); e.triggerIdleAction('nap'); e.idleAction.duration = 12; advancePet(e, 4.5);
+    assert.ok(e.naiwa.pose.drool > .9);
+    if (mode === 'privacy') e.setPrivacyMode(true); else e.naiwa.resetContacts();
+    assert.equal(e.naiwa.pose.drool, 0);
+    assert.equal(e.naiwa.poseBlend.drool, 0);
+    e.stop();
   }
 });
 

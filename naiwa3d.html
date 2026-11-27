@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D 奶蛙 · DIY-Cat 模型预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: #242721; font: 16px/1.65 "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; }
+    main { width: min(1120px, 100%); margin: auto; padding: 28px 20px 40px; }
+    a { color: #526529; text-underline-offset: 4px; }
+    h1 { margin: 12px 0 4px; font-size: clamp(24px, 3vw, 28px); font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+    p { margin: 6px 0 16px; max-width: 78ch; }
+    .intro { color: #62665b; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; }
+    #viewport { position: relative; height: clamp(360px, 65vh, 680px); background: #f6f5ef; border-radius: 16px; overflow: hidden; }
+    #viewport canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    #loading { position: absolute; inset: 0; display: grid; place-content: center; padding: 24px; text-align: center; background: #f6f5ef; }
+    [hidden] { display: none !important; }
+    aside { padding: 20px; border-radius: 12px; background: #1c231e; color: #f3f3e9; }
+    fieldset { min-width: 0; margin: 0 0 20px; padding: 0; border: 0; }
+    legend, .label { display: block; margin-bottom: 8px; color: #c4cdbd; font-size: 14px; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { min-height: 42px; padding: 8px 12px; border: 1px solid #535e4f; border-radius: 7px; background: #303a30; color: #f4f5ee; font: inherit; font-size: 14px; cursor: pointer; }
+    button:hover { background: #404e3d; }
+    button[aria-pressed="true"] { border-color: #e4d167; color: #1c231e; background: #e4d167; }
+    button:disabled { opacity: .5; cursor: wait; }
+    button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #a48e2a; outline-offset: 3px; }
+    aside button:focus-visible, aside input:focus-visible { outline-color: #e4d167; }
+    #loading button { margin: 8px auto; }
+    .playback { display: flex; gap: 8px; margin-bottom: 10px; }
+    .playback button { flex: 1; }
+    #timeline { width: 100%; accent-color: #e4d167; }
+    #time { display: block; font-variant-numeric: tabular-nums; color: #c4cdbd; font-size: 14px; }
+    .toggle { display: flex; align-items: center; gap: 8px; min-height: 42px; }
+    .toggle input { width: 18px; height: 18px; accent-color: #e4d167; }
+    .views { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .views button { font-size: 14px; flex: 1; }
+    .help, #status { color: #62665b; font-size: 14px; margin-top: 10px; }
+    .notes { margin-top: 24px; padding-top: 20px; border-top: 1px solid #dedfd7; }
+    .downloads { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+    details { margin-top: 20px; }
+    summary { cursor: pointer; padding: 8px 0; }
+    details img { display: block; max-width: 100%; height: auto; margin-top: 12px; }
+    @media (max-width: 740px) { .layout { grid-template-columns: minmax(0, 1fr); } main { padding: 16px 12px 28px; } #viewport { height: min(65vh, 500px); } .actions { grid-template-columns: repeat(4, minmax(0, 1fr)); } aside { padding: 16px; } }
+    @media (max-width: 400px) { .actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+<main>
+  <a href="./harness.html?breed=builtin-naiwa&amp;idle=0">返回 2D 交互预览</a>
+  <h1>奶蛙 · 站姿预览</h1>
+  <p class="intro">对照设计图查看体型、肩臂和手脚。默认展示自然站姿，也可切换现有动作检查变形。</p>
+  <div class="layout">
+    <div>
+      <div id="viewport" aria-label="3D 奶蛙预览，可拖动旋转，通过下方按钮切换视角">
+        <div id="loading"><p id="load-message" role="status">正在加载模型…</p><button id="retry" hidden>重新加载</button></div>
+      </div>
+      <div class="views" aria-label="查看角度">
+        <button data-view="front">正面</button><button data-view="side">侧面</button><button data-view="back">背面</button><button data-view="perspective">重置视角</button>
+      </div>
+      <p class="help">拖动旋转 · 滚轮缩放 · 双指缩放。也可用上方视角按钮查看。正面适合对照设计图，侧面和背面可检查身体轮廓。</p>
+      <p id="status" role="status" aria-live="polite">正在读取骨架与动作…</p>
+    </div>
+    <aside aria-label="动作与预览设置">
+      <fieldset><legend>姿态与动作</legend><div class="actions" id="clips">
+        <button data-clip="rest" aria-pressed="true" disabled>自然站姿</button>
+        <button data-clip="idle" aria-pressed="false" disabled>坐姿呼吸</button>
+        <button data-clip="typing" aria-pressed="false" disabled>敲键盘</button>
+        <button data-clip="mouse" aria-pressed="false" disabled>点鼠标</button>
+        <button data-clip="sway" aria-pressed="false" disabled>左右摇摆</button>
+        <button data-clip="wave" aria-pressed="false" disabled>招手</button>
+        <button data-clip="nap" aria-pressed="false" disabled>打盹流口水</button>
+        <button data-clip="angry" aria-pressed="false" disabled>鼓腮跺脚</button>
+      </div></fieldset>
+      <div class="playback"><button id="play" disabled>暂停</button><button id="restart" disabled>从头播放</button></div>
+      <label class="label" for="timeline">动作进度</label>
+      <input id="timeline" type="range" min="0" max="1" step="0.01" value="0" disabled />
+      <output id="time" for="timeline">0.0 / 0.0 秒</output>
+      <label class="toggle"><input id="skeleton" type="checkbox" />显示骨架</label>
+      <label class="toggle"><input id="props" type="checkbox" />显示键鼠定位参考</label>
+    </aside>
+  </div>
+  <div class="notes">
+    <p>这是可编辑的 3D 建模版本，现有七段动作供检查骨架和变形。键鼠定位参考用于检查手部接触；实际桌宠的道具适配、动态接触和外部 GLB 导入仍需后续接入。</p>
+    <div class="downloads">
+      <a href="./art/naiwa/naiwa.blend" download>下载 Blender 源文件</a>
+      <a href="./art/naiwa/naiwa.glb" download>下载 GLB 模型与动作</a>
+      <a href="./docs/naiwa-3d-design.md">骨架、动作与接入说明</a>
+    </div>
+    <details><summary>展开原始设计图</summary><img src="./art/naiwa/reference.png" alt="奶蛙原始设计图：黄色头身、奶油色肚皮、绿色眼睛与橄榄色手脚，包含正面、侧面和背面。" loading="lazy" /></details>
+  </div>
+</main>
+<script type="module" src="/src/naiwa3dPreview.ts"></script>
+</body>
+</html>
