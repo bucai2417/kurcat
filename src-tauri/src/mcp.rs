@@ -283,14 +283,14 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "trigger_idle_action",
-            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tantrum (tail slap for cats, foot stomp for naiwa); calm soothes it. Naiwa additionally supports frogHop, frogCroak and bellyPat. An action may be ignored while privacy or an incompatible interaction is active.",
+            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tantrum (tail slap for cats, foot stomp for naiwa); calm soothes it. Naiwa additionally supports frogHop, frogCroak (silent cheek puff), bellyPat, frogSway, frogPeek and footSwing. An action may be ignored while privacy or an incompatible interaction is active.",
             "inputSchema": {
                 "type": "object",
                 "required": ["kind"],
                 "properties": {
                     "kind": {
                         "type": "string",
-                        "enum": ["drink", "stretch", "wave", "tilt", "slowBlink", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck", "tailGround", "calm", "frogHop", "frogCroak", "bellyPat", "sleep"]
+                        "enum": ["drink", "stretch", "wave", "tilt", "slowBlink", "groom", "nap", "cuddle", "roll", "listen", "shimmy", "pawCheck", "tailGround", "calm", "frogHop", "frogCroak", "bellyPat", "frogSway", "frogPeek", "footSwing", "sleep"]
                     }
                 }
             }
@@ -411,7 +411,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "update_settings",
-            "description": "Update live settings: model/render mode (falls back to a supported adapter), collar, headphones, tail keys, independent keyboard/mouse sound profiles, pet sounds (purring/frog calls), window and keyboard layout preferences. Use dedicated tools for props, idle, mood and lighting.",
+            "description": "Update live settings: model/render mode (falls back to a supported adapter), collar, headphones, tail keys, independent keyboard/mouse sound profiles, cat purring (Naiwa has no dedicated sounds), window and keyboard layout preferences. Use dedicated tools for props, idle, mood and lighting.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -420,7 +420,7 @@ fn tool_definitions() -> Value {
                     "headphoneMode": {"type":"string","enum":["auto","on","off"]},
                     "tailKeyMode": {"type":"string","enum":["smart","custom","edge","off"]},
                     "tailKeyIds": {"type":"array","items":{"type":"string"}},
-                    "inputSound": {"type":"object","description":"Independent keyboard/mouse effects; soundEnabled controls pet sounds (purring/frog calls).","properties":{"keyboard":{"type":"boolean"},"mouse":{"type":"boolean"},"profile":{"type":"string","enum":["linear","tactile","clicky","silent"]},"volume":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false},
+                    "inputSound": {"type":"object","description":"Independent keyboard/mouse effects; soundEnabled controls cat purring; Naiwa has no dedicated sounds.","properties":{"keyboard":{"type":"boolean"},"mouse":{"type":"boolean"},"profile":{"type":"string","enum":["linear","tactile","clicky","silent"]},"volume":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false},
                     "catBreed": { "type": "string" },
                     "scale": { "type": "number", "minimum": 0.2, "maximum": 1.5 },
                     "keyboardLayout": { "type": "string", "enum": ["65", "108"] },
@@ -971,7 +971,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
                     "name": SERVER_NAME,
                     "version": SERVER_VERSION
                 },
-                "instructions": "First use get_builtin_rigs to discover skin-importable cat/naiwa rigs and fixed-art dafeiyu. Naiwa is 2D only, uses hands for typing/mouse/props and feet only for tail-key taps, and adds frogHop/frogCroak/bellyPat actions. Milk cat is a cat skin, not a frog. Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
+                "instructions": "First use get_builtin_rigs to discover skin-importable cat/naiwa rigs and fixed-art dafeiyu. Naiwa is 2D only, uses hands for typing/mouse/props and feet only for tail-key taps, and adds silent frogHop/frogCroak/bellyPat/frogSway/frogPeek/footSwing actions. Milk cat is a cat skin, not a frog. Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
             }))
         }
         "ping" => Ok(json!({})),

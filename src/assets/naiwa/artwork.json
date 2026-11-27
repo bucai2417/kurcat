@@ -461,10 +461,10 @@
     603
   ],
   "proneRect": [
-    -0.39,
-    -0.43,
-    0.78,
-    0.466
+    -0.42,
+    -0.31,
+    0.84,
+    0.35
   ],
   "notes": "Reference-derived seated/prone body and feet; hand is an authoring reference. Runtime arms, palms and fingers form one surface; puffing is local to the mouth corners. No ears or tail. Runtime recolors material zones; no external images in skin packages."
 }

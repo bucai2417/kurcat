@@ -98,7 +98,7 @@ function applyLayout(): void {
   document.getElementById('naiwa-reference')!.hidden = !isFrog;
   document.getElementById('preview-comparison')!.classList.toggle('has-reference', isFrog);
   document.getElementById('preview-intro')!.textContent = isFrog
-    ? '奶蛙 · 连续软手臂轻触鼠标，嘴边鼓腮生气，伏在键盘上睡觉。'
+    ? '奶蛙 · 放松趴睡、左右晃身、好奇探头和交替摆脚；互动无专属音效。'
     : '直接敲键盘、点击鼠标，或选择下方动作查看互动。';
   engine.setKeyboardConfig(layout, orient, {
     scale: kbs,
@@ -392,8 +392,11 @@ function buildPanel(): void {
       <button data-idle="tilt">歪头看你</button>
       <button data-idle="slowBlink">慢眨眼</button>
       <button data-idle="frogHop">蓄力小跳</button>
-      <button data-idle="frogCroak">鼓腮呱呱</button>
+      <button data-idle="frogCroak">鼓腮吐气</button>
       <button data-idle="bellyPat">拍拍肚皮</button>
+      <button data-idle="frogSway">左右晃身</button>
+      <button data-idle="frogPeek">好奇探头</button>
+      <button data-idle="footSwing">交替摆脚</button>
       <button data-idle="tailGround">拍地抗议</button>
       <button data-idle="calm">安抚起床气</button>
       <button data-idle="stop">停止动作</button>
@@ -512,10 +515,14 @@ function syncPanel(): void {
   });
   const rigInfo = document.getElementById('rig-info');
   if (rigInfo) rigInfo.textContent = modelRig(cat) === 'naiwa'
-    ? '奶蛙 · 手臂、掌心和三指连续形变，点鼠标轻压、拿道具收拢。生气只在嘴边鼓腮。趴键盘睡觉后敲键可测试起床气，抚摸可安抚；普通输入用手，原尾巴按键用脚。'
+    ? '奶蛙 · 低身趴睡，前臂向内摊放；试试左右晃身、好奇探头、交替摆脚。睡觉后敲键可测试起床气，抚摸可安抚。普通输入用手，原尾巴按键用脚；奶蛙互动无专属音效。'
     : '打盹后敲键可测试起床气；点击动作按钮可逐个预览。';
   const sound = document.getElementById('pet-sound');
-  if (sound) { sound.textContent = `宠物声音：${soundEnabled ? '开' : '关'}`; sound.setAttribute('aria-pressed', String(soundEnabled)); }
+  if (sound) {
+    sound.hidden = modelRig(cat) === 'naiwa';
+    sound.textContent = `宠物声音：${soundEnabled ? '开' : '关'}`;
+    sound.setAttribute('aria-pressed', String(soundEnabled));
+  }
   const size = engine.getLogicalSize();
   const kbSlider = document.getElementById('kbscale') as HTMLInputElement | null;
   if (kbSlider) {

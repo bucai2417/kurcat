@@ -134,12 +134,12 @@ export class NaiwaRenderer {
   private initialized = false;
   private poseKind: string | undefined;
   private poseSeconds = 0;
-  private poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0 };
+  private poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0, gaze: 0 };
   public ready(): Promise<void> { return readyNaiwaArtwork(); }
   public setSkin(skin: ResolvedSkin | null): void { this.colors = palette(skin); }
   public resetContacts(): void {
     this.initialized = false; this.poseKind = undefined;
-    this.poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0 };
+    this.poseBlend = { lift: 0, squash: 0, lean: 0, tilt: 0, sleep: 0, gaze: 0 };
     this.expression = { anger: 0, cheeks: 0 };
     for (const side of SIDES) {
       this.footContacts[side].weight = 0; this.arms[side].lag = { x: 0, y: 0 };
@@ -158,9 +158,9 @@ export class NaiwaRenderer {
     // The front prone artwork lowers the torso and head together. Keep world
     // anchors in the same frame so hands can brace on the keyboard throughout.
     const sleep = clamp(this.pose.sleep), breath = Math.sin(l.seconds * 1.7) * sleep * .003;
-    return { x: l.centerX - (turn * .045 + sleep * .015) * l.bodyHeight,
+    return { x: l.centerX - (turn * .045 + sleep * .012) * l.bodyHeight,
       y: l.baseY + ((idleBob + l.hunch * .012) * (1 - sleep) - this.pose.lift + sleep * .015) * l.bodyHeight,
-      angle: this.pose.lean + sleep * .025 + (l.drinkActive ? 0 : (l.lean * .03 + this.pose.tilt * .65 + l.tilt * .20) * (1 - sleep)) - turn * .075,
+      angle: this.pose.lean + sleep * -.018 + (l.drinkActive ? 0 : (l.lean * .03 + this.pose.tilt * .65 + l.tilt * .20) * (1 - sleep)) - turn * .075,
       sx: 1 + this.pose.squash * .55 - reach * .045 + breath,
       sy: 1 - this.pose.squash };
   }
@@ -180,7 +180,7 @@ export class NaiwaRenderer {
   }
   private face(l: NaiwaLayout) {
     const sleep = clamp(this.pose.sleep);
-    return { x: (l.drinkActive ? 0 : l.headTurn * 0.012) - sleep * .014, y: -0.653 + sleep * .575,
+    return { x: (l.drinkActive ? 0 : l.headTurn * 0.012) - sleep * .014, y: -0.653 + sleep * .588,
       angle: 0 };
   }
   public getMouthWorld(l: NaiwaLayout): FrogPoint {
@@ -198,7 +198,7 @@ export class NaiwaRenderer {
       stomp: l.groundAmount, stompLift: l.groundLift, drinking: l.drinkActive, privacy: l.privacyMode });
     const kind = l.privacyMode ? 'privacy' : l.drinkActive ? 'drink' : l.idleKind ?? 'rest';
     const dt = Math.max(0, Math.min(0.1, l.seconds - this.poseSeconds));
-    for (const key of ['lift', 'squash', 'lean', 'tilt', 'sleep'] as const) {
+    for (const key of ['lift', 'squash', 'lean', 'tilt', 'sleep', 'gaze'] as const) {
       if (this.poseKind !== undefined && kind !== this.poseKind) this.poseBlend[key] = this.pose[key] - next[key];
       // Preserve the current body pose when a hop/gesture is interrupted. Mouth
       // solving and rendering can both sample a frame without advancing twice.
@@ -210,7 +210,7 @@ export class NaiwaRenderer {
   public update(dt: number, now: number, l: NaiwaLayout): void {
     this.syncPose(l);
     const k = 1 - Math.exp(-12 * dt);
-    this.look.x += (l.eyeLookX - this.look.x) * k; this.look.y += (l.eyeLookY - this.look.y) * k;
+    this.look.x += (Math.max(-1, Math.min(1, l.eyeLookX + this.pose.gaze)) - this.look.x) * k; this.look.y += (l.eyeLookY - this.look.y) * k;
     this.lids += (Math.max(this.pose.lids, l.squint, l.privacyMode ? 0 : clamp(l.anger) * .48) - this.lids) * k;
     const angry = l.privacyMode ? 0 : clamp(l.anger);
     this.expression.anger += (angry - this.expression.anger) * (1 - Math.exp(-10 * dt));
@@ -243,8 +243,8 @@ export class NaiwaRenderer {
       const contact = paw.active && (paw.mode === 'poke' || paw.mode === 'mouse');
       const sign = side === 'left' ? -1 : 1;
       const sleep = clamp(this.pose.sleep);
-      const brace = this.toLocal({ x: l.centerX + l.bodyHeight * sign * .29,
-        y: l.baseY + l.bodyHeight * .055 }, l);
+      const brace = this.toLocal({ x: l.centerX + l.bodyHeight * sign * .23,
+        y: l.baseY + l.bodyHeight * .045 }, l);
       const resting = this.pose.hands[side];
       const handTarget = holding
         ? this.toLocal({ x: l.drinkHandX, y: l.drinkHandY }, l)
@@ -290,7 +290,7 @@ export class NaiwaRenderer {
   }
   private shoulder(side: Side): FrogPoint {
     const sleep = clamp(this.pose.sleep), sign = side === 'left' ? -1 : 1;
-    return { x: sign * (.24 + sleep * .06), y: -.43 + sleep * .28 };
+    return { x: sign * (.24 + sleep * .10), y: -.43 + sleep * .30 };
   }
   private limb(side: Side, limb: 'arm' | 'leg') {
     const sign = side === 'left' ? -1 : 1;
@@ -385,15 +385,17 @@ export class NaiwaRenderer {
     const image = sleep > 0 ? naiwaSleepArtwork(this.colors, sleep) : naiwaArtwork('body', this.colors);
     if (!image) return false;
     // Blend in an isolated surface so the torso never becomes see-through.
-    const top = -.82 + sleep * .39, height = .86 - sleep * .394;
+    const [ax, ay, aw, ah] = artwork.bodyRect, [bx, by, bw, bh] = artwork.proneRect;
+    const left = ax + (bx - ax) * sleep, width = aw + (bw - aw) * sleep;
+    const top = ay + (by - ay) * sleep, height = ah + (bh - ah) * sleep;
     if (sleep > 0 && sleep < 1) {
       // A solid interpolated boundary hides the two source outlines. Filling the
       // new skin area first also prevents background showing at unequal edges.
       const contour = artwork.sleepContours.body.map((row, i) => {
         const prone = artwork.sleepContours.prone[i];
         return { y: top + (row[0] + (prone[0] - row[0]) * sleep) * height,
-          left: -.39 + (row[1] + (prone[1] - row[1]) * sleep) * .78,
-          right: -.39 + (row[2] + (prone[2] - row[2]) * sleep) * .78 };
+          left: left + (row[1] + (prone[1] - row[1]) * sleep) * width,
+          right: left + (row[2] + (prone[2] - row[2]) * sleep) * width };
       });
       ctx.save(); ctx.beginPath(); ctx.moveTo(contour[0].left, contour[0].y);
       for (const point of contour.slice(1)) ctx.lineTo(point.left, point.y);
@@ -402,8 +404,8 @@ export class NaiwaRenderer {
       const skin = ctx.createLinearGradient(0, top, 0, top + height);
       skin.addColorStop(0, css(this.colors.light)); skin.addColorStop(.55, css(this.colors.body));
       skin.addColorStop(1, css(this.colors.shade)); ctx.fillStyle = skin; ctx.fill();
-      ctx.drawImage(image, -.39, top, .78, height); ctx.restore();
-    } else ctx.drawImage(image, -.39, top, .78, height);
+      ctx.drawImage(image, left, top, width, height); ctx.restore();
+    } else ctx.drawImage(image, left, top, width, height);
     return true;
   }
 
@@ -484,7 +486,7 @@ export class NaiwaRenderer {
       if (l.petEnergy > 0.05) {
         ctx.fillStyle = css(p.blush, clamp(l.petEnergy) * 0.45); ellipse(ctx, sign * 0.16, 0.017, 0.026, 0.012);
       }
-      this.drawEye(ctx, sign * (.131 + this.pose.sleep * .042), -.056 - this.pose.sleep * .064, sign, l);
+      this.drawEye(ctx, sign * (.131 + this.pose.sleep * .060), -.056 - this.pose.sleep * .026, sign, l);
       if (angry > .02) {
         ctx.strokeStyle = css(p.mouth, angry * .45); ctx.lineWidth = .0022;
         ctx.beginPath(); ctx.moveTo(sign * .052, .008);
@@ -506,43 +508,41 @@ export class NaiwaRenderer {
     const lid = clamp(Math.max(this.lids, this.blink, l.privacyMode ? 1 : 0));
     const edge = -r * 1.24 + r * 2.50 * lid;
     const slant = sign * this.expression.anger * r * .82 * (1 - smoothClose(lid));
+    const closedT = clamp((lid - .70) / .24), closed = closedT * closedT * (3 - 2 * closedT);
+    const creaseY = edge * (1 - closed) + r * .12 * closed;
+    const halfWidth = r * (1.2 - .34 * closed), bend = r * .41 * closed;
+    const gap = Math.max(0, r * 1.3 - edge) * (1 - closed);
     ctx.save(); ctx.translate(x, y);
-    if (lid < .995) {
-      // Reveal only the part below the lid. The existing face supplies the skin,
-      // avoiding a flat yellow disc over the reference's shaded eye socket.
-      ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, r * 1.14, r * 1.24, 0, 0, Math.PI * 2); ctx.clip();
-      ctx.beginPath(); ctx.moveTo(-r * 1.2, edge + slant);
-      ctx.lineTo(r * 1.2, edge - slant); ctx.lineTo(r * 1.2, r * 1.3);
-      ctx.lineTo(-r * 1.2, r * 1.3); ctx.closePath(); ctx.clip();
-    ctx.fillStyle = css(mix(p.iris, p.irisLight, 0.32)); ellipse(ctx, 0, 0, r * 1.13, r * 1.22);
-    const iris = ctx.createLinearGradient(0, -r, 0, r);
-    iris.addColorStop(0, css(p.iris)); iris.addColorStop(1, css(p.irisLight));
-    ctx.fillStyle = iris; ellipse(ctx, 0, 0, r, r * 1.12);
-    const px = this.look.x * r * 0.17, py = this.look.y * r * 0.13;
-    const pupil = ctx.createRadialGradient(px-r*.20,py-r*.35,r*.06,px,py,r*.85);
-    pupil.addColorStop(0, css(mix(p.pupil,WHITE,.24))); pupil.addColorStop(.50,css(p.pupil)); pupil.addColorStop(1,css(mix(p.pupil,p.iris,.12)));
-    ctx.fillStyle = pupil; ellipse(ctx, px, py, r * 0.70, r * 0.78);
-    if (p.catchlight) {
-      ctx.fillStyle = 'rgba(255,255,255,0.38)'; ellipse(ctx, px + r * 0.25, py - r * 0.44, r * 0.23, r * 0.16, -0.4);
-      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ellipse(ctx, px - r * 0.30, py + r * 0.36, r * 0.08, r * 0.07);
-    }
+    if (closed < 1) {
+      // The visible iris collapses against the same curved lid that becomes the
+      // closed-eye crease. Separate closing lines would leave a second green slit.
+      ctx.save(); ctx.globalAlpha *= 1 - closed;
+      ctx.beginPath(); ctx.ellipse(0, 0, r * 1.14, r * 1.24, 0, 0, Math.PI * 2); ctx.clip();
+      ctx.beginPath(); ctx.moveTo(-halfWidth, creaseY + slant);
+      ctx.quadraticCurveTo(0, creaseY + bend, halfWidth, creaseY - slant);
+      ctx.lineTo(halfWidth, creaseY + gap - slant * closed);
+      ctx.quadraticCurveTo(0, creaseY + bend + gap, -halfWidth, creaseY + gap + slant * closed);
+      ctx.closePath(); ctx.clip();
+      ctx.fillStyle = css(mix(p.iris, p.irisLight, 0.32)); ellipse(ctx, 0, 0, r * 1.13, r * 1.22);
+      const iris = ctx.createLinearGradient(0, -r, 0, r);
+      iris.addColorStop(0, css(p.iris)); iris.addColorStop(1, css(p.irisLight));
+      ctx.fillStyle = iris; ellipse(ctx, 0, 0, r, r * 1.12);
+      const px = this.look.x * r * 0.17, py = this.look.y * r * 0.13;
+      const pupil = ctx.createRadialGradient(px-r*.20,py-r*.35,r*.06,px,py,r*.85);
+      pupil.addColorStop(0, css(mix(p.pupil,WHITE,.24))); pupil.addColorStop(.50,css(p.pupil)); pupil.addColorStop(1,css(mix(p.pupil,p.iris,.12)));
+      ctx.fillStyle = pupil; ellipse(ctx, px, py, r * 0.70, r * 0.78);
+      if (p.catchlight) {
+        ctx.fillStyle = 'rgba(255,255,255,0.38)'; ellipse(ctx, px + r * 0.25, py - r * 0.44, r * 0.23, r * 0.16, -0.4);
+        ctx.fillStyle = 'rgba(255,255,255,0.35)'; ellipse(ctx, px - r * 0.30, py + r * 0.36, r * 0.08, r * 0.07);
+      }
       ctx.restore();
     }
     if (lid > .005) {
-      // Blend the shrinking aperture crease into the relaxed closed-eye arc.
-      // Both keep their position continuously through blink and nap transitions.
-      const closedT = clamp((lid - .70) / .24), closed = closedT * closedT * (3 - 2 * closedT);
-      ctx.lineWidth = .0025;
-      if (closed < 1) {
-        ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, r * 1.14, r * 1.24, 0, 0, Math.PI * 2); ctx.clip();
-        ctx.strokeStyle = css(p.outline, .72 * (1 - closed));
-        ctx.beginPath(); ctx.moveTo(-r * 1.2, edge + slant); ctx.lineTo(r * 1.2, edge - slant); ctx.stroke(); ctx.restore();
-      }
-      if (closed > 0) {
-        ctx.strokeStyle = css(p.outline, .72 * closed);
-        ctx.beginPath(); ctx.moveTo(-r * .86, r * .12);
-        ctx.quadraticCurveTo(0, r * .53, r * .86, r * .12); ctx.stroke();
-      }
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0, 0, r * 1.14, r * 1.24, 0, 0, Math.PI * 2); ctx.clip();
+      ctx.strokeStyle = css(p.outline, .72); ctx.lineWidth = .0025;
+      ctx.beginPath(); ctx.moveTo(-halfWidth, creaseY + slant);
+      ctx.quadraticCurveTo(0, creaseY + bend, halfWidth, creaseY - slant);
+      ctx.stroke(); ctx.restore();
     }
     ctx.restore();
   }

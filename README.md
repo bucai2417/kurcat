@@ -12,10 +12,10 @@ DIY-Cat 在上游 KuroCat 的基础上继续开发 2D / 3D 互动与模型库，
 
 - **奶蛙与奶猫内置**：奶猫沿用猫咪 2D / 3D 骨架；奶蛙使用专用 2D 适配器和参考图拆分素材，坐着操作键鼠。普通按键（包括空格）和鼠标由手完成，仅配置的原尾巴按键改成脚踩，双脚平时在两侧轻摆。
 - **连续手部与嘴边鼓腮**：奶蛙的手臂、掌心和三指连成一层皮肤，掌心沿伸手方向自然转动，点鼠标时指尖轻触上缘，拿道具时收拢；伸缩和回弹不改变接触点。生气时只在嘴巴两侧小幅鼓腮，搭配斜压眼皮、收紧嘴型与轻微泛红；安抚后逐渐回落。
-- **趴键盘睡觉**：奶蛙从坐姿缓缓伏下，双手撑在键盘边缘，身体和头部一起降低，闭眼呼吸。自然醒来或被输入、停止动作、拿饮品打断时平滑衔接；键鼠吵醒仍触发跺脚起床气。
-- **奶蛙专属行为**：鼓腮呱叫、蓄力小跳、拍肚皮、坐姿摆脚；起床气改为跺脚。合成呱声、开心声、惊讶声和跺脚声受“呼噜 / 呱声”开关控制，关闭立即停止，键鼠音效仍独立控制。
-- **导入与 MCP 骨架说明**：支持 `canvas-naiwa-v1` + `cat-v1` 的原奶蛙包；无 profile 的旧“naiwa”奶猫保持猫咪骨架。MCP 新增 `get_builtin_rigs`，列明 cat / naiwa / dafeiyu 可用模式、换肤字段、部件、动作与形变通道。当前没有 3D 奶蛙或任意 GLB 加载器。
-- **HTML 动作对照**：预览页提供参考图、双手敲键、点鼠标、原尾巴按键、嘴边鼓腮、趴键盘睡觉与停止动作按钮，关闭随机待机后仍可反复触发和停止手动动作。
+- **趴键盘睡觉**：奶蛙从坐姿缓缓伏下，头身压低并横向摊开，前臂向内放松，下巴靠近键盘，闭眼呼吸；清理趴姿贴图的旧眼睛残影。自然醒来或被输入、停止动作、拿饮品打断时平滑衔接；键鼠吵醒仍触发跺脚起床气。
+- **奶蛙专属行为**：新增左右晃身、好奇探头和交替摆脚；左右倾斜经过中间姿态，眼神先动、身体随后，输入时平滑收回。保留无声鼓腮、蓄力小跳和拍肚皮；移除奶蛙专属合成音效，键鼠音效仍独立控制。
+- **导入与 MCP 骨架说明**：支持 `canvas-naiwa-v1` + `cat-v1` 的原奶蛙包；无 profile 的旧“naiwa”奶猫保持猫咪骨架。MCP 新增 `get_builtin_rigs`，列明 cat / naiwa / dafeiyu 可用模式、换肤字段、部件、动作与形变通道。当前没有 3D 奶蛙或任意 GLB 加载器；Blender 建模、软手臂、表情与动作接入方案见 [3D 奶蛙设计](docs/naiwa-3d-design.md)。
+- **HTML 动作对照**：预览页提供参考图、双手敲键、点鼠标、原尾巴按键、嘴边鼓腮、趴键盘睡觉、左右晃身、好奇探头、交替摆脚与停止动作按钮，关闭随机待机后仍可反复触发和停止手动动作。
 
 ## 已有功能
 
@@ -216,7 +216,7 @@ DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP
 | `switch_resource` / `delete_resource_pack` | 按 `kind`、`mode` 切换键鼠；删除后回退至桌面主题 |
 | `list_cats` / `get_cat_schema` | 查看所有外观、当前模型、花色参数、斑点坐标与品种模板 |
 | `upsert_cat` / `switch_cat` / `delete_cat` | 新增或修改外观、切换模型、删除自定义外观或重置内置外观 |
-| `get_settings` / `update_settings` | 查询或修改模式、缩放、气泡、呼噜 / 呱声、项圈、耳机、尾巴控制、键鼠音效、置顶、穿透等设置 |
+| `get_settings` / `update_settings` | 查询或修改模式、缩放、气泡、猫咪呼噜、项圈、耳机、尾巴控制、键鼠音效、置顶、穿透等设置 |
 | `set_prop` / `get_prop` / `trigger_prop_sip` | 设置道具种类、位置、开关，查询配置，触发饮用 |
 | `get_desk_schema` / `list_desk_skins` | 查询键鼠主题参数与皮肤列表 |
 | `upsert_desk_skin` / `switch_desk_skin` / `delete_desk_skin` | 管理键鼠主题 |
@@ -226,7 +226,7 @@ DIY-Cat `v1.0.0` 桌面程序原生内置 **Stdio** 与 **本机 Streamable HTTP
 | `set_keycaps` / `get_keycaps` / `clear_keycaps` | 通过 `mode` 分开管理 2D / 3D 键帽，含顶面、侧面、图例与文字色 |
 | `set_lighting` / `get_lighting` | 设置与查询 RGB 效果、配色、亮度、速度和边缘灯带 |
 
-动作是否可用取决于当前模型与模式；请求被保存不代表动画已播放，隐私模式或正在进行的冲突动作可能阻止执行。`update_settings.inputSound` 包含 `keyboard`、`mouse`、`profile`、`volume`；`soundEnabled` 控制猫咪呼噜与奶蛙合成声音，关闭立即停止；键盘和鼠标音效单独设置。模型包完整示例及扩展设计见 [接入文档](docs/model-packs.md)。
+动作是否可用取决于当前模型与模式；请求被保存不代表动画已播放，隐私模式或正在进行的冲突动作可能阻止执行。`update_settings.inputSound` 包含 `keyboard`、`mouse`、`profile`、`volume`；`soundEnabled` 控制猫咪呼噜，关闭立即停止；奶蛙没有专属音效，键盘和鼠标音效单独设置。模型包完整示例及扩展设计见 [接入文档](docs/model-packs.md)。
 
 自定义猫咪配置保存在：
 - **Windows**：`%APPDATA%\kuro-cat-pet\cats.json`
@@ -266,7 +266,7 @@ npm run dev
 
 > 预览模式下设置会存进浏览器 localStorage，刷新后保留；桌面端图标 / 托盘 / 点击穿透等原生能力仍然需要真正打包。想重置预览状态可在 DevTools 执行 `localStorage.removeItem('kurocat-preview-v1')` 后刷新。
 
-奶蛙对照预览：`http://127.0.0.1:1420/harness.html?breed=builtin-naiwa&idle=0`；奶猫预览：`http://127.0.0.1:1420/harness.html?breed=builtin-milk-cat`。奶蛙页可展开参考图，对比双手敲键、鼠标、脚踩、嘴边鼓腮、趴键盘睡觉及道具动作。已有依赖时只需运行 `npm run dev`；不需要打包。
+奶蛙对照预览：`http://127.0.0.1:1420/harness.html?breed=builtin-naiwa&idle=0`；奶猫预览：`http://127.0.0.1:1420/harness.html?breed=builtin-milk-cat`。奶蛙页可展开参考图，对比双手敲键、鼠标、脚踩、嘴边鼓腮、趴键盘睡觉、左右晃身、好奇探头、交替摆脚及道具动作。已有依赖时只需运行 `npm run dev`；不需要打包。
 
 另外还提供了一个参数化工装页：`http://127.0.0.1:1420/harness.html?layout=108&light=wave&mode=palette&edge=1&prop=coffee,right`，适合快速比对单点效果。
 

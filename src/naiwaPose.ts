@@ -2,8 +2,7 @@
  * Future 3D rigs can retarget these channels; this does not implement a 3D adapter.
  * Feet use absolute targets (never accumulate offsets over successive frames).
  */
-export type FrogAction = 'frogHop' | 'frogCroak' | 'bellyPat';
-export type FrogSound = 'croak' | 'happy' | 'surprise' | 'stomp';
+export type FrogAction = 'frogHop' | 'frogCroak' | 'bellyPat' | 'frogSway' | 'frogPeek' | 'footSwing';
 export interface FrogPoint { x: number; y: number }
 export interface NaiwaPoseInput {
   kind: string | null;
@@ -30,18 +29,20 @@ export interface NaiwaPose {
   bellyPat: number;
   /** Weight of the supported, forward-lying keyboard sleep pose. */
   sleep: number;
+  /** Eye lead for curiosity gestures; the body follows a little later. */
+  gaze: number;
   hands: { left: FrogPoint; right: FrogPoint };
   feet: { left: FrogPoint; right: FrogPoint };
 }
-export const FROG_ACTIONS: readonly FrogAction[] = ['frogHop', 'frogCroak', 'bellyPat'];
-export const FROG_DURATIONS: Record<FrogAction, number> = { frogHop: 1.65, frogCroak: 2.1, bellyPat: 2.6 };
+export const FROG_ACTIONS: readonly FrogAction[] = ['frogHop', 'frogCroak', 'bellyPat', 'frogSway', 'frogPeek', 'footSwing'];
+export const FROG_DURATIONS: Record<FrogAction, number> = { frogHop: 1.65, frogCroak: 2.1, bellyPat: 2.6, frogSway: 5.2, frogPeek: 3.8, footSwing: 4.4 };
 const clamp = (v: number) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
 const smooth = (v: number) => { const t = clamp(v); return t * t * (3 - 2 * t); };
 export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
   const t = clamp(input.progress);
   const envelope = smooth(t / 0.16) * smooth((1 - t) / 0.18);
   const p: NaiwaPose = {
-    lift: 0, squash: 0, lean: 0, tilt: 0, lids: 0, cheeks: 0, mouthOpen: 0, bellyPat: 0, sleep: 0,
+    lift: 0, squash: 0, lean: 0, tilt: 0, lids: 0, cheeks: 0, mouthOpen: 0, bellyPat: 0, sleep: 0, gaze: 0,
     hands: { left: { x: -0.26, y: 0.075 }, right: { x: 0.26, y: 0.075 } },
     feet: { left: { x: -0.30, y: 0.015 }, right: { x: 0.30, y: 0.015 } },
   };
@@ -82,6 +83,32 @@ export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
       hand('right', 0.105, -0.23 - p.bellyPat * 0.025);
       p.squash = p.bellyPat * 0.025; p.lids = envelope * 0.25;
       break;
+    case 'frogSway': {
+      // Pause over each hip; always pass through neutral before changing sides.
+      const shift = smooth(t / .18) - 2 * smooth((t - .36) / .28) + smooth((t - .82) / .18);
+      p.lean = shift * .09;
+      p.tilt = -shift * .035;
+      p.squash = Math.abs(shift) * .012;
+      p.gaze = -shift * .28;
+      break;
+    }
+    case 'frogPeek': {
+      const peek = smooth(t / .30) * smooth((1 - t) / .25);
+      p.gaze = .65 * smooth(t / .15) * smooth((1 - t) / .20);
+      p.lean = -.055 * peek; p.tilt = .10 * peek;
+      p.lift = .018 * peek;
+      p.lids = .65 * Math.pow(Math.sin(Math.PI * clamp((t - .52) / .18)), 2);
+      break;
+    }
+    case 'footSwing': {
+      const swing = Math.sin(t * Math.PI * 4) * envelope;
+      p.lean = -swing * .025;
+      p.feet.left.x -= swing * .024; p.feet.right.x += swing * .024;
+      p.feet.left.y -= Math.max(0, swing) * .035;
+      p.feet.right.y -= Math.max(0, -swing) * .035;
+      p.lids = envelope * .22;
+      break;
+    }
     case 'wave':
       hand('right', 0.23 + Math.sin(t * Math.PI * 8) * 0.035, -0.70);
       p.tilt = -0.07 * envelope; break;
@@ -106,8 +133,8 @@ export function sampleNaiwaPose(input: NaiwaPoseInput): NaiwaPose {
       // A long plateau leaves time to breathe; natural waking reverses the fold.
       p.sleep = smooth(t / .24) * smooth((1 - t) / .20);
       p.lids = smooth(t / .13) * smooth((1 - t) / .12);
-      hand('left', -.29, .055, p.sleep);
-      hand('right', .29, .055, p.sleep);
+      hand('left', -.23, .045, smooth(t / .14) * smooth((1 - t) / .25));
+      hand('right', .23, .045, smooth(t / .14) * smooth((1 - t) / .25));
       p.feet.left.x += (-.34 - p.feet.left.x) * p.sleep;
       p.feet.left.y += (-.025 - p.feet.left.y) * p.sleep;
       p.feet.right.x += (.34 - p.feet.right.x) * p.sleep;

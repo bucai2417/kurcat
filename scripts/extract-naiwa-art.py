@@ -100,6 +100,22 @@ prone_face = np.zeros(src.shape[:2], np.uint8)
 for ex in [140, 242]: cv2.ellipse(prone_face, (ex,533), (24,28), 0,0,360,255,-1)
 cv2.ellipse(prone_face, (191,575), (43,12), 0,0,360,255,-1)
 prone_clean = cv2.inpaint(src, prone_face, 7, cv2.INPAINT_TELEA)
+# Large eye holes otherwise retain circular inpainting streaks under closed lids.
+# Reconstruct their low-frequency skin lighting from the surrounding yellow skin,
+# feathering the replacement so no baked iris rim survives the sleeping face.
+for ex in [140, 242]:
+    ys, xs = np.mgrid[494:571, ex-37:ex+38]
+    patch = src[494:571, ex-37:ex+38].astype(float)
+    nx = (xs-ex)/37; ny = (ys-533)/38
+    basis = np.stack([np.ones_like(nx), nx, ny, nx*nx, nx*ny, ny*ny], axis=-1)
+    distance = ((xs-ex)/24)**2 + ((ys-533)/28)**2
+    valid = (distance>1.18)&(distance<2.7)&(patch[:,:,0]>220)&(patch[:,:,1]>160)&(patch[:,:,0]-patch[:,:,2]>90)
+    coeff = np.linalg.lstsq(basis[valid], patch[valid], rcond=None)[0]
+    fitted = np.clip(basis@coeff, 0, 255)
+    weight = np.clip((1.45-distance)/.45, 0, 1)
+    weight = (weight*weight*(3-2*weight))[:,:,None]
+    old = prone_clean[494:571, ex-37:ex+38].astype(float)
+    prone_clean[494:571, ex-37:ex+38] = np.clip(old*(1-weight)+fitted*weight, 0, 255)
 prone_alpha = pathmask(1536,1024,[
  ('moveTo',(205,468)),('cubicTo',(148,463,116,483,100,513)),
  ('cubicTo',(91,536,91,553,95,571)),('cubicTo',(99,594,119,599,171,599)),
@@ -130,7 +146,7 @@ Image.fromarray(src).resize((1152,768),Image.Resampling.LANCZOS).save(out/'refer
  'facePivot':[0,-.653], 'eyes':[[-.136,-.709],[.126,-.709]],
  'defaultPose':'seated', 'parts':['body','prone','belly-mask','hand','foot'],
  'sleepContours':{'body':contour('body'),'prone':contour('prone')},
- 'proneCrop':list(prone_box), 'proneRect':[-.39,-.43,.78,.466],
+ 'proneCrop':list(prone_box), 'proneRect':[-.42,-.31,.84,.35],
  'notes':'Reference-derived seated/prone body and feet; hand is an authoring reference. Runtime arms, palms and fingers form one surface; puffing is local to the mouth corners. No ears or tail. Runtime recolors material zones; no external images in skin packages.'
 },ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 print('Wrote Naiwa layered artwork to',out)

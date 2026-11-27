@@ -1389,24 +1389,35 @@ test('frog wake tantrum uses feet, can be soothed, and frog-only actions are fil
   const cat = engine2d(); assert.equal(cat.triggerIdleAction('frogHop'), false); cat.stop();
 });
 
-test('frog one-shots respect mute, voice limits, end cleanup and suspended contexts', () => {
-  const ctx = audioContext();
-  const param = () => ({ value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
-  ctx.createGain = function () { const g = { gain: param(), connect() {}, disconnect() { this.disconnected = true; } }; this.gains.push(g); return g; };
-  ctx.createOscillator = function () { const s = { frequency: param(), connect() {}, start() {}, stop() { this.stopped = true; }, disconnect() { this.disconnected = true; } }; this.sources.push(s); return s; };
-  const sound = new CatAudio(); sound.ctx = ctx;
-  assert.equal(sound.playFrogSound('croak'), true); assert.equal(sound.playFrogSound('croak'), false);
-  assert.equal(sound.playFrogSound('happy'), true); assert.equal(sound.playFrogSound('surprise'), true);
-  assert.equal(sound.playFrogSound('stomp'), false); assert.equal(sound.voices.size, 3);
-  ctx.sources[0].onended(); assert.equal(sound.voices.size, 2);
-  sound.setEnabled(false); assert.equal(sound.voices.size, 0);
-  assert.ok(ctx.sources.every(s => s.disconnected)); assert.ok(ctx.gains.every(s => s.disconnected));
-  assert.equal(sound.playFrogSound('croak'), false);
-  sound.setEnabled(true); ctx.state = 'suspended'; assert.equal(sound.playFrogSound('croak'), false);
-  ctx.state = 'running'; assert.equal(sound.voices.size, 0); assert.equal(sound.playFrogSound('croak'), true);
-  sound.stopPetVoices(); assert.equal(sound.voices.size, 0);
+test('frog interactions stay silent while the shared pet audio switch is enabled', () => {
+  const ctx = audioContext(), savedContext = catAudio.ctx, savedPurr = catAudio.setPurrIntensity;
+  const requested = [];
+  catAudio.ctx = ctx;
+  catAudio.setPurrIntensity = intensity => { requested.push(intensity); };
+  const e = frog2d();
+  try {
+    assert.deepEqual(MODEL_CONTRACT.rigs.naiwa.sounds, []);
+    for (const kind of FROG_ACTIONS) {
+      assert.equal(e.triggerIdleAction(kind), true);
+      advancePet(e, e.idleAction.duration + .2);
+    }
+    e.triggerIdleAction('nap'); advancePet(e, .5); e.onMouseWheel(); advancePet(e, .5);
+    assert.ok(e.sleepReaction.active(e.elapsed));
+    e.onWindowCursor(.4, .4, true);
+    for (const x of [.45, .5, .45, .4, .45, .5]) e.onWindowCursor(x, .4, true);
+    advancePet(e, .4);
+    assert.equal(e.sleepReaction.active(e.elapsed), false, 'petting still soothes the silent frog');
+    for (const kind of ['coffee', 'boba', 'cola', 'energy', 'pudding']) {
+      e.stopCurrentAction(); e.setPropConfig(propConfig(kind, 'right'));
+      assert.equal(e.clickProp(), 'sipped'); advancePet(e, 10);
+    }
+    assert.ok(requested.length > 0, 'exercise live audio path, not preview-only rendering');
+    assert.ok(requested.every(value => value === 0), 'frog never requests a cat purr');
+    assert.equal(ctx.sources.length, 0, 'no dedicated frog audio sources');
+  } finally {
+    e.stop(); catAudio.setPurrIntensity = savedPurr; catAudio.ctx = savedContext;
+  }
 });
-
 
 test('fluid arms deform in both directions, taper under extension and keep palm contact', () => {
   const root = { x: .24, y: -.43 }, target = { x: .28, y: .075 };
@@ -1525,7 +1536,7 @@ test('frog lowers onto the keyboard and smoothly returns from natural, stopped a
     assert.ok(e.naiwa.pose.sleep > .99 && e.naiwa.lids > .97);
     for (const side of ['left','right']) {
       const hand = e.naiwa.getHandWorld(side, l);
-      assert.ok(Math.abs(hand.y - l.baseY - l.bodyHeight * .055) < .5, 'hands stay braced on keys');
+      assert.ok(Math.abs(hand.y - l.baseY - l.bodyHeight * .045) < .5, 'hands stay braced on keys');
     }
     if (wake === 'key') e.onKeyDown(65, false);
     if (wake === 'mouse') e.onMouseDown('left');
@@ -1599,4 +1610,73 @@ test('frog artwork keeps the head intact, blends opaque sleep poses and caches r
     for (const img of images) { img.complete = false; img.naturalWidth = 0; img.naturalHeight = 0; }
     e.stop();
   }
+});
+
+
+test('frog micro-actions shift weight in sequence and settle smoothly at both ends', () => {
+  const base = { kind: null, progress: 0, seconds: 0, anger: 0, petting: 0, typing: 0,
+    groove: 0, excitement: 0, stomp: 0, stompLift: 0, drinking: false, privacy: false };
+  const flatten = obj => Object.values(obj).flatMap(v => typeof v === 'object' ? flatten(v) : [v]);
+  const sample = (kind, t, extra = {}) => sampleNaiwaPose({ ...base, kind, progress: t, seconds: t * 5, ...extra });
+  for (const kind of ['frogSway', 'frogPeek', 'footSwing']) {
+    for (const t of [0, 1]) {
+      const rest = flatten(sample(null, t));
+      flatten(sample(kind, t)).forEach((v, i) => near(v, rest[i], 1e-8, kind + ' returns to rest'));
+    }
+    let previous = flatten(sample(kind, 0));
+    for (let i = 1; i <= 200; i++) {
+      const current = flatten(sample(kind, i / 200));
+      assert.ok(current.every((v, j) => Math.abs(v - previous[j]) < .08), kind + ' no pose discontinuity');
+      previous = current;
+    }
+    for (const extra of [{ drinking: true }, { privacy: true }]) {
+      const pose = sample(kind, .4, extra);
+      assert.equal(pose.lean, 0); assert.equal(pose.gaze, 0);
+      assert.deepEqual(pose.hands, sample(null, .4, extra).hands);
+    }
+  }
+  assert.ok(sample('frogSway', .25).lean > .08);
+  near(sample('frogSway', .5).lean, 0, 1e-8, 'crosses centre');
+  assert.ok(sample('frogSway', .75).lean < -.08);
+  const first = sample('footSwing', .125), second = sample('footSwing', .375);
+  assert.ok(first.feet.left.y < first.feet.right.y && second.feet.right.y < second.feet.left.y);
+});
+
+test('new frog micro-actions yield to keyboard and mouse input without a pose snap', () => {
+  for (const dt of [1 / 30, 1 / 60]) for (const kind of ['frogSway', 'frogPeek', 'footSwing']) {
+    for (const input of ['key', 'mouse']) {
+      const e = frog2d(); assert.equal(e.triggerIdleAction(kind), true); advancePet(e, 1.2, dt);
+      let previous = e.naiwa.getMouthWorld(e.buildNaiwaLayout());
+      if (input === 'key') e.onKeyDown(65, false); else e.onMouseDown('left');
+      assert.equal(e.idleActionKind, null);
+      for (let t = 0; t < 1.2; t += dt) {
+        advancePet(e, dt, dt);
+        const l = e.buildNaiwaLayout(), mouth = e.naiwa.getMouthWorld(l);
+        assert.ok(Math.hypot(mouth.x - previous.x, mouth.y - previous.y) < l.bodyHeight * .06);
+        for (const side of ['left', 'right']) assert.ok(e.naiwa.getLimbWorld(side, 'arm', l).reachable);
+        previous = mouth;
+      }
+      e.onKeyUp(65); e.onMouseUp('left'); e.stop();
+    }
+  }
+});
+
+
+test('frog closed eyelids never leave a second iris sliver beneath the sleeping crease', () => {
+  const e = frog2d();
+  const l = e.buildNaiwaLayout();
+  e.naiwa.blink = 0;
+  for (const lid of [0, .48, .7, .78, .85, .93, .96, 1]) {
+    e.naiwa.lids = lid;
+    const ctx = makeContext(true); ctx.globalAlpha = 1;
+    e.naiwa.drawEye(ctx, 0, 0, -1, l);
+    const fills = ctx.calls.filter(([op]) => op === 'fill').length;
+    if (lid > .005) assert.equal(ctx.calls.filter(([op]) => op === 'stroke').length, 1, 'closing uses one continuous lid, never two separate creases');
+    if (lid < .94) assert.ok(fills > 0, 'open and partly closed eyes retain a clipped iris');
+    else {
+      assert.equal(fills, 0, 'sleeping eyes have no iris below the closed arc');
+      assert.equal(ctx.calls.filter(([op]) => op === 'stroke').length, 1);
+    }
+  }
+  e.stop();
 });

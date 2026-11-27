@@ -302,7 +302,6 @@ export class KuroCatEngine {
     this.dafeiyu.onPrivacyModeChanged(active);
     this.naiwa.onPrivacyModeChanged(active);
     if (active) {
-      this.petAudio?.stopPetVoices();
       this.petAudio?.setPurrIntensity(0);
       this.endIdleAction();
       this.resetWakeReaction();
@@ -566,7 +565,6 @@ export class KuroCatEngine {
     this.drinker.reset(this.propConfig);
     this.propFizz = 0; this.drinkFeedback = null;
     this.resetWakeReaction();
-    this.petAudio?.stopPetVoices();
     this.petAudio?.setPurrIntensity(0);
     this.nextIdleActionAt = this.elapsed + this.idleDelaySec;
     this.wakeRendering();
@@ -676,7 +674,6 @@ export class KuroCatEngine {
   public setCatAppearance(breedId: string, skin?: CatSkinConfig | null): void {
     const frogRig = skin?.modelProfile?.adapters.includes('canvas-naiwa-v1') === true;
     if (this.activeModelId !== breedId || (this.catBreed === 'naiwa') !== frogRig) {
-      this.petAudio?.stopPetVoices();
       this.petAudio?.setPurrIntensity(0);
       this.heldKeys.clear(); this.catTail.heldVks.clear(); this.catTailHeldAt.clear();
       this.catTail.active = false; this.catTail.reach = this.catTail.hover = this.catTail.impactSquash = 0;
@@ -1140,7 +1137,6 @@ export class KuroCatEngine {
   }
 
   public stop(): void {
-    this.petAudio?.stopPetVoices();
     this.petAudio?.setPurrIntensity(0);
     this.resetWakeReaction();
     this.endIdleAction();
@@ -1670,7 +1666,6 @@ export class KuroCatEngine {
           if (this.petStrokeCount >= REQUIRED_STROKES) {
             this.petEnergy = Math.min(1, this.petEnergy + dist * 0.015);
             this.calmSleepReaction();
-            if (this.catBreed === 'naiwa' && !this.privacyMode) this.petAudio?.playFrogSound('happy');
             if (this.idleAction?.kind === 'nap') this.interruptIdleAction();
           }
         }
@@ -2215,7 +2210,6 @@ export class KuroCatEngine {
 
   private beginSleepReaction(): void {
     if (!this.sleepReaction.start(this.elapsed)) return;
-    if (this.catBreed === 'naiwa' && !this.privacyMode) this.petAudio?.playFrogSound('surprise');
     this.typingReactions.reset(); this.catTail.active = false;
     this.catTail.heldVks.clear(); this.catTailHeldAt.clear();
     this.annoyance = 0.88; this.dizzy = 0;
@@ -2294,10 +2288,9 @@ export class KuroCatEngine {
         // Independent frog channels: never drive invisible cat ears, paws or tail.
         const kind = this.idleAction.kind;
         if (kind === 'nap') squintTarget = envelope;
-        const cues = kind === 'frogCroak' ? [0.10, 0.43, 0.76] : kind === 'frogHop' ? [0.70] : kind === 'bellyPat' ? [0.20, 0.52, 0.84] : [];
-        if (!this.privacyMode && cues.some(cue => previousT < cue && t >= cue)) {
-          this.petAudio?.playFrogSound(kind === 'frogCroak' ? 'croak' : 'stomp');
-          if (kind === 'frogHop') this.groundImpactAt = this.elapsed;
+        // Keep the landing ripple, without a synthesized voice or impact sound.
+        if (!this.privacyMode && kind === 'frogHop' && previousT < .70 && t >= .70) {
+          this.groundImpactAt = this.elapsed;
         }
       } else {
         switch (this.idleAction.kind) {
@@ -2737,7 +2730,6 @@ export class KuroCatEngine {
     this.groundTail = this.sleepReaction.sample(this.elapsed);
     if (this.groundTail.impact) {
       this.groundImpactAt = this.elapsed;
-      if (this.catBreed === 'naiwa' && !this.privacyMode) this.petAudio?.playFrogSound('stomp');
     }
     if (this.groundTail.settled) {
       this.annoyance = this.dizzy = 0; this.angerSteam.length = 0;
@@ -2752,9 +2744,7 @@ export class KuroCatEngine {
       if (drank) {
         this.wakeRendering(now);
         if (this.propConfig.kind === 'cola') this.propFizz = 1;
-        if (this.catBreed === 'naiwa') {
-          if (!this.privacyMode) this.petAudio?.playFrogSound(this.propConfig.kind === 'cola' ? 'surprise' : 'happy');
-        } else if (this.catBreed !== 'dafeiyu' && (this.propConfig.kind === 'boba' || this.propConfig.kind === 'pudding')) {
+        if (this.catBreed !== 'naiwa' && this.catBreed !== 'dafeiyu' && (this.propConfig.kind === 'boba' || this.propConfig.kind === 'pudding')) {
           this.petAudio?.setPurrIntensity(0.5);
         }
         this.spawnDrinkParticles(this.propConfig.kind, 18);
@@ -3358,7 +3348,7 @@ export class KuroCatEngine {
     const angry = this.sleepReaction.active(this.elapsed);
     const text = angry ? '还没睡够呢！' : this.elapsed < this.soothedUntil ? '好啦，原谅你了' :
       !this.drinkFeedback && this.typingPose.amount > 0.35 ? ({ focus: '认真陪你打字', groove: '跟着节奏摇摆', excited: '越打越起劲！', grumpy: this.catBreed === 'naiwa' ? '手忙脚乱啦' : '爪爪忙不过来啦' }[this.typingReactions.kind!] ?? '') : this.catBreed === 'naiwa' && this.idleAction ?
-        ({ frogHop: '蓄力——蹦！', frogCroak: '呱，陪你一会儿', bellyPat: '肚皮小鼓手' } as Record<string, string>)[this.idleAction.kind] ?? '' : '';
+        ({ frogHop: '蓄力——蹦！', frogCroak: '鼓鼓腮，陪你一会儿', bellyPat: '肚皮小鼓手', frogSway: '左边一下，右边一下', frogPeek: '让我瞧瞧～', footSwing: '脚丫歇一歇' } as Record<string, string>)[this.idleAction.kind] ?? '' : '';
     if (text) drawPetCaption(ctx, text, this.catCenterX, Math.max(22, this.catTopY - 18), 16, angry);
     const age = this.elapsed - this.groundImpactAt;
     if (age >= 0 && age < 0.38) {

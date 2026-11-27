@@ -220,9 +220,10 @@ mod tests {
         assert_eq!(mode(&frog, "3d"), "2d");
         let c = contract();
         let actions = c["adapters"]["canvas-naiwa-v1"]["actions"].as_array().unwrap();
-        for action in ["drink", "tailGround", "calm", "frogHop", "frogCroak", "bellyPat"] {
+        for action in ["drink", "tailGround", "calm", "frogHop", "frogCroak", "bellyPat", "frogSway", "frogPeek", "footSwing"] {
             assert!(actions.contains(&json!(action)));
         }
+        assert!(c["rigs"]["naiwa"]["sounds"].as_array().unwrap().is_empty());
         let normalized = serde_json::to_value(&frog).unwrap();
         let roundtrip = json!({"format": "kurocat-model", "version": 1,
             "profile": frog.model_profile.clone(), "skin": normalized});
