@@ -77,7 +77,7 @@ export function setupModelLibrary(host: LibraryHost): () => void {
     const prepare = async () => {
       if (cat.modelProfile?.glb && !host.models().some(c => c.id === cat.id && c.modelProfile?.glb?.sha256 === cat.modelProfile?.glb?.sha256)) {
         const pack = [pending, ...batch, ...(catalog ?? [])].find(p => p?.skin === cat);
-        if (pack) await resolveGlbAsset(cat.modelProfile.glb, pack.asset);
+        if (pack) await resolveGlbAsset(cat.modelProfile.glb, pack.asset, cat.modelProfile.adapters.includes('three-naiwa-v1'));
       }
       return previews.image(cat, mode);
     };

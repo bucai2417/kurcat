@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { NaiwaRig, type NaiwaFrame, type NaiwaContacts } from './naiwaRig';
+import type { GroundRollPose } from './groundRoll3d';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { invoke } from '@tauri-apps/api/core';
 import type { CatSkinConfig } from './catSkins';
@@ -8,6 +10,8 @@ type Behavior = keyof GlbProfile['animations'];
 /** An imported actor owns its mixer and GPU resources; desk and shared effects stay in the engine. */
 export class GlbActor {
   readonly root = new THREE.Group();
+  readonly motionRoot = new THREE.Group();
+  private groundSamples: Array<{ mesh: THREE.Mesh; indices: number[] }> = [];
   private mixer: THREE.AnimationMixer;
   private actions = new Map<Behavior, THREE.AnimationAction>();
   private current?: THREE.AnimationAction;
@@ -19,29 +23,83 @@ export class GlbActor {
   private blendTime = .22;
   private blendFrom = new Map<THREE.AnimationAction, number>();
   private readonly naiwa: boolean;
+  readonly liveRig?: NaiwaRig;
+  get supportsContacts(): boolean { return !!this.liveRig; }
   private constructor(scene: THREE.Group, clips: THREE.AnimationClip[], profile: GlbProfile, naiwa = false) {
     this.naiwa = naiwa;
+    this.motionRoot.add(this.root);
     this.root.add(scene);
-    this.root.rotation.y = THREE.MathUtils.degToRad(profile.yaw);
-    this.root.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(this.root);
-    const height = box.max.y - box.min.y;
-    if (!Number.isFinite(height) || height < 1e-5) throw Error('GLB 网格没有有效高度');
-    const scale = profile.height / height;
-    this.root.scale.setScalar(scale);
-    const center = box.getCenter(new THREE.Vector3());
-    this.root.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+    scene.traverse(o => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const count = o.geometry.attributes.position.count, stride = Math.max(1, Math.floor(count / 4096));
+      this.groundSamples.push({ mesh: o, indices: Array.from({ length: Math.ceil(count / stride) }, (_, i) => i * stride) });
+    });
+    if (naiwa) this.liveRig = new NaiwaRig(this.root, scene);
     this.mixer = new THREE.AnimationMixer(scene);
     for (const [key, name] of Object.entries(profile.animations)) {
       const clip = clips.find(c => c.name === name);
       if (clip && clip.duration > 0) this.actions.set(key as Behavior, this.mixer.clipAction(clip));
     }
+    // Normalize the actual desktop idle pose once, not the standing bind pose.
     this.play('idle'); this.mixer.update(0);
+    this.root.rotation.y = THREE.MathUtils.degToRad(profile.yaw);
+    this.refreshBounds();
+    const box = new THREE.Box3().setFromObject(this.root);
+    const height = box.max.y - box.min.y;
+    if (!Number.isFinite(height) || height < 1e-5) throw Error('GLB 网格没有有效高度');
+    const scale = profile.height / height;
+    const center = this.liveRig ? scene.getObjectByName('pelvis')!.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+    this.root.scale.setScalar(scale);
+    this.root.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+    this.root.updateMatrixWorld(true);
+
+  }
+  /** The preview and geometry regression checks use the same runtime as the pet. */
+  static fromScene(scene: THREE.Group, clips: THREE.AnimationClip[], profile: GlbProfile, naiwa = false): GlbActor {
+    return new GlbActor(scene, clips, profile, naiwa);
+  }
+  socket(name: 'mouth' | 'headTouch' | 'head' | 'footContactLeft', out: THREE.Vector3): boolean {
+    const socket = this.liveRig && this.root.getObjectByName(name);
+    if (!socket) return false;
+    socket.getWorldPosition(out); return true;
+  }
+  pose(dt: number, frame: NaiwaFrame): void { this.liveRig?.pose(dt, frame); }
+  contacts(dt: number, frame: NaiwaContacts): void { this.liveRig?.contacts(dt, frame); }
+  /** Apply the shared roll AFTER contact solving. Normalization never changes. */
+  roll(pose: GroundRollPose): void {
+    if (!this.liveRig || pose.tuck <= 0) return;
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), pose.lean)
+      .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), pose.twist));
+    const pivot = new THREE.Vector3(0, .82, 0), offset = pivot.clone().sub(pivot.clone().applyQuaternion(q));
+    offset.z -= pose.retreat;
+    this.root.updateWorldMatrix(true, true);
+    let lowest = Infinity; const point = new THREE.Vector3();
+    for (const { mesh, indices } of this.groundSamples) for (const i of indices) {
+      mesh.getVertexPosition(i, point).applyMatrix4(mesh.matrixWorld).applyQuaternion(q).add(offset);
+      lowest = Math.min(lowest, point.y);
+    }
+    const blend = THREE.MathUtils.smoothstep(pose.tuck, 0, .15);
+    if (Number.isFinite(lowest)) offset.y += (.025 - lowest) * blend;
+    this.motionRoot.quaternion.copy(q); this.motionRoot.position.copy(offset);
+    this.motionRoot.updateMatrixWorld(true);
+  }
+  /** Bounds must see the final live pose, including arms and roll. */
+  finishFrame(dt: number): void {
+    this.boundsIn -= dt;
+    if (this.boundsIn <= 0) { this.boundsIn = .2; this.refreshBounds(); }
+  }
+  private refreshBounds(): void {
+    this.root.updateMatrixWorld(true);
+    this.root.traverse(obj => {
+      if (!(obj instanceof THREE.SkinnedMesh)) return;
+      obj.computeBoundingBox();
+      if (obj.boundingBox) { obj.boundingSphere ??= new THREE.Sphere(); obj.boundingBox.getBoundingSphere(obj.boundingSphere); }
+    });
   }
   static async load(cat: CatSkinConfig): Promise<GlbActor> {
     const profile = cat.modelProfile!.glb!;
     const bytes = pendingGlb(profile.sha256) ?? decodeGlb(await invoke<string>('read_model_glb', { id: cat.id }));
-    validateGlbMapping(profile, bytes);
+    validateGlbMapping(profile, bytes, cat.modelProfile!.adapters.includes('three-naiwa-v1'));
     if (await glbHash(bytes) !== profile.sha256) throw Error('已保存的 3D 文件校验失败，请重新导入');
     const manager = new THREE.LoadingManager();
     manager.setURLModifier(url => { if (!url.startsWith('blob:')) throw Error('禁止加载 GLB 外部资源'); return url; });
@@ -79,7 +137,11 @@ export class GlbActor {
     this.blendTime = previous ? 0 : .22;
   }
   update(dt: number, state: Behavior, autoIdle: boolean): void {
+    this.motionRoot.position.set(0,0,0); this.motionRoot.quaternion.identity();
+    this.motionRoot.updateMatrixWorld(true);
+    this.liveRig?.reset();
     this.clock += dt;
+    if (this.liveRig) { state = state === 'nap' ? 'nap' : 'idle'; autoIdle = false; }
     if (state === 'angry' || state === 'pet' || state === 'typing' || state === 'mouse') this.manual = undefined;
     if (this.manual && (this.manual.remaining -= dt) <= 0) this.manual = undefined;
     if (state === 'idle' && autoIdle && !this.manual && this.clock >= this.nextFidget) {
@@ -107,23 +169,9 @@ export class GlbActor {
     }
     if (eased === 1) this.blendFrom.clear();
     this.mixer.update(Math.min(dt, .1));
-    // SkinnedMesh geometry bounds describe the bind pose. Refresh posed bounds
-    // at 5 Hz for pointer regions and raycast culling without scanning every frame.
-    this.boundsIn -= dt;
-    if (this.boundsIn <= 0) {
-      this.boundsIn = .2;
-      this.root.updateMatrixWorld(true);
-      this.root.traverse(obj => {
-        if (!(obj instanceof THREE.SkinnedMesh)) return;
-        obj.computeBoundingBox();
-        if (obj.boundingBox) {
-          obj.boundingSphere ??= new THREE.Sphere();
-          obj.boundingBox.getBoundingSphere(obj.boundingSphere);
-        }
-      });
-    }
+    if (!this.liveRig) this.finishFrame(dt);
   }
-  dispose(): void { this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.mixer.getRoot()); this.root.removeFromParent(); disposeScene(this.root); }
+  dispose(): void { this.mixer.stopAllAction(); this.mixer.uncacheRoot(this.mixer.getRoot()); this.motionRoot.removeFromParent(); disposeScene(this.root); }
 }
 function disposeScene(root: THREE.Object3D): void {
   const textures = new Set<THREE.Texture>(), materials = new Set<THREE.Material>(), geometries = new Set<THREE.BufferGeometry>();

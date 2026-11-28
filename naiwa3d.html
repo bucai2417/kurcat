@@ -25,13 +25,14 @@
     button:hover { background: #404e3d; }
     button[aria-pressed="true"] { border-color: #e4d167; color: #1c231e; background: #e4d167; }
     button:disabled { opacity: .5; cursor: wait; }
-    button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid #a48e2a; outline-offset: 3px; }
-    aside button:focus-visible, aside input:focus-visible { outline-color: #e4d167; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, canvas:focus-visible { outline: 3px solid #a48e2a; outline-offset: 3px; }
+    aside button:focus-visible, aside input:focus-visible, aside select:focus-visible { outline-color: #e4d167; }
     #loading button { margin: 8px auto; }
-    .playback { display: flex; gap: 8px; margin-bottom: 10px; }
-    .playback button { flex: 1; }
-    #timeline { width: 100%; accent-color: #e4d167; }
-    #time { display: block; font-variant-numeric: tabular-nums; color: #c4cdbd; font-size: 14px; }
+    ::selection { background: #e4d167; color: #1c231e; }
+    input, select { caret-color: #526529; }
+    #typing, select { width: 100%; min-height: 44px; padding: 8px 10px; font: inherit; border: 1px solid #929b86; border-radius: 6px; }
+    select { margin: 0 0 10px; background: #303a30; color: #f3f3e9; }
+    #use-prop, #play { width: 100%; margin-bottom: 12px; }
     .toggle { display: flex; align-items: center; gap: 8px; min-height: 42px; }
     .toggle input { width: 18px; height: 18px; accent-color: #e4d167; }
     .views { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
@@ -49,43 +50,48 @@
 <body>
 <main>
   <a href="./harness.html?breed=builtin-naiwa&amp;idle=0">返回 2D 交互预览</a>
-  <h1>奶蛙 · 站姿预览</h1>
-  <p class="intro">对照设计图查看圆润的身体、向内收的手掌与短手指。试试“扶肚摸头”，暂停后拖动进度检查肩、肘和手腕的衔接。</p>
+  <h1>奶蛙 · 桌面互动预览</h1>
+  <p class="intro">这里使用与 DIY-Cat 相同的 3D 引擎。移动鼠标观察眼睛和头部跟随，在输入框打字，或点击桌面上的饮料。</p>
   <div class="layout">
     <div>
-      <div id="viewport" aria-label="3D 奶蛙预览，可拖动旋转，通过下方按钮切换视角">
+      <div id="viewport" aria-label="3D 奶蛙互动区域。按住 Shift 拖动旋转，也可使用下方视角按钮">
         <div id="loading"><p id="load-message" role="status">正在加载模型…</p><button id="retry" hidden>重新加载</button></div>
       </div>
       <div class="views" aria-label="查看角度">
-        <button data-view="front">正面</button><button data-view="side">侧面</button><button data-view="back">背面</button><button data-view="perspective">重置视角</button><button data-view="hands">手部近景</button>
+        <button data-view="front" disabled>正面</button><button data-view="left" disabled>左侧</button><button data-view="right" disabled>右侧</button><button data-view="reset" disabled>重置视角</button>
       </div>
-      <p class="help">拖动旋转 · 滚轮缩放 · 双指缩放。也可用上方视角按钮查看。正面适合对照设计图，侧面和背面可检查身体轮廓；“手部近景”会暂停动作并回到站姿，便于查看掌根与手指。</p>
+      <p class="help">移动鼠标：眼睛先看，头部随后转向。轻划头部可抚摸；点击饮料可使用。按住 Shift 拖动可旋转视角。</p>
+      <label for="typing">试着打字</label>
+      <input id="typing" type="text" autocomplete="off" spellcheck="false" placeholder="在这里连续输入，观察手部与情绪" disabled aria-describedby="typing-help" />
+      <p id="typing-help" class="help">只在输入框和互动区域获得焦点时响应键盘；打盹时输入会将奶蛙吵醒。预览默认静音。</p>
       <p id="status" role="status" aria-live="polite">正在读取骨架与动作…</p>
     </div>
     <aside aria-label="动作与预览设置">
-      <fieldset><legend>姿态与动作</legend><div class="actions" id="clips">
-        <button data-clip="rest" aria-pressed="true" disabled>自然站姿</button>
-        <button data-clip="idle" aria-pressed="false" disabled>坐姿呼吸</button>
-        <button data-clip="typing" aria-pressed="false" disabled>敲键盘</button>
-        <button data-clip="mouse" aria-pressed="false" disabled>点鼠标</button>
-        <button data-clip="sway" aria-pressed="false" disabled>左右摇摆</button>
-        <button data-clip="wave" aria-pressed="false" disabled>招手</button>
-        <button data-clip="nap" aria-pressed="false" disabled>打盹流口水</button>
-        <button data-clip="angry" aria-pressed="false" disabled>鼓腮跺脚</button>
-        <button data-clip="delight" aria-pressed="false" disabled>扶肚摸头</button>
+      <fieldset id="interactions" disabled><legend>试试这些动作</legend><div class="actions">
+        <button data-action="wave">招招手</button><button data-action="stretch">伸懒腰</button>
+        <button data-action="groom">揉揉脸</button><button data-action="pawCheck">看看手</button>
+        <button data-action="shimmy">扭扭身体</button><button data-action="roll">地上打滚</button>
+        <button data-action="nap">打盹流口水</button><button data-action="curious">好奇看看</button>
+        <button data-action="tailGround">生气跺脚</button><button data-action="calm">安抚恢复</button>
       </div></fieldset>
-      <div class="playback"><button id="play" disabled>暂停</button><button id="restart" disabled>从头播放</button></div>
-      <label class="label" for="timeline">动作进度</label>
-      <input id="timeline" type="range" min="0" max="1" step="0.01" value="0" disabled />
-      <output id="time" for="timeline">0.0 / 0.0 秒</output>
-      <label class="toggle"><input id="skeleton" type="checkbox" />显示骨架</label>
-      <label class="toggle"><input id="props" type="checkbox" />显示键鼠定位参考</label>
+      <fieldset id="desk-settings" disabled><legend>桌面道具</legend>
+        <label class="label" for="prop-kind">饮料与甜点</label><select id="prop-kind"></select>
+        <button id="use-prop">拿起享用</button>
+        <label class="label" for="layout">键盘布局</label>
+        <select id="layout"><option value="65">65 键</option><option value="108">108 键</option></select>
+      </fieldset>
+      <fieldset id="play-settings" disabled><legend>预览控制</legend>
+        <button id="play" aria-pressed="false">暂停预览</button>
+        <label class="toggle"><input id="auto-idle" type="checkbox" />自动小动作</label>
+        <label class="toggle"><input id="petting" type="checkbox" checked />允许抚摸</label>
+      </fieldset>
     </aside>
   </div>
   <div class="notes">
-    <p>这是可编辑的 3D 建模版本，现有八段动作供检查骨架和变形。新增的“扶肚摸头”参考了视频中的扶腹、抬臂和回位姿态。键鼠定位参考用于检查手部接触；实际桌宠的道具适配、动态接触和外部 GLB 导入仍需后续接入。</p>
+    <p>奶蛙以坐姿呼吸和打盹为基础，手臂实时对准按键、鼠标与道具。招手、揉脸和打滚使用桌宠共享的动作控制。下载 GLB 或模型包后，可在模型库导入；下方历史渲染仅展示建模细节，互动效果以上方预览为准。</p>
     <div class="downloads">
       <a href="./art/naiwa/naiwa.blend" download>下载 Blender 源文件</a>
+      <a href="./model-store/naiwa-3d.kurocat.json" download>下载模型包</a>
       <a href="./art/naiwa/naiwa.glb" download>下载 GLB 模型与动作</a>
       <a href="./docs/naiwa-3d-design.md">骨架、动作与接入说明</a>
     </div>

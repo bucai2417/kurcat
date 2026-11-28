@@ -71,8 +71,23 @@
     "three-naiwa-v1": {
       "mode": "3d",
       "rig": "naiwa",
-      "actions": [],
-      "dynamicActions": "profile.glb.animations; same GLB runtime, Naiwa authoring rig"
+      "actions": [
+        "drink",
+        "stretch",
+        "wave",
+        "tilt",
+        "slowBlink",
+        "groom",
+        "nap",
+        "cuddle",
+        "tailGround",
+        "calm",
+        "roll",
+        "listen",
+        "shimmy",
+        "pawCheck"
+      ],
+      "dynamicActions": "Shared cat-v1 live desktop controller; idle/nap base clips, soft-arm contact solving, head/pupil gaze, foot taps, shared props and grounded roll. Requires the complete Naiwa rig signature."
     }
   },
   "specialModels": {
@@ -386,18 +401,24 @@
       "future3d": {
         "status": "glb-import-supported",
         "adapter": "three-naiwa-v1",
-        "poseContract": "src/naiwaPose.ts",
+        "poseContract": "src/naiwaRig.ts",
         "requiredAnchors": [
           "mouth",
           "gripLeft",
           "gripRight",
           "footContactLeft",
-          "footContactRight"
+          "footContactRight",
+          "headTouch"
         ],
-        "notes": "可导入版本 2 的 three-naiwa-v1 GLB 包；源文件 art/naiwa/naiwa.blend，80 骨骼、8 段动作。手腕沿掌心方向连续弯曲，手指独立。使用 profile.glb.animations 映射输入、睡觉、情绪和菜单动作。道具抓握对位、趴睡片段尚待制作。",
-        "designDoc": "docs/naiwa-3d-design.md"
+        "notes": "版本 2 three-naiwa-v1 GLB 通过完整骨架、挂点、表情和 idle/nap 校验后，复用 3D 猫咪交互引擎。按坐姿待机高度归一化；软臂跟随真实键鼠和道具接触点，瞳孔先动、头部随后转向，局部鼓腮仅随生气状态。支持共用待机动作、道具反应、跺脚和打滚；脚够不到的键由手完成。源文件保留 80 骨骼和 8 段作者动画，趴睡仍待制作。",
+        "designDoc": "docs/naiwa-3d-design.md",
+        "runtime": "src/catEngine3d.ts",
+        "baseClips": [
+          "idle",
+          "nap"
+        ]
       },
-      "notes": "不通过 ID/名称猜测骨架。2D 换肤使用 canvas-naiwa-v1；3D 使用版本 2 three-naiwa-v1 包和 GLB。2D 无耳、无尾，不绘制猫咪花纹/斑点；3D 使用 GLB 材质和动作，不自动继承 2D 行为或道具握持。",
+      "notes": "不通过 ID/名称猜测骨架。2D 换肤使用 canvas-naiwa-v1；3D 使用版本 2 three-naiwa-v1 包和 GLB 材质。裸 GLB 仅在完整结构通过校验时识别为奶蛙，其余使用 three-glb-v1。奶蛙没有猫耳与尾巴，原尾巴行为改用脚；2D 专属小跳等动作不会自动移植到 3D。",
       "deformation": {
         "arms": "手臂、掌心与三指连续曲面，无固定肘部或独立手掌贴片；随接触方向伸缩、转向和惯性回弹，点鼠标轻压、握道具收拢，指尖保持接触",
         "cheeks": "嘴巴左右两侧各自鼓起小腮包，保持头部轮廓与五官位置，安抚后逐渐回落；搭配斜压眼皮、收紧嘴型、轻微泛红与短腮纹",
@@ -418,7 +439,7 @@
         "renderer": "src/naiwaRenderer.ts",
         "armSurface": "src/naiwaDeform.ts",
         "sleep": "保持参考图坐姿，缓慢点头、闭眼呼吸、嘴角流口水；结束或打断时平滑恢复",
-        "scope": "内置 2D 程序化形变；3D 骨架、蒙皮与烘焙片段见 docs/naiwa-3d-design.md。"
+        "scope": "内置 2D 程序化形变；3D 实时骨骼与接触求解见 src/naiwaRig.ts，作者规范见 docs/naiwa-3d-design.md。"
       },
       "soundNotes": "奶蛙互动保持静音；键盘和鼠标音效由独立开关控制。",
       "modes": [
@@ -426,7 +447,7 @@
         "3d"
       ],
       "skinFieldsScope": "canvas-naiwa-v1 only; 3D colors are authored in GLB materials",
-      "inputMappingScope": "下面的 inputMapping/actionLabels/deformation 描述内置 2D；导入 3D 以 profile.glb.animations 的实际片段为准。"
+      "inputMappingScope": "inputMapping/actionLabels/deformation 描述内置 2D；3D 的可用动作以 adapters.three-naiwa-v1.actions 为准，运行时共用 catEngine3d 输入、道具和视线驱动，idle/nap 为基础片段。普通 three-glb-v1 仅播放映射片段。"
     },
     "glb": {
       "name": "自定义 GLB 骨架",
@@ -475,7 +496,12 @@
       "shimmy",
       "pawCheck"
     ],
-    "propInteraction": false
+    "propInteraction": false,
+    "propInteractionScope": "Generic three-glb-v1 has no live contact solver; see propInteractionByAdapter for dedicated rigs.",
+    "propInteractionByAdapter": {
+      "three-glb-v1": false,
+      "three-naiwa-v1": true
+    }
   },
   "packageVersions": [
     1,

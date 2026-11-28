@@ -27,3 +27,5 @@ node scripts/build-model-catalog.mjs --check
 此目录同时接收 `.diycat.json` 键盘 / 鼠标外观包，目录任务会生成 `resources.json`。商城按类型和 2D / 3D 筛选，独立保存四个键鼠选择。请从 mint-keyboard / mint-mouse 示例开始，并阅读 [完整创作教程](../docs/RESOURCE_AUTHORING.md)。两个模式设计不同外观时使用不同 ID；同 ID 更新必须递增 revision。`space`、`esc` 等按键 ID 区分大小写。
 
 `node scripts/check-resource-library.mjs` 验证资源与存储行为；`node scripts/build-model-catalog.mjs --check` 同时检查宠物、键鼠目录。键鼠资源格式暂不加载自定义网格；宠物 GLB 请使用版本 2 `.kurocat.json`。
+
+3D 奶蛙清单修订 2 使用 `three-naiwa-v1` 实时控制：复用猫咪的键鼠、道具、头眼跟随和动作调度，坐姿尺寸固定。完整裸 GLB 也可自动识别；旧版作为通用 GLB 导入的奶蛙需重新导入，以更新适配器。它仍引用同一个作者 GLB，新行为由应用提供，旧应用不会因下载新清单而自动获得新行为。通用 `three-glb-v1` 继续只播放映射的实际片段。

@@ -1163,6 +1163,10 @@ test('every shipped catalog package matches its standalone file after normalizat
   assert.equal(catalog.length, standalone.length);
   for (const cat of standalone) {
     assert.deepEqual(catalog.find(p => p.skin.id === cat.skin.id), parseModelPack(exportModelPack(cat.skin, cat.asset)));
+    if (cat.profile.adapters.includes('three-naiwa-v1')) {
+      assert.deepEqual(modelActions(cat.skin, '3d'), MODEL_CONTRACT.adapters['three-cat-v1'].actions);
+      continue;
+    }
     if (cat.profile.glb) {
       const animated = Object.keys(cat.profile.glb.animations)
         .filter(k => !['idle', 'typing', 'mouse', 'angry', 'pet'].includes(k)).concat('calm');
@@ -1703,21 +1707,110 @@ test('frog closed eyelids never leave a second iris sliver beneath the sleeping 
 });
 
 
-test('Naiwa desk stays in authored contact space across board changes and resets on model switch', () => {
-  const e=engine3d(), desk=e.desk;
-  const originalBoard=desk.boardGroup.position.clone(), originalMouse=desk.mouseGroup.position.clone();
-  const root=e.rollRoot.clone(false); root.scale.setScalar(.759); root.position.set(.03,0,-.014); root.rotation.y=.3;
-  desk.setMouseNormalized(1,1); tick(e,.3);
-  desk.setNaiwaLayout(root);
-  for(const layout of ['65','108','65']) {
-    desk.rebuildBoard(layout,'cat');
-    tick(e,.3);
-    near(desk.deskGroup.worldToLocal(desk.keyTopWorld('a')).y,.496,1e-5,'authored key contact height');
-    const position=desk.mouseGroup.position.clone();
-    desk.setMouseNormalized(0,0); tick(e,.3);
-    nearVector(desk.mouseGroup.position,position,1e-6,'baked contact must not drift with cursor');
+test('live Naiwa shares normal desks, real prop contacts, gaze and interruptible actions', async (t) => {
+  const { Texture, Box3 } = await import('three');
+  const { GLTFLoader } = await import('three/addons/loaders/GLTFLoader.js');
+  const { GlbActor } = await import('../src/glbActor.ts');
+  const loader = new GLTFLoader();
+  loader.register(() => ({ name: 'TEST_TEXTURES', loadTexture: () => Promise.resolve(new Texture()) }));
+  const bytes = readFileSync(new URL('../art/naiwa/naiwa.glb', import.meta.url));
+  const gltf = await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '');
+  const pack = parseModelPack(JSON.parse(readFileSync(new URL('../model-store/naiwa-3d.kurocat.json', import.meta.url), 'utf8')));
+  const actor = GlbActor.fromScene(gltf.scene, gltf.animations, pack.profile.glb, true);
+  // Replace only native file/texture IO; use the real imported scene and engine lifecycle.
+  t.mock.method(GlbActor, 'load', async () => actor);
+  const e = engine3d(), desk = e.desk;
+  t.after(() => { e.stop(); actor.dispose(); });
+  const boardPosition = desk.boardGroup.position.clone();
+  e.setCatSkin(pack.skin); await e.glbReady; e.setTailKeyConfig('off', []);
+  assert.equal(e.rollRoot.visible, false);
+  assert.equal(actor.supportsContacts, true);
+  near(new Box3().setFromObject(actor.root).getSize(new Vector3()).y, 2.3, 1e-6, 'seated import height');
+  const scale = actor.root.scale.clone(), origin = actor.root.position.clone();
+  const world = name => gltf.scene.getObjectByName(name).getWorldPosition(new Vector3());
+  const contacts = () => {
+    nearVector(world('gripRight'), e.paws.L.pos, 1e-5, 'left visible hand');
+    nearVector(world('gripLeft'), e.paws.R.pos, 1e-5, 'right visible hand');
+  };
+  const step = seconds => { tick(e, seconds, 1 / 30); contacts(); };
+  // Opt-in offline visual review: only writes ignored cache files, never source assets.
+  const review = process.env.NAIWA_REVIEW === '1'
+    ? (await import('./lib/naiwa-review.mjs')).createNaiwaReview(bytes) : null;
+  const snapshot = name => review?.(name, e.scene, e.camera);
+  const morph = name => {
+    let value = 0;
+    gltf.scene.traverse(m => { const i = m.morphTargetDictionary?.[name]; if (i !== undefined) value = Math.max(value, m.morphTargetInfluences[i]); });
+    return value;
+  };
+  for (const layout of ['65', '108']) {
+    e.setKeyboardConfig(layout, 'cat'); step(.15);
+    nearVector(desk.deskGroup.scale, new Vector3(1, 1, 1));
+    nearVector(desk.boardGroup.position, boardPosition);
+    for (const vk of [65, 74, 32]) {
+      e.onKeyDown(vk); step(.15);
+      const paw = Object.values(e.paws).find(p => p.keyId && p.down);
+      assert.ok(paw, 'input owns a hand');
+      assert.ok(paw.pos.distanceTo(desk.keyTopWorld(paw.keyId)) < .16, 'hand reaches actual key');
+      e.onKeyUp(vk); step(.55);
+    }
+    for (const facing of ['cat', 'viewer']) {
+      e.setMouseOrientation(facing); e.onGlobalMouseMove(.1, .2); e.onMouseDown('left'); step(.6);
+      const first = world('gripRight');
+      e.onGlobalMouseMove(.9, .8); step(.6);
+      assert.ok(first.distanceTo(world('gripRight')) > .03, 'hand follows moving mouse');
+      e.onMouseUp('left');
+    }
+    nearVector(actor.root.scale, scale); nearVector(actor.root.position, origin);
   }
-  desk.setNaiwaLayout(null); tick(e,.3);
-  nearVector(desk.boardGroup.position,originalBoard); nearVector(desk.mouseGroup.position,originalMouse);
-  nearVector(desk.deskGroup.scale,new Vector3(1,1,1)); e.stop();
+  e.releaseInputs(); step(1); snapshot('scene-desk');
+  e.onWindowCursor(.95, .15, false); step(.6);
+  assert.ok(e.headRot.yaw > .12, 'head turns toward cursor');
+  const pupil = gltf.scene.getObjectByName('PupilL');
+  const rightPupil = Array.from(pupil.geometry.attributes.position.array);
+  e.onWindowCursor(.05, .85, false); step(.6);
+  assert.ok(e.headRot.yaw < -.12, 'head reverses smoothly');
+  assert.notDeepEqual(Array.from(pupil.geometry.attributes.position.array), rightPupil, 'pupils look independently of head');
+  assert.equal(morph('CheekPuff.L'), 0, 'ordinary interaction never puffs cheeks');
+  snapshot('scene-gaze');
+  for (const [i, kind] of ['coffee', 'boba', 'cola', 'energy', 'pudding'].entries()) {
+    const side = i % 2 ? 'left' : 'right';
+    e.setPropConfig(propConfig(kind, side));
+    assert.ok(e.getHitRegions().prop, 'live imported model exposes prop hit area');
+    assert.equal(e.clickProp(), 'sipped'); step(.9);
+    assert.equal(e.propPhase, 'sip');
+    const h = e.propHandle, hand = side === 'left' ? 'gripRight' : 'gripLeft';
+    nearVector(h.mouthAnchor.clone().applyMatrix4(h.group.matrixWorld), world('mouth'), 1e-5, kind + ' mouth');
+    nearVector(h.gripAnchor.clone().applyMatrix4(h.group.matrixWorld), world(hand), 1e-5, kind + ' held cup');
+    // Correct contact points alone previously hid the whole wrist inside the belly.
+    // Ray-test against actual torso faces, excluding the arm's own skinned surface.
+    const surface = gltf.scene.getObjectByName('Naiwa_Surface');
+    surface.computeBoundingBox(); surface.computeBoundingSphere();
+    const indices = surface.geometry.attributes.skinIndex, weights = surface.geometry.attributes.skinWeight;
+    const torsoVertex = index => ['getX','getY','getZ','getW'].every(get =>
+      weights[get](index) < .01 || !/^(arm|hand|finger|thumb|clavicle)/.test(surface.skeleton.bones[indices[get](index)].name));
+    for (const name of [hand, side === 'left' ? 'handR' : 'handL']) {
+      const point = world(name), ray = new Raycaster(point.clone().add(new Vector3(0,0,3)), new Vector3(0,0,-1));
+      const torso = ray.intersectObject(surface, false).filter(hit => hit.face && [hit.face.a,hit.face.b,hit.face.c].every(torsoVertex));
+      if (torso.length) assert.ok(point.z > Math.max(...torso.map(hit => hit.point.z)) + .015, kind + ' wrist clears torso');
+    }
+    snapshot('scene-' + kind);
+    e.onKeyDown(65); step(.1); assert.equal(e.propPhase, 'return');
+    e.onKeyUp(65); step(.6); assert.equal(e.propPhase, 'rest');
+  }
+  e.setPropConfig({ ...DEFAULT_PROP, enabled: false }); step(1);
+  e.triggerIdleAction('wave'); e.idleAct.side = 1; step(.9); assert.equal(e.idleAct?.kind, 'wave');
+  snapshot('scene-wave');
+  const before = world('gripLeft');
+  e.onKeyDown(74); step(1 / 30);
+  assert.equal(e.idleAct, null);
+  assert.ok(before.distanceTo(world('gripLeft')) < .5, 'input blends from current wave pose');
+  e.onKeyUp(74); step(.8);
+  nearVector(actor.root.scale, scale); nearVector(actor.root.position, origin);
+  e.triggerIdleAction('nap'); step(3.5);
+  assert.equal(e.asleep, true); assert.ok(morph('Drool') > .9);
+  snapshot('scene-nap');
+  e.onMouseDown('left'); step(.1); e.onMouseUp('left');
+  assert.equal(e.asleep, false); assert.ok(e.sleepReaction.active(e.elapsed));
+  e.triggerIdleAction('calm'); step(.8); assert.equal(e.sleepReaction.active(e.elapsed), false);
+  assert.ok(morph('Drool') < .01);
 });

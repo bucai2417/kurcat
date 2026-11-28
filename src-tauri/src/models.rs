@@ -70,7 +70,8 @@ pub fn validate(value: Value) -> Result<CatSkinConfig, String> {
     if let Some(g) = &profile.glb {
         if value["version"] != 2 || value["asset"].get("url").is_some() { return Err("本地安装需要版本 2 的内嵌 GLB；商城请先下载资源".into()); }
         let bytes = crate::glb::decode(value["asset"]["data"].as_str().ok_or("缺少 asset.data")?)?;
-        crate::glb::validate(&bytes, g)?;
+        if profile.adapters.iter().any(|a| a == "three-naiwa-v1") { crate::glb::validate_naiwa(&bytes, g)?; }
+        else { crate::glb::validate(&bytes, g)?; }
     } else if value["version"] != 1 || value.get("asset").is_some() { return Err("外观模型使用版本 1".into()); }
     let s = &value["skin"];
     let id = text(&s["id"], 36)?;
@@ -195,6 +196,9 @@ pub fn actions(id: &str, preferred: &str) -> Value {
     let all = cats::all_cats();
     let cat = all.iter().find(|cat| cat.id == id);
     let actual = cat.map(|cat| mode(cat, preferred)).unwrap_or_else(|| preferred.into());
+    if actual == "3d" && cat.and_then(|cat| cat.model_profile.as_ref()).is_some_and(|p| p.adapters.iter().any(|a| a == "three-naiwa-v1")) {
+        return c["adapters"]["three-naiwa-v1"]["actions"].clone();
+    }
     if actual == "3d" { if let Some(g) = cat.and_then(|c| c.model_profile.as_ref()).and_then(|p| p.glb.as_ref()) {
         let mut actions: Vec<&str> = g.animations.keys().map(String::as_str).filter(|k| !["idle","typing","mouse","angry","pet"].contains(k)).collect();
         actions.push("calm"); return json!(actions);
@@ -318,6 +322,9 @@ mod tests {
 
 pub fn read_glb(id: &str) -> Result<String, String> {
     let _guard = MODEL_IO.lock().map_err(|_| "模型存储暂不可用".to_string())?;
-    let p = cats::all_cats().into_iter().find(|c| c.id == id).and_then(|c| c.model_profile).and_then(|p| p.glb).ok_or("已安装模型没有 GLB 资源")?;
-    Ok(crate::glb::encode(&crate::glb::read(&p)?))
+    let profile = cats::all_cats().into_iter().find(|c| c.id == id).and_then(|c| c.model_profile).ok_or("已安装模型没有配置")?;
+    let p = profile.glb.as_ref().ok_or("已安装模型没有 GLB 资源")?;
+    let bytes = crate::glb::read(p)?;
+    if profile.adapters.iter().any(|a| a == "three-naiwa-v1") { crate::glb::validate_naiwa(&bytes, p)?; }
+    Ok(crate::glb::encode(&bytes))
 }

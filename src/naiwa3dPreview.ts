@@ -1,223 +1,143 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { KuroCatEngine3D } from './catEngine3d';
+import { parseModelPack } from './modelPack';
+import { encodeGlb, resolveGlbAsset } from './glbModel';
+import { DEFAULT_PROP, PROP_KINDS, type PropKind } from './prop';
+import type { KeyboardLayoutId } from './keyboardLayout';
 
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const viewport = element<HTMLDivElement>('viewport');
 const loading = element<HTMLDivElement>('loading');
-const loadMessage = element<HTMLParagraphElement>('load-message');
-const retry = element<HTMLButtonElement>('retry');
-const play = element<HTMLButtonElement>('play');
-const restart = element<HTMLButtonElement>('restart');
-const timeline = element<HTMLInputElement>('timeline');
-const time = element<HTMLOutputElement>('time');
 const status = element<HTMLParagraphElement>('status');
-const clipButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-clip]')];
+const play = element<HTMLButtonElement>('play');
+const typing = element<HTMLInputElement>('typing');
+const autoIdle = element<HTMLInputElement>('auto-idle');
+const prop = element<HTMLSelectElement>('prop-kind');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const canvas = document.createElement('canvas');
+canvas.tabIndex = 0;
+canvas.setAttribute('aria-label', '奶蛙桌面互动，聚焦后可用键盘输入');
+viewport.prepend(canvas);
+for (const kind of PROP_KINDS) prop.add(new Option(kind.label, kind.id));
+prop.value = 'coffee';
+let engine: KuroCatEngine3D | undefined;
+let ready = false;
 let playing = !reducedMotion.matches;
-let rig: THREE.Group | undefined;
-let mixer: THREE.AnimationMixer | undefined;
-let active: THREE.AnimationAction | undefined;
-let skeleton: THREE.SkeletonHelper | undefined;
-const actions = new Map<string, THREE.AnimationAction>();
-const modelUrl = new URL('../art/naiwa/naiwa.glb', import.meta.url).href;
-
-function showError(message: string) {
-  loading.hidden = false;
-  loadMessage.textContent = message;
-  retry.hidden = false;
-  status.textContent = '预览暂不可用。模型源文件仍可从下方下载。';
+let dragging: { id: number; x: number; y: number } | undefined;
+const pressed = new Set<number>();
+const mouseButtons = new Set<string>();
+const running = () => ready && playing && !document.hidden;
+function releaseMouse() {
+  for (const button of mouseButtons) engine?.onMouseUp(button);
+  mouseButtons.clear(); dragging = undefined;
 }
-
-function startPreview() {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-  renderer.setClearColor(0xf6f5ef);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  viewport.prepend(renderer.domElement);
-  renderer.domElement.setAttribute('aria-label', '3D 奶蛙模型');
-  renderer.domElement.addEventListener('webglcontextlost', (event) => {
-    event.preventDefault();
-    renderer.setAnimationLoop(null);
-    showError('图形上下文已中断，请重新加载预览。');
-  });
-  const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(34, 1, .05, 100);
-  const orbit = new OrbitControls(camera, renderer.domElement);
-  orbit.enableDamping = !reducedMotion.matches;
-  orbit.dampingFactor = .12;
-  orbit.minDistance = .65;
-  orbit.maxDistance = 12;
-  orbit.maxPolarAngle = Math.PI * .53;
-  function setView(view: string) {
-    orbit.target.set(0, 1.5, 0);
-    if (view === 'hands') {
-      selectClip('rest');
-      orbit.target.set(.78, 1.04, .16);
-      camera.position.set(1.25, 1.17, 1.45);
-    } else if (view === 'front') camera.position.set(0, 1.5, 7.5);
-    else if (view === 'side') camera.position.set(7.5, 1.5, 0);
-    else if (view === 'back') camera.position.set(0, 1.5, -7.5);
-    else camera.position.set(3.4, 2.7, 7.4);
-    orbit.update();
-  }
-  setView('front');
-  document.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button => {
-    button.addEventListener('click', () => setView(button.dataset.view!));
-  });
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb0a88b, 2));
-  const key = new THREE.DirectionalLight(0xfff5dc, 3);
-  key.position.set(-3, 7, 5);
-  key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
-  key.shadow.camera.left = key.shadow.camera.bottom = -3;
-  key.shadow.camera.right = key.shadow.camera.top = 3;
-  key.shadow.normalBias = .025;
-  scene.add(key);
-  const fill = new THREE.DirectionalLight(0xe4edff, 1.5);
-  fill.position.set(4, 3, -3);
-  scene.add(fill);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0xf6f5ef, roughness: 1 }));
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -.025;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  // Authoring contact guides only; not part of the exported character.
-  const props = new THREE.Group();
-  const propMaterial = new THREE.MeshStandardMaterial({ color: 0xb8beb3, roughness: .75 });
-  const keyboard = new THREE.Mesh(new THREE.BoxGeometry(1.32, .07, .44), propMaterial);
-  keyboard.position.set(0, .445, 1);
-  keyboard.receiveShadow = true;
-  props.add(keyboard);
-  const keys = new THREE.InstancedMesh(new THREE.BoxGeometry(.11, .035, .10), new THREE.MeshStandardMaterial({ color: 0xe7e8dc }), 40);
-  const transform = new THREE.Matrix4();
-  for (let row = 0; row < 4; row++) for (let col = 0; col < 10; col++) {
-    transform.makeTranslation((col - 4.5) * .127, .496, 1 + (row - 1.5) * .105);
-    keys.setMatrixAt(row * 10 + col, transform);
-  }
-  props.add(keys);
-  const mouse = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), propMaterial);
-  mouse.scale.set(.14, .08, .21);
-  mouse.position.set(-1, .44, .91);
-  props.add(mouse);
-  const table = new THREE.Mesh(new THREE.BoxGeometry(2.7, .035, .8), new THREE.MeshStandardMaterial({ color: 0xdad1bc, roughness: .9 }));
-  table.position.set(-.2, .385, 1.02);
-  props.add(table);
-  props.visible = false;
-  scene.add(props);
-  element<HTMLInputElement>('props').addEventListener('change', event => { props.visible = (event.target as HTMLInputElement).checked; });
-  element<HTMLInputElement>('skeleton').addEventListener('change', event => { if (skeleton) skeleton.visible = (event.target as HTMLInputElement).checked; });
-
-  function updatePlayback() {
-    play.textContent = playing ? '暂停' : '播放';
-    play.disabled = restart.disabled = timeline.disabled = !active;
-  }
-  function selectClip(name: string) {
-    if (!rig || !mixer) return;
-    if (name === 'rest') {
-      mixer.stopAllAction();
-      rig.traverse(object => {
-        if (object instanceof THREE.SkinnedMesh) object.pose();
-        if (object instanceof THREE.Mesh && object.morphTargetInfluences) object.morphTargetInfluences.fill(0);
-      });
-      active = undefined;
-      playing = false;
-    } else {
-      const next = actions.get(name);
-      if (!next) return;
-      const previous = active;
-      next.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).play();
-      if (previous && previous !== next && playing && !reducedMotion.matches) next.crossFadeFrom(previous, .28, false);
-      else {
-        mixer.stopAllAction();
-        next.reset().play();
-      }
-      active = next;
-      playing = !reducedMotion.matches;
-      mixer.update(0);
-    }
-    clipButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.clip === name)));
-    timeline.max = String(active?.getClip().duration ?? 1);
-    timeline.value = '0';
-    time.textContent = '0.0 / ' + (active?.getClip().duration ?? 0).toFixed(1) + ' 秒';
-    updatePlayback();
-  }
-  clipButtons.forEach(button => button.addEventListener('click', () => selectClip(button.dataset.clip!)));
-  play.addEventListener('click', () => { playing = !playing; updatePlayback(); });
-  restart.addEventListener('click', () => { if (active) { active.time = 0; mixer!.update(0); } });
-  timeline.addEventListener('input', () => {
-    if (!active || !mixer) return;
-    playing = false;
-    // Clear a pending crossfade before deterministic scrubbing.
-    mixer.stopAllAction();
-    active.reset().play();
-    active.time = Number(timeline.value);
-    mixer.update(0);
-    updatePlayback();
-  });
-  const motionChanged = () => { orbit.enableDamping = !reducedMotion.matches; if (reducedMotion.matches) playing = false; updatePlayback(); };
-  reducedMotion.addEventListener('change', motionChanged);
-  const resize = new ResizeObserver(() => {
-    const { width, height } = viewport.getBoundingClientRect();
-    renderer.setSize(width, height, false);
-    camera.aspect = width / Math.max(1, height);
-    camera.updateProjectionMatrix();
-  });
-  resize.observe(viewport);
-  const loader = new GLTFLoader();
-  loader.load(modelUrl, gltf => {
-    rig = gltf.scene;
-    rig.traverse(object => {
-      if (object instanceof THREE.Mesh) { object.castShadow = true; object.receiveShadow = true; }
-    });
-    scene.add(rig);
-    skeleton = new THREE.SkeletonHelper(rig);
-    skeleton.visible = element<HTMLInputElement>('skeleton').checked;
-    scene.add(skeleton);
-    mixer = new THREE.AnimationMixer(rig);
-    gltf.animations.forEach(clip => actions.set(clip.name, mixer!.clipAction(clip)));
-    clipButtons.forEach(button => { button.disabled = button.dataset.clip !== 'rest' && !actions.has(button.dataset.clip!); });
-    loading.hidden = true;
-    let bones = 0;
-    rig.traverse(object => { if (object instanceof THREE.Bone) bones++; });
-    status.textContent = bones + ' 根骨骼 · ' + actions.size + ' 段动画 · ' + (reducedMotion.matches ? '已按系统偏好暂停，点击播放查看动作。' : '模型加载完成。');
-    selectClip('rest');
-  }, event => {
-    if (event.total) loadMessage.textContent = '正在加载模型… ' + Math.round(event.loaded / event.total * 100) + '%';
-  }, () => showError('模型加载失败。请通过项目开发服务器打开此页面，再重试。'));
-  let previousTime = performance.now();
-  renderer.setAnimationLoop(now => {
-    const delta = Math.min((now - previousTime) / 1000, .05);
-    previousTime = now;
-    if (document.hidden) return;
-    if (mixer && playing) mixer.update(delta);
-    if (active) {
-      timeline.value = String(active.time);
-      time.textContent = active.time.toFixed(1) + ' / ' + active.getClip().duration.toFixed(1) + ' 秒';
-    }
-    orbit.update();
-    renderer.render(scene, camera);
-  });
-  window.addEventListener('pagehide', () => {
-    renderer.setAnimationLoop(null);
-    resize.disconnect();
-    reducedMotion.removeEventListener('change', motionChanged);
-    orbit.dispose();
-    mixer?.stopAllAction();
-    if (rig) mixer?.uncacheRoot(rig);
-    scene.traverse(object => {
-      if (object instanceof THREE.Mesh) {
-        object.geometry.dispose();
-        for (const material of Array.isArray(object.material) ? object.material : [object.material]) material.dispose();
-      }
-    });
-    skeleton?.dispose();
-    renderer.dispose();
-  }, { once: true });
+function release() {
+  for (const key of pressed) engine?.onKeyUp(key);
+  pressed.clear(); releaseMouse();
 }
-retry.addEventListener('click', () => location.reload());
-try { startPreview(); } catch { showError('无法启动 3D 预览，请启用浏览器硬件加速后重试。'); }
+function playback() {
+  release();
+  if (running()) engine?.start(); else engine?.stop();
+  play.textContent = playing ? '暂停预览' : '继续预览';
+  play.setAttribute('aria-pressed', String(!playing));
+  status.textContent = playing ? '互动已开启：移动鼠标、打字或选择一个动作。' : '预览已暂停，点击“继续预览”后可互动。';
+}
+function configureProp() {
+  engine?.setPropConfig({ ...DEFAULT_PROP, enabled: true, autoSip: false, kind: prop.value as PropKind });
+}
+function error(message: string) {
+  ready = false; engine?.stop(); release(); loading.hidden = false;
+  element('load-message').textContent = message;
+  element('retry').hidden = false;
+  for (const control of document.querySelectorAll<HTMLFieldSetElement>('aside fieldset')) control.disabled = true;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) button.disabled = true;
+  typing.disabled = play.disabled = true;
+  status.textContent = '预览暂不可用。可重新加载，或下载模型到 DIY-Cat 中查看。';
+}
+async function startPreview() {
+  engine = new KuroCatEngine3D(canvas, { embedded: true });
+  engine.setIdleAutoEnabled(false); engine.setMoodTrackingEnabled(true);
+  const [manifest, binary] = await Promise.all([
+    fetch(new URL('../model-store/naiwa-3d.kurocat.json', import.meta.url)),
+    fetch(new URL('../art/naiwa/naiwa.glb', import.meta.url)),
+  ]);
+  if (!manifest.ok || !binary.ok) throw Error('模型文件读取失败，请通过项目开发服务器打开预览');
+  const pack = parseModelPack({ ...await manifest.json(), asset: { data: encodeGlb(new Uint8Array(await binary.arrayBuffer())) } });
+  await resolveGlbAsset(pack.profile.glb!, pack.asset, true);
+  engine.setKeyboardConfig('65', 'cat'); configureProp();
+  await engine.snapshot(pack.skin);
+  ready = true; loading.hidden = true;
+  for (const control of document.querySelectorAll<HTMLFieldSetElement>('aside fieldset')) control.disabled = false;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) button.disabled = false;
+  typing.disabled = play.disabled = false; playback();
+}
+play.addEventListener('click', () => { playing = !playing; playback(); });
+prop.addEventListener('change', configureProp);
+element('layout').addEventListener('change', event => engine?.setKeyboardConfig((event.target as HTMLSelectElement).value as KeyboardLayoutId, 'cat'));
+autoIdle.addEventListener('change', () => engine?.setIdleAutoEnabled(autoIdle.checked));
+element('use-prop').addEventListener('click', () => {
+  if (!running()) { status.textContent = '请先点击“继续预览”。'; return; }
+  const result = engine!.clickProp();
+  status.textContent = result === 'busy' ? '等当前动作结束后，再试一次。' : result === 'refilled' ? '已补充道具，再点一次即可享用。' : '拿起、享用，再放回桌面。';
+});
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action]')) button.addEventListener('click', () => {
+  if (!running()) { status.textContent = '请先点击“继续预览”。'; return; }
+  if (button.dataset.action === 'curious') engine!.triggerCuriousDemo();
+  else engine!.triggerIdleAction(button.dataset.action!, true);
+});
+for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) button.addEventListener('click', () => {
+  engine!.resetOrbit();
+  if (button.dataset.view === 'left') engine!.addOrbitDelta(-75, 0);
+  if (button.dataset.view === 'right') engine!.addOrbitDelta(75, 0);
+  if (button.dataset.view === 'front') engine!.addOrbitDelta(0, -12);
+});
+// The preview only observes keys while its canvas or typing field is focused.
+function virtualKey(event: KeyboardEvent): number | undefined {
+  if (/^Key[A-Z]$/.test(event.code)) return event.code.charCodeAt(3);
+  if (/^Digit[0-9]$/.test(event.code)) return 48 + Number(event.code.slice(5));
+  if (/^Numpad[0-9]$/.test(event.code)) return 96 + Number(event.code.slice(6));
+  const keys: Record<string, number> = { Space: 32, Enter: 13, NumpadEnter: 0x10d, Backspace: 8,
+    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Comma: 188, Period: 190,
+    Slash: 191, Semicolon: 186, Quote: 222, Minus: 189, Equal: 187, BracketLeft: 219, BracketRight: 221, Backslash: 220 };
+  return keys[event.code];
+}
+document.addEventListener('keydown', event => {
+  if (!running() || event.ctrlKey || event.metaKey || event.altKey || (document.activeElement !== typing && document.activeElement !== canvas)) return;
+  const vk = virtualKey(event); if (vk == null) return;
+  pressed.add(vk); engine!.onKeyDown(vk, event.repeat);
+  if (document.activeElement === canvas) event.preventDefault();
+});
+document.addEventListener('keyup', event => {
+  const vk = virtualKey(event); if (vk != null && pressed.delete(vk)) engine?.onKeyUp(vk);
+});
+typing.addEventListener('blur', release); canvas.addEventListener('blur', release);
+document.addEventListener('pointermove', event => {
+  if (!running()) return;
+  if (dragging?.id === event.pointerId) {
+    engine!.addOrbitDelta((event.clientX - dragging.x) * .4, (event.clientY - dragging.y) * .25);
+    dragging.x = event.clientX; dragging.y = event.clientY; return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  const inside = event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+  engine!.onPointerMove(event.clientX, event.clientY, inside, element<HTMLInputElement>('petting').checked);
+});
+canvas.addEventListener('pointerdown', event => {
+  if (!running()) return;
+  canvas.focus();
+  if (event.shiftKey) { dragging = { id: event.pointerId, x: event.clientX, y: event.clientY }; canvas.setPointerCapture(event.pointerId); return; }
+  if (engine!.hitTestProp(event.clientX, event.clientY)) { engine!.clickProp(); return; }
+  const button = ['left', 'middle', 'right'][event.button];
+  if (button) { mouseButtons.add(button); engine!.onMouseDown(button); }
+});
+document.addEventListener('pointerup', releaseMouse); canvas.addEventListener('pointercancel', releaseMouse);
+canvas.addEventListener('contextmenu', event => event.preventDefault());
+canvas.addEventListener('wheel', () => { if (running()) engine!.onMouseWheel(); }, { passive: true });
+canvas.addEventListener('webglcontextlost', event => { event.preventDefault(); error('图形上下文中断，请重新加载预览。'); });
+element('retry').addEventListener('click', () => location.reload());
+const resize = new ResizeObserver(() => engine?.resize()); resize.observe(viewport);
+window.addEventListener('blur', release);
+document.addEventListener('visibilitychange', playback);
+reducedMotion.addEventListener('change', () => {
+  if (reducedMotion.matches) { playing = false; autoIdle.checked = false; engine?.setIdleAutoEnabled(false); playback(); }
+});
+window.addEventListener('pagehide', () => { release(); engine?.stop(); resize.disconnect(); });
+void startPreview().catch(cause => error(cause instanceof Error ? cause.message : '无法启动 3D 预览，请检查浏览器硬件加速设置。'));

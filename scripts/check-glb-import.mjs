@@ -93,9 +93,38 @@ test('published Naiwa manifest matches the shipped mesh, animations and 3D adapt
   assert.deepEqual(pack.profile.adapters, ['three-naiwa-v1']);
   assert.match(pack.asset.url, /^https:\/\/raw\.githubusercontent\.com\/bucai2417\/kurcat\/[a-f0-9]{40}\/art\/naiwa\/naiwa\.glb$/);
   assert.equal(pack.profile.glb.sha256, await glbHash(bytes));
-  validateGlbMapping(pack.profile.glb, bytes);
+  validateGlbMapping(pack.profile.glb, bytes, true);
   assert.deepEqual(Object.keys(pack.profile.glb.animations).sort(), ['idle','typing','mouse','sway','wave','nap','angry','delight'].sort());
   const actions = modelActions(pack.skin, '3d');
-  assert.ok(actions.includes('wave') && actions.includes('nap') && actions.includes('delight'));
-  assert.ok(!actions.includes('drink') && !actions.includes('roll'));
+  assert.ok(actions.includes('wave') && actions.includes('nap') && actions.includes('pawCheck'));
+  assert.ok(actions.includes('drink') && actions.includes('roll'));
+  assert.equal(validateGlb(bytes).naiwaRig,true);
+  const importedPack=(await readModelFiles([new File([bytes],'renamed-frog.glb')]))[0];
+  assert.deepEqual(importedPack.profile.adapters,['three-naiwa-v1']);
+  assert.throws(()=>validateGlbMapping(pack.profile.glb,fixture(),true),/完整骨架/);
+});
+
+
+test('incomplete Naiwa hierarchy or pupils cannot opt into live controls', async () => {
+  const bytes = await readFile(new URL('../art/naiwa/naiwa.glb', import.meta.url));
+  const size = bytes.readUInt32LE(12);
+  const source = JSON.parse(bytes.subarray(20, 20 + size).toString('utf8'));
+  const binary = bytes.subarray(20 + size);
+  const pack = parseModelPack(await readFile(new URL('../model-store/naiwa-3d.kurocat.json', import.meta.url), 'utf8'));
+  for (const [reason, change] of [
+    ['detached head', (d, node) => { node('neck').children = []; }],
+    ['detached shoulder', (d, node) => { node('chest').children = node('chest').children.filter(i => !d.nodes[i].name.startsWith('clavicle')); }],
+    ['foot outside skin joints', (d, node) => { const i = d.nodes.indexOf(node('foot.L')); d.skins.forEach(s => { s.joints = s.joints.filter(j => j !== i); }); }],
+    ['missing pupil normals', (d, node) => { delete d.meshes[node('Pupil.L').mesh].primitives[0].attributes.NORMAL; }],
+    ['pupil group instead of mesh', (d, node) => { const p = d.meshes[node('Pupil.L').mesh].primitives; p.push(structuredClone(p[0])); }],
+  ]) {
+    const doc = structuredClone(source), node = name => doc.nodes.find(n => n.name === name);
+    change(doc, node);
+    const text = Buffer.from(JSON.stringify(doc)), json = Buffer.alloc(Math.ceil(text.length / 4) * 4, 32);
+    text.copy(json);
+    const changed = Buffer.concat([bytes.subarray(0, 20), json, binary]);
+    changed.writeUInt32LE(changed.length, 8); changed.writeUInt32LE(json.length, 12);
+    assert.equal(validateGlb(changed).naiwaRig, false, reason);
+    assert.throws(() => validateGlbMapping(pack.profile.glb, changed, true), /完整骨架/, reason);
+  }
 });

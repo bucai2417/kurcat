@@ -156,7 +156,7 @@ export function installTauriPreviewShim(): boolean {
         if (!args.replace && cats.some(c => c.id === pack.skin.id)) throw Error('该模型 ID 已存在；请选择替换，或修改模型包的 ID');
         const previous = cats.find(c => c.id === pack.skin.id);
         if (!previous && cats.length >= 50) throw Error('自定义模型最多 50 个');
-        if (pack.profile.glb) await saveBrowserGlb(pack.profile.glb.sha256, await resolveGlbAsset(pack.profile.glb, pack.asset));
+        if (pack.profile.glb) await saveBrowserGlb(pack.profile.glb.sha256, await resolveGlbAsset(pack.profile.glb, pack.asset, pack.profile.adapters.includes('three-naiwa-v1')));
         store.cats = cats.filter(c => c.id !== pack.skin.id).concat(pack.skin);
         try { persist(true); } catch (error) {
           store.cats = cats;

@@ -32,6 +32,6 @@ python scripts/extract-naiwa-art.py path/to/reference.png
 
 已有开发预览服务中打开 `/harness.html?breed=builtin-naiwa&idle=0`，对照参考图测试双手敲键、点鼠标、原尾巴按键、嘴边鼓腮、坐着打盹 · 流口水、左右晃身、好奇探头、交替摆脚和五种道具。奶蛙专属合成音效已移除，键鼠音效仍独立设置。停止按钮会结束当前动作及道具交互。
 
-内置奶蛙继续使用这里的 2D 分层素材，版本 1 模型包用于调整配色和配置。独立的 [3D 作者模型](../../../art/naiwa/README.md) 已支持通过版本 2 模型包导入桌宠，包含 Blender 源文件、自包含 GLB、80 根骨骼与 8 段动画。推荐导入 [3D 奶蛙清单](../../../model-store/naiwa-3d.kurocat.json)，以启用 `three-naiwa-v1` 的键鼠布局校准；裸 `.glb` 使用通用适配器。3D 只开放包内实际映射的动作，不会自动继承 2D 的道具抓握和脚部按键动作。
+内置奶蛙继续使用这里的 2D 分层素材，版本 1 包用于调整配色和配置。独立的 [3D 作者模型](../../../art/naiwa/README.md) 支持版本 2 包导入，包含 Blender 源文件、自包含 GLB、80 根骨骼与 8 段作者动画。推荐导入 [3D 奶蛙清单](../../../model-store/naiwa-3d.kurocat.json)；通过完整骨架校验的裸 GLB 也会自动启用 `three-naiwa-v1`。该适配器接入猫咪共用的键鼠、道具、视线、情绪和小动作；普通 GLB 仍仅播放已映射片段。
 
-在 `/naiwa3d.html` 可检查导出的 3D 动作与手部近景；导入、导出和商城协议见 [模型包说明](../../../docs/model-packs.md)，骨架与动作制作见 [3D 奶蛙设计](../../../docs/naiwa-3d-design.md)。趴下睡觉仍是后续动作设计，当前 2D / 3D 均保持坐着打盹。
+在 `/naiwa3d.html` 可用与桌宠相同的引擎检查 3D 互动；导入、导出和商城协议见 [模型包说明](../../../docs/model-packs.md)，骨架与实时控制见 [3D 奶蛙设计](../../../docs/naiwa-3d-design.md)。趴下睡觉仍是后续动作设计，当前 2D / 3D 均保持坐着打盹。

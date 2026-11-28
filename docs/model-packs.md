@@ -29,7 +29,7 @@ DIY-Cat 1.0.0 沿用原来的模型包格式和设置目录，升级改名无需
 
 ## 完整示例
 
-仓库提供可直接导入的 [薄荷云朵外观包](../model-store/mint-cloud.kurocat.json) 和 [奶蛙 3D 清单包](../model-store/naiwa-3d.kurocat.json)。奶蛙包包含动作映射与专用键鼠布局，导入时会下载并校验对应 GLB。一个最小可用外观包如下：
+仓库提供可直接导入的 [薄荷云朵外观包](../model-store/mint-cloud.kurocat.json) 和 [奶蛙 3D 清单包](../model-store/naiwa-3d.kurocat.json)。奶蛙包包含实时软臂、视线跟随与共享行为，导入时会下载并校验对应 GLB。一个最小可用外观包如下：
 
 ```json
 {
@@ -100,7 +100,7 @@ DIY-Cat 1.0.0 沿用原来的模型包格式和设置目录，升级改名无需
 
 配色字段为 `furColor`、`furSecondaryColor`、`outlineColor`、`bellyBibColor`、`armColor`、`pawColor`、`pawOutlineColor`、`eyeColorTop`、`eyeColorBottom`、`pupilColor`、`eyeCatchlight`、`mouthColor`、`blushColor`；奶蛙不绘制猫咪耳朵、尾巴、花纹或斑点。部件和形变通道由 `get_builtin_rigs` 返回，并标明此处配色与输入映射属于 2D 绘制器。3D 条目标记 `glb-import-supported`，不会自动继承 2D 的全部行为。
 
-当前奶蛙的坐姿身体和脚掌来自用户提供参考图的拆分素材；打盹保持坐姿，旧趴姿素材不再用于睡觉。手臂、掌心与手指由运行时连续形变生成，见 [素材说明](../src/assets/naiwa/README.md)。模型包仅改变现有素材配色，不包含新的图片或骨骼。另已提供 [3D 奶蛙建模初版](../art/naiwa/README.md)：Blender 源文件、80 骨骼 GLB、8 段动作和独立 HTML 预览。骨架与接入方式见 [制作说明](naiwa-3d-design.md)。通过[奶蛙 3D 包](../model-store/naiwa-3d.kurocat.json)可导入桌宠，并应用作者键鼠布局校准；直接导入裸 GLB 使用通用适配器，不启用该专用校准。
+内置 2D 奶蛙的坐姿身体和脚掌来自参考图拆分素材，打盹保持坐姿，手臂与手指通过连续形变绘制，见 [素材说明](../src/assets/naiwa/README.md)。其外观包仅改变现有配色。另有 [3D 奶蛙作者文件](../art/naiwa/README.md)：Blender、80 骨骼 GLB 与 8 段作者动画。导入 [3D 奶蛙清单](../model-store/naiwa-3d.kurocat.json) 后由实时软臂和共享猫咪引擎驱动键鼠、道具、视线与行为；HTML 预览 `/naiwa3d.html` 使用同一套引擎。裸 GLB 只有通过完整奶蛙骨架与表情校验才会自动选择专用适配器，详见 [制作说明](naiwa-3d-design.md)。
 
 ## 动作与反应契约
 
@@ -116,7 +116,7 @@ UI、MCP 和 OBS 读取同一个 [modelContract.json](../src/modelContract.json)
 | `calm` | 安抚当前起床气，平滑收尾 | 支持 | 支持 |
 | `roll` / `listen` / `shimmy` / `pawCheck` | 地上打滚、侧耳听、抖毛、检查爪子 | 不支持 | 支持 |
 
-以上表格属于内置猫咪适配器。外部 GLB 只显示映射的实际片段和安抚功能，不能自动获得未制作的道具、尾巴或打滚动作。大肥鱼仅声明 `drink`、`stretch`、`wave`。MCP 保留 `sleep`→`nap` 的旧名兼容；`roll` 在 3D 中是真正打滚，不再映射成撒娇。
+以上表格适用于内置猫咪和完整的 `three-naiwa-v1` 奶蛙，奶蛙没有尾巴，拍地改为跺脚。通用 `three-glb-v1` 只显示映射的实际片段和安抚功能，不能自动获得未制作的道具、尾巴或打滚动作。大肥鱼仅声明 `drink`、`stretch`、`wave`。MCP 保留 `sleep`→`nap` 的旧名兼容；`roll` 在 3D 中是真正打滚。
 
 | 输入或状态 | 需要呈现的反应 |
 | --- | --- |
@@ -208,17 +208,17 @@ UI 接受 GitHub 的 `blob/.../catalog.json` 文件链接并转换为 Raw，也�
 ```
 
 - `asset` 二选一：`data` 为 Base64（本地导出和 MCP 安装），或 `url` 为允许的公开 GitHub Raw HTTPS 地址（UI 导入 / 商城）。SHA-256 不匹配会停止安装；不支持任意下载站或文件系统路径。
-- `height` 为归一化站姿高度，范围 0.5–4，默认 2.3；`yaw` 为朝向角度，范围 -180–180，默认 0。只在加载时确定尺度，切换 UI / 动作不会按动态包围盒重新缩放。
+- `height` 为初始 `idle` 姿态的归一化高度（没有 `idle` 时使用绑定姿态），范围 0.5–4，默认 2.3；`yaw` 为朝向角度，范围 -180–180，默认 0。只在加载时确定尺度，切换 UI / 动作不会按动态包围盒重新缩放。
 - `skin` 字段提供库内名称和兼容元数据；GLB 的外观来自其材质和贴图，修改猫咪配色字段不会给任意网格重新上色。
 - GLB 必须为 glTF 2.0，只有 JSON 与 BIN 数据块，网格和 PNG/JPEG 贴图均内嵌，不允许 URI、外部文件、脚本、Draco、Meshopt 或 KTX2。单个二进制最大 16 MiB，完整 JSON 包最大 23 MiB；最多 4096 节点、512 网格、64 动画、16 张贴图，单张不超过 4096×4096、合计不超过 1600 万像素。
-- 动作映射的键可用 `idle / typing / mouse / nap / angry / delight / sway / wave / pet / stretch / tilt / slowBlink / groom / cuddle / roll / listen / shimmy / pawCheck`；值必须为 GLB 中存在且唯一命名的片段。支持骨骼动画与形态键。没有映射的菜单动作不会显示，输入反应缺失时回退到待机或静态姿态。
-- 裸 `.glb` 导入会按同名片段识别上述动作并生成通用包。需要自定义映射或奶蛙键鼠校准时，用版本 2 清单。只改适配器名称不能把旧 2D 配色包变成 3D 模型。
+- 动作映射的键可用 `idle / typing / mouse / nap / angry / delight / sway / wave / pet / stretch / tilt / slowBlink / groom / cuddle / roll / listen / shimmy / pawCheck`；值必须为 GLB 中存在且唯一命名的片段。支持骨骼动画与形态键。通用适配器没有映射的菜单动作不会显示，输入反应缺失时回退到待机或静态姿态；奶蛙专用适配器的交互动作由应用共享引擎提供。
+- 裸 `.glb` 导入会检查骨架层级、软臂表面朝向、挂点、瞳孔、表情和 `idle` / `nap` 片段，完整匹配时使用 `three-naiwa-v1`，否则使用 `three-glb-v1`，不依据文件名猜测。旧版以通用适配器导入的奶蛙可重新导入裸 GLB，或使用修订 2 的奶蛙清单。导出的离线包保留适配器、映射及完整 GLB。
 - 动作切换使用 0.22 秒平滑混合；键鼠输入、抚摸和情绪可中断手动动作。奶蛙 `nap` 先播放入睡段，再保持片段中部的睡眠区间，避免反复闭眼又醒来；因此替换奶蛙睡眠片段时需保留前 40% 入睡、40–60% 熟睡的布局。通用 GLB 睡眠片段应自行制作成合适的循环。
-- 当前没有导入模型的道具抓握 IK，GLB 模式会隐藏真实道具。也不自动重定向任意骨架、生成缺失动作或根据骨骼名称合成闭眼；隐私模式停止输入驱动并回到待机。
+- `three-naiwa-v1` 使用经过校验的专用软臂和脚部接触控制，支持正常键鼠、拿杯饮用、输入中断、头眼跟随、表情和共享动作。通用 `three-glb-v1` 不自动重定向任意骨架或生成缺失动作，并隐藏未适配的真实道具；隐私模式停止输入驱动。
 
 ## 后续作者工具与接触求解
 
-GLB 加载、保存、删除、导出、静态预览、动作映射及状态过渡已接通。以下仍是后续制作和适配要求，不能把作者文件里存在挂点等同于应用已完成相应交互：
+GLB 加载、保存、删除、导出、静态预览、动作映射及过渡已接通。完整奶蛙骨架的实时接触和共享行为已实现；下面是将相同能力扩展到任意外部骨架时的制作与验收要求，通用适配器尚不具备这些能力：
 
 | 接入部件 | 外部模型需要提供的信息 | 验收要求 |
 | --- | --- | --- |

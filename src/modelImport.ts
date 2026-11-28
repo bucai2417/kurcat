@@ -28,21 +28,21 @@ export async function readModelFiles(files: File[]): Promise<ModelPack[]> {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (/\.glb$/i.test(file.name)) {
-        const { animations: clips } = validateGlb(bytes); const sha256 = await glbHash(bytes);
+        const { animations: clips, naiwaRig } = validateGlb(bytes); const sha256 = await glbHash(bytes);
         const animations = Object.fromEntries(GLB_BEHAVIORS.filter(k => clips.includes(k)).map(k => [k, k]));
         const title = file.name.replace(/\.glb$/i, '').slice(0, 42) || '导入模型';
         packs.push(parseModelPack({ format: 'kurocat-model', version: 2,
-          profile: { adapters: ['three-glb-v1'], behaviorContract: 'cat-v1', glb: { sha256, animations, height: 2.3, yaw: 0 } },
+          profile: { adapters: [naiwaRig ? 'three-naiwa-v1' : 'three-glb-v1'], behaviorContract: 'cat-v1', glb: { sha256, animations, height: 2.3, yaw: 0 } },
           skin: { id: 'glb-' + sha256.slice(0, 20), name: title, furColor: '#e9ead4', eyeColorTop: '#161b17' }, asset: { data: encodeGlb(bytes) },
         }));
       } else packs.push(...parseModelFiles([{ name: file.name, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) }]));
     } catch (error) { throw Error(file.name + '：' + (error instanceof Error ? error.message : String(error))); }
   }
   if (packs.length > 50 || new Set(packs.map(p => p.skin.id)).size !== packs.length) throw Error('一次最多 50 个模型，模型 ID 不能重复');
-  for (const pack of packs) if (pack.profile.glb && pack.asset?.data) await resolveGlbAsset(pack.profile.glb, pack.asset);
+  for (const pack of packs) if (pack.profile.glb && pack.asset?.data) await resolveGlbAsset(pack.profile.glb, pack.asset, pack.profile.adapters.includes('three-naiwa-v1'));
   return packs;
 }
 export async function materializeModelPack(pack: ModelPack): Promise<ModelPack> {
   if (!pack.profile.glb) return pack;
-  return { ...pack, asset: { data: encodeGlb(await resolveGlbAsset(pack.profile.glb, pack.asset)) } };
+  return { ...pack, asset: { data: encodeGlb(await resolveGlbAsset(pack.profile.glb, pack.asset, pack.profile.adapters.includes('three-naiwa-v1'))) } };
 }

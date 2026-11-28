@@ -5,13 +5,16 @@ import './build-model-catalog.mjs';
 import * as THREE from 'three';
 const { GlbActor } = await import('../src/glbActor.ts');
 
-function actor(mapping = {idle:'idle', wave:'wave', typing:'typing', nap:'nap'}, naiwa = true) {
+function actor(mapping = {idle:'idle', wave:'wave', typing:'typing', nap:'nap'}, naiwa = false) {
   const scene = new THREE.Group();
   const pose = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), new THREE.MeshBasicMaterial());
   pose.name = 'pose'; scene.add(pose);
   const clips = Object.entries({idle:0, wave:1, typing:-1, nap:2}).map(([name, value]) =>
     new THREE.AnimationClip(name, 6, [new THREE.NumberKeyframeTrack('pose.position[x]', [0,3,6], [value,value+.1,value])]));
-  return { pet:new GlbActor(scene, clips, {height:2.3,yaw:0,animations:mapping}, naiwa), pose };
+  const pet=GlbActor.fromScene(scene, clips, {height:2.3,yaw:0,animations:mapping});
+  // Test only the nap clock here; actual rig integrity is covered by check-naiwa-runtime.
+  pet.naiwa=naiwa;
+  return { pet, pose };
 }
 function advance(pet, seconds, state) { for (let i=0;i<Math.round(seconds*60);i++) pet.update(1/60,state,false); }
 
@@ -30,7 +33,7 @@ test('reversing a transition and keyboard interruption preserve the visible pose
 });
 
 test('Naiwa remains in the settled nap section until input wakes it', () => {
-  const {pet}=actor(); advance(pet,3,'nap');
+  const {pet}=actor(undefined,true); advance(pet,3,'nap');
   for(let i=0;i<1800;i++) {
     pet.update(1/60,'nap',false);
     const time=pet.actions.get('nap').time;

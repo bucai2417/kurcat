@@ -41,7 +41,7 @@ export function parseModelPack(value: unknown): ModelPack {
     profile.glb = parseGlbProfile(p.glb);
     if (!record(value.asset) || (typeof value.asset.data === 'string') === (typeof value.asset.url === 'string')) throw Error('GLB 模型需要 asset.data 或 asset.url，只能选择一种');
     asset = typeof value.asset.data === 'string' ? { data: value.asset.data } : { url: glbUrl(String(value.asset.url)) };
-    if (asset.data != null) validateGlbMapping(profile.glb, decodeGlb(asset.data));
+    if (asset.data != null) validateGlbMapping(profile.glb, decodeGlb(asset.data), adapters.includes('three-naiwa-v1'));
   } else if (value.version !== 1 || p.glb != null || value.asset != null) throw Error('外观配置使用版本 1；GLB 需使用 three-glb-v1 适配器');
   for (const k of ['author', 'license'] as const) if (p[k] != null) profile[k] = text(p[k], k, 100);
   if (p.revision != null) {
@@ -96,6 +96,7 @@ export function modelActions(cat: CatSkinConfig | undefined, preferred: ModelMod
   const adapters = cat?.modelProfile?.adapters ?? ['canvas-cat-v1', 'three-cat-v1'];
   const adapter = adapters.find(a => contract.adapters[a]?.mode === preferred)
     ?? (preferred === '2d' ? 'canvas-cat-v1' : 'three-cat-v1');
+  if (adapter === 'three-naiwa-v1') return contract.adapters[adapter].actions;
   if (preferred === '3d' && cat?.modelProfile?.glb) return Object.keys(cat.modelProfile.glb.animations).filter(k => !['idle','typing','mouse','angry','pet'].includes(k)).concat('calm');
   return contract.adapters[adapter].actions;
 }

@@ -57,6 +57,8 @@ jobs:
         run: node scripts/check-glb-import.mjs
       - name: Check GLB motion transitions
         run: node scripts/check-glb-motion.mjs
+      - name: Check Naiwa mesh contacts and gaze
+        run: node scripts/check-naiwa-runtime.mjs
       - name: Check keyboard and mouse resources
         run: node scripts/check-resource-library.mjs
       - name: Check public model catalog

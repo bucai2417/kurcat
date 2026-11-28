@@ -1651,16 +1651,14 @@ export class KuroCatEngine3D {
   private glbReady: Promise<void> = Promise.resolve();
   private loadGlb(skin: CatSkinConfig): void {
     const profile = skin.modelProfile?.glb;
-    const key = profile ? JSON.stringify([skin.id, profile]) : '';
+    const key = profile ? JSON.stringify([skin.id, skin.modelProfile?.adapters, profile]) : '';
     if (key === this.glbKey) return;
     this.glbKey = key; const generation = ++this.glbGeneration;
     this.glbActor?.dispose(); this.glbActor = undefined;
     this.rollRoot.visible = !profile;
-    this.desk.setNaiwaLayout(null);
     this.glbReady = profile ? GlbActor.load(skin).then(actor => {
       if (generation !== this.glbGeneration) { actor.dispose(); return; }
-      this.glbActor = actor; this.scene.add(actor.root);
-      if (skin.modelProfile!.adapters.includes('three-naiwa-v1')) this.desk.setNaiwaLayout(actor.root);
+      this.glbActor = actor; this.scene.add(actor.motionRoot);
       this.wakeRendering();
     }) : Promise.resolve();
     void this.glbReady.catch(error => {
@@ -1858,7 +1856,7 @@ export class KuroCatEngine3D {
       petBox: this.windowRegion(0.5, 0.5, 0.5, 0.5),
       cat: (this.glbActor && modelHitArea(this.glbActor.root, this.camera, this.viewport.width, this.viewport.height)) || { cx: 0.5, cy: 0.44, rx: 0.30, ry: 0.36 },
       desk: { cx: 0.5, cy: 0.78, rx: 0.40, ry: 0.20 },
-      prop: this.propEnabled && !this.currentSkin?.modelProfile?.glb ? this.propScreenRegion() : null,
+      prop: this.propEnabled && (!this.currentSkin?.modelProfile?.glb || this.glbActor?.supportsContacts) ? this.propScreenRegion() : null,
       menuBox: null,
     };
   }
@@ -1878,7 +1876,7 @@ export class KuroCatEngine3D {
 
   /** Clicking the cup refills it, or drinks from it if it still has liquid. */
   public clickProp(): 'refilled' | 'sipped' | 'busy' {
-    if (this.currentSkin?.modelProfile?.glb) return 'busy';
+    if (this.currentSkin?.modelProfile?.glb && !this.glbActor?.supportsContacts) return 'busy';
     if (!this.propHandle || this.privacyMode || this.sleepReaction.visible(this.elapsed) || this.rollPose.tuck > 0 || this.idleAct?.kind === 'roll') return 'busy';
     if (this.propPhase !== 'rest') return 'busy';
     this.wake();
@@ -2003,9 +2001,13 @@ export class KuroCatEngine3D {
     if (!handle) return;
     const cup = handle.group;
     const home = this.getPropHome(this.propHome);
-    const yaw = this.propSide === 'left' ? 0.30 : -0.30;
+    const liveNaiwa = !!this.glbActor?.supportsContacts;
+    // Naiwa has a forward belly and a short muzzle. Turn the grip toward the
+    // owning hand and bring the bottom forward so neither cup nor wrist hides in it.
+    const yaw = (this.propSide === 'left' ? 1 : -1) * (liveNaiwa ? Math.PI / 2 : 0.30);
     this.propRestRotation.setFromEuler(new THREE.Euler(0, yaw, 0));
-    const tilt = this.propKind === 'boba' ? 0.06 : this.propKind === 'pudding' ? 0.12 : 0.65;
+    const tilt = liveNaiwa ? (this.propKind === 'boba' ? .55 : .85)
+      : this.propKind === 'boba' ? 0.06 : this.propKind === 'pudding' ? 0.12 : 0.65;
     const lift = this.propPhase === 'sip' ? 1 : this.propPhase === 'lift'
       ? smoothstep(0, 1, clamp(this.propPhaseT / this.propPhaseDur.lift, 0, 1)) : 0;
     cup.rotation.set(-tilt * lift, yaw, 0);
@@ -2014,7 +2016,8 @@ export class KuroCatEngine3D {
         smoothstep(0, 1, clamp(this.propPhaseT / this.propPhaseDur.return, 0, 1)));
     }
     this.headMount.updateWorldMatrix(true, false);
-    this.propMouthTarget.set(0, -0.08, this.surfaceZ(0, -0.08) + 0.04).applyMatrix4(this.headMount.matrixWorld);
+    if (!this.glbActor?.socket('mouth', this.propMouthTarget))
+      this.propMouthTarget.set(0, -0.08, this.surfaceZ(0, -0.08) + 0.04).applyMatrix4(this.headMount.matrixWorld);
     this.tmpV1.copy(handle.mouthAnchor).applyQuaternion(cup.quaternion);
     this.propMouthTarget.sub(this.tmpV1);
     if (this.propPhase === 'lift') {
@@ -2120,7 +2123,7 @@ export class KuroCatEngine3D {
     if (this.sleepReaction.visible(this.elapsed)) return;
     const kind = rawKind === 'sleep' ? 'nap' : rawKind;
     if (kind === 'drink') { this.clickProp(); return; }
-    if (this.currentSkin?.modelProfile?.glb && kind !== 'nap') {
+    if (this.currentSkin?.modelProfile?.glb && !this.glbActor?.supportsContacts && kind !== 'nap') {
       if (this.glbActor?.trigger(kind)) { this.wake(); this.isCross = false; this.annoy = 0; this.wakeRendering(); }
       return;
     }
@@ -2190,7 +2193,7 @@ export class KuroCatEngine3D {
           this.tailKeyMode !== 'off' &&
           (this.desk.isRightEdgeTailKey(k.spec.id) ||
             (this.tailKeyMode === 'smart' && (k.spec.id === 'space' || k.spec.id === 'enter'))));
-    if (useTail) {
+    if (useTail && (!this.glbActor?.liveRig || this.glbActor.liveRig.canFootReach(this.desk.keyTopWorld(k.spec.id, this.tmpV1)))) {
       this.triggerTailKey(k.spec.id, k.spec.bubble || k.spec.label || k.spec.id);
       return;
     }
@@ -2467,6 +2470,7 @@ export class KuroCatEngine3D {
     this.captionSprite.visible = true;
     this.headMount.updateMatrixWorld(false);
     this.captionSprite.position.set(0, 0.73, 0.15).applyMatrix4(this.headMount.matrixWorld);
+    if (this.glbActor?.socket('headTouch', this.captionSprite.position)) this.captionSprite.position.y += .25;
     this.captionSprite.scale.set(1.65, 1.65 * 112 / 512, 1);
   }
 
@@ -2814,7 +2818,8 @@ export class KuroCatEngine3D {
         ? [...this.tailKeyIdSet].filter((id) => this.desk.getKeyById(id))
         : ['enter', 'space'].filter((id) => this.desk.getKeyById(id) &&
             (this.tailKeyMode !== 'edge' || this.desk.isRightEdgeTailKey(id)));
-      const pick = ids[Math.floor(Math.random() * ids.length)];
+      const reachable = ids.filter(id => !this.glbActor?.liveRig || this.glbActor.liveRig.canFootReach(this.desk.keyTopWorld(id, this.tmpV1)));
+      const pick = reachable[Math.floor(Math.random() * reachable.length)];
       if (pick) this.tailSlapKey(pick);
     }
 
@@ -2822,7 +2827,7 @@ export class KuroCatEngine3D {
     if (this.idleAct && t > this.idleAct.t0 + this.idleAct.dur) this.idleAct = null;
     if (
       this.idleAutoEnabled &&
-      !this.currentSkin?.modelProfile?.glb && this.propPhase === 'rest' && this.propMoodT === 0 &&
+      (!this.currentSkin?.modelProfile?.glb || this.glbActor?.supportsContacts) && this.propPhase === 'rest' && this.propMoodT === 0 &&
       !this.idleAct &&
       this.rollPose.tuck === 0 &&
       t >= this.nextIdleAct &&
@@ -2874,7 +2879,7 @@ export class KuroCatEngine3D {
     const reactionMark = propReaction.mark ?? typingPose.mark;
     if (reactionMark && Math.max(propReaction.amount, typingPose.amount) > 0.45 && t >= this.nextReactionFx) {
       this.nextReactionFx = t + 0.65;
-      this.headMount.getWorldPosition(this.tmpV1);
+      if (!this.glbActor?.socket('headTouch', this.tmpV1)) this.headMount.getWorldPosition(this.tmpV1);
       this.tmpV1.x += Math.sin(t * 3) * 0.42; this.tmpV1.y += 0.42;
       this.spawnFx(reactionMark, this.tmpV1, new THREE.Vector3(0.07 * Math.sin(t), 0.32, 0), 0.17, 0.9);
     }
@@ -3032,6 +3037,12 @@ export class KuroCatEngine3D {
     // Deform one-piece body+head smoothly & sync headMount + optional collar!
     this.deformCatBody();
     this.placeHeadAndCollar();
+    this.glbActor?.update(dt, this.privacyMode ? 'idle' : this.petting ? 'pet' : this.sleepReaction.active(t) ? 'angry' : this.asleep ? 'nap' :
+      t - this.lastKey < .4 ? (this.isCross ? 'angry' : 'typing') : t - this.lastMouse < .25 ? 'mouse' :
+      this.typingReactions.kind === 'excited' && typingPose.amount > .3 ? 'delight' :
+      this.typingReactions.kind === 'groove' && typingPose.amount > .3 ? 'sway' : 'idle', this.idleAutoEnabled && !this.privacyMode);
+    this.glbActor?.pose(dt, { head: this.headRot, lean: this.bend.x, hunch: this.bend.z,
+      blink: 0, anger: this.privacyMode ? 0 : cross, sleeping: this.sleepAmt });
     this.positionProp();
 
     // 5b) Smooth drop-on gaming headset animation + reactive KuroCat-lime/cyan RGB earcup glow!
@@ -3205,6 +3216,7 @@ export class KuroCatEngine3D {
       if (ground.impact) {
         const tip = this.tailCurve.points[this.tailCurve.points.length - 1];
         const contact = new THREE.Vector3(tip.x, 0.065, tip.z);
+        if (this.glbActor?.socket('footContactLeft', contact)) contact.y = .06;
         this.spawnFx('bang', contact, new THREE.Vector3(0, 0.04, 0), 0.48, 0.32);
         for (const side of [-1, 1]) this.spawnFx('dust', contact.clone(), new THREE.Vector3(side * 0.6, 0.25, 0.12), 0.22, 0.5);
         this.sSquash.kick(0.42); this.sPitch.kick(0.55);
@@ -3235,6 +3247,7 @@ export class KuroCatEngine3D {
 
       this.tmpPawLocal.set(paw.side * 0.24, 0.16 - this.sleepAmt * 0.06, 0.54);
       const tuckHome = this.attachLocal(this.tmpPawLocal, this.tmpV3);
+      if (this.glbActor?.supportsContacts) tuckHome.set(paw.side * .40, .28 - this.sleepAmt * .04, .63);
 
       if (rolling) {
         this.tmpPawLocal.set(paw.side * 0.28, 0.73 + 0.045 * Math.sin(t * 5 + paw.side), 0.62);
@@ -3308,6 +3321,14 @@ export class KuroCatEngine3D {
             wave ? 1.30 : act.kind === 'stretch' ? 0.48 : 0.78, wave ? 0.50 : 0.92);
           this.attachLocal(this.tmpPawLocal, this.tmpV2);
         }
+        if (this.glbActor?.socket('head', this.tmpV2)) {
+          // Naiwa has different proportions: gesture goals follow its actual head.
+          if (act.kind === 'wave') this.tmpV2.add(new THREE.Vector3(paw.side * (.70 + .07 * Math.sin(actU * Math.PI * 8)), .04, .18));
+          else if (act.kind === 'groom') this.tmpV2.add(new THREE.Vector3(paw.side * .20, -.10 + .035 * Math.sin(actU * Math.PI * 6), .36));
+          else if (act.kind === 'pawCheck') this.tmpV2.add(new THREE.Vector3(paw.side * .38, -.45, .55));
+          else if (act.kind === 'stretch') this.tmpV2.add(new THREE.Vector3(paw.side * .65, .20, .20));
+          else this.tmpV2.add(new THREE.Vector3(paw.side * .28, -.48, .48));
+        }
         this.tmpV2.lerpVectors(tuckHome, this.tmpV2, actEnv);
         paw.pos.copy(paw.spring.step(this.tmpV2, dt));
         paw.last.copy(paw.pos);
@@ -3319,6 +3340,7 @@ export class KuroCatEngine3D {
         if (propReaction.paw === 'cheek' && paw.side === propArmSide) {
           this.tmpV2.set(paw.side * 0.14, -0.10 + 0.025 * Math.sin(t * 8), this.surfaceZ(0.14, -0.1) + 0.09);
           this.tmpV2.applyMatrix4(this.headMount.matrixWorld);
+          if (this.glbActor?.socket('mouth', this.tmpV2)) this.tmpV2.add(new THREE.Vector3(paw.side * .19, -.04, .08));
         } else if (propReaction.paw === 'pump') {
           this.tmpPawLocal.set(paw.side * 0.47, 0.92 + 0.08 * Math.sin(t * 8 + paw.side), 0.68);
           this.attachLocal(this.tmpPawLocal, this.tmpV2);
@@ -3381,7 +3403,23 @@ export class KuroCatEngine3D {
       arm.paw.rotation.y = Math.atan2(arm.hand.x - arm.c2.x, Math.max(0.1, arm.hand.z - arm.c2.z)) * 0.42;
     }
 
+    this.glbActor?.liveRig?.eyes(Math.max(blinkClose, this.squintAmt * .75, this.privacyClose), this.sleepAmt, gazeX, gazeY, curious, this.excite);
+    const mode = (paw: PawTrack3D): 'desk' | 'wave' | 'cup' => {
+      if (rolling) return 'desk';
+      if (propReaching && paw.side === propArmSide) return 'cup';
+      const tapping = !!paw.keyId && (paw.down || t - paw.t0 < .52);
+      if (tapping || (mousing && paw.side === -1)) return 'desk';
+      const raised = act && (act.kind === 'stretch' ||
+        (['wave', 'groom', 'pawCheck'].includes(act.kind) && act.side === paw.side));
+      return raised ? 'wave' : 'desk';
+    };
+    this.glbActor?.contacts(dt, { left: this.paws.L.pos, right: this.paws.R.pos,
+      leftMode: mode(this.paws.L), rightMode: mode(this.paws.R),
+      foot: this.tailTap.keyId ? this.tailTap.tip : undefined, footWeight: rolling ? 0 : this.tailTap.reach,
+      stomp: rolling ? 0 : this.groundTail.amount, stompLift: this.groundTail.lift });
     this.applyGroundRoll();
+    this.glbActor?.roll(this.rollPose);
+    if (this.glbActor?.supportsContacts) this.glbActor.finishFrame(dt);
 
     // 10) Floating Key Bubbles, Anger Mark 💢 & Sleep Zzz FX
     for (let i = this.popups.length - 1; i >= 0; i--) {
@@ -3407,6 +3445,7 @@ export class KuroCatEngine3D {
       const pulse = 1 + 0.10 * Math.sin(t * 14) + (t - this.lastSlam < 0.22 ? 0.16 : 0);
       this.headMount.updateMatrixWorld(false);
       this.tmpFxPos.set(-0.52, 0.44, 0.18).applyMatrix4(this.headMount.matrixWorld);
+      if (this.glbActor?.socket('headTouch', this.tmpFxPos)) this.tmpFxPos.add(new THREE.Vector3(-.35, .10, .10));
       this.angerSprite.position.copy(this.tmpFxPos);
       this.angerSprite.scale.setScalar(0.40 * pulse * smoothstep(0.25, 0.65, cross));
     } else {
@@ -3417,13 +3456,11 @@ export class KuroCatEngine3D {
       this.nextZ = t + 1.35;
       this.headMount.updateMatrixWorld(false);
       const zPos = this.tmpFxPos.set(0.46, 0.42, 0.16).applyMatrix4(this.headMount.matrixWorld);
+      if (this.glbActor?.socket('headTouch', zPos)) zPos.add(new THREE.Vector3(.30, .08, .10));
       this.spawnFx('z', zPos, new THREE.Vector3(0.08, 0.36, 0), 0.31, 2.3);
     }
 
-    this.glbActor?.update(dt, this.privacyMode ? 'idle' : this.petting ? 'pet' : this.sleepReaction.active(t) ? 'angry' : this.asleep ? 'nap' :
-      t - this.lastKey < .4 ? (this.isCross ? 'angry' : 'typing') : t - this.lastMouse < .25 ? 'mouse' :
-      this.typingReactions.kind === 'excited' && typingPose.amount > .3 ? 'delight' :
-      this.typingReactions.kind === 'groove' && typingPose.amount > .3 ? 'sway' : 'idle', this.idleAutoEnabled && !this.privacyMode);
+
     const wakeAngry = this.sleepReaction.active(t);
     const caption = wakeAngry ? '还没睡够呢！' : t < this.soothedUntil ? '好啦，原谅你了' :
       propReaction.amount > 0.35 && this.propMood ? ({ coffee: '精神回来啦！', boba: '甜甜的好幸福', cola: '嗝，气泡冒出来了', energy: '元气充满！', pudding: '再来一口嘛' }[this.propMood] ?? '') :

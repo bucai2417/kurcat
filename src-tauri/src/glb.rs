@@ -145,6 +145,91 @@ pub fn validate(bytes: &[u8], profile: &Profile) -> Result<(), String> {
     if crate::updater::hash_bytes(bytes) != profile.sha256 { return Err("GLB SHA-256 不匹配".into()); }
     Ok(())
 }
+/// The dedicated live controller requires actual skin joints, hierarchy and morphs.
+/// A filename or a copied adapter label cannot opt an unrelated mesh into this rig.
+pub fn validate_naiwa(bytes: &[u8], profile: &Profile) -> Result<(), String> {
+    validate(bytes, profile)?;
+    let length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    let doc: serde_json::Value = serde_json::from_slice(&bytes[20..20 + length]).map_err(|e| e.to_string())?;
+    if !naiwa_signature(&doc) || !profile.animations.contains_key("idle") || !profile.animations.contains_key("nap") {
+        return Err("奶蛙专用适配器需要完整骨架、挂点、表情及 idle/nap 动画；普通模型请使用 three-glb-v1".into());
+    }
+    Ok(())
+}
+fn naiwa_signature(doc: &serde_json::Value) -> bool {
+    use std::collections::{HashMap, HashSet};
+    let Some(nodes) = doc["nodes"].as_array() else { return false; };
+    let mut names = HashMap::new();
+    for (index, node) in nodes.iter().enumerate() {
+        if let Some(name) = node["name"].as_str().filter(|n| !n.is_empty()) {
+            if names.insert(name.replace('.', ""), index).is_some() { return false; }
+        }
+    }
+    let mut parents = HashMap::new();
+    for (parent, node) in nodes.iter().enumerate() {
+        for child in node["children"].as_array().into_iter().flatten().filter_map(|c| c.as_u64()) {
+            parents.insert(child as usize, parent);
+        }
+    }
+    let descendant = |parent: &str, name: &str| {
+        let (Some(parent), Some(index)) = (names.get(parent), names.get(name)) else { return false; };
+        let mut cursor = parents.get(index);
+        for _ in 0..nodes.len() {
+            let Some(index) = cursor else { return false; };
+            if index == parent { return true; }
+            cursor = parents.get(index);
+        }
+        false
+    };
+    let pupil = |name: &str| {
+        let Some(index) = names.get(name) else { return false; };
+        let Some(mesh) = nodes[*index]["mesh"].as_u64() else { return false; };
+        let Some(primitives) = doc["meshes"][mesh as usize]["primitives"].as_array() else { return false; };
+        if primitives.len() != 1 { return false; }
+        let attributes = &primitives[0]["attributes"];
+        let (Some(position), Some(normal)) = (attributes["POSITION"].as_u64(), attributes["NORMAL"].as_u64()) else { return false; };
+        let position = &doc["accessors"][position as usize];
+        let normal = &doc["accessors"][normal as usize];
+        position["type"] == "VEC3" && normal["type"] == "VEC3" &&
+            position["count"].as_u64().is_some_and(|n| n > 0 && normal["count"].as_u64() == Some(n))
+    };
+    let joints: HashSet<usize> = doc["skins"].as_array().into_iter().flatten()
+        .flat_map(|s| s["joints"].as_array().into_iter().flatten())
+        .filter_map(|j| j.as_u64().map(|i| i as usize)).collect();
+    let bone = |name: &str| names.get(name).is_some_and(|i| joints.contains(i));
+    let child = |parent: &str, name: &str| match (names.get(parent), names.get(name)) {
+        (Some(p), Some(n)) => nodes[*p]["children"].as_array().is_some_and(|cs| cs.iter().any(|i| i.as_u64() == Some(*n as u64))),
+        _ => false,
+    };
+    let normal = |name: &str| names.get(name).is_some_and(|i| {
+        nodes[*i]["extras"]["surface_normal"].as_array().is_some_and(|v| v.len() == 3 &&
+            v.iter().all(|x| x.as_f64().is_some_and(f64::is_finite)) &&
+            v.iter().map(|x| x.as_f64().unwrap_or(0.0).powi(2)).sum::<f64>() > 0.25)
+    });
+    if !["PupilL", "PupilR"].iter().all(|n| pupil(n)) ||
+        !["pelvis", "spine", "chest", "head"].iter().all(|n| bone(n)) ||
+        !child("pelvis", "spine") || !child("spine", "chest") || !descendant("chest", "head") ||
+        !child("head", "mouth") || !child("head", "headTouch") { return false; }
+    for side in ["L", "R"] {
+        if !descendant("chest", &format!("arm03{}", side)) || !child("pelvis", &format!("thigh{}", side)) ||
+            !["thigh", "shin", "foot", "finger201"].iter().all(|prefix| bone(&format!("{}{}", prefix, side))) { return false; }
+        for i in 3..=14 {
+            let name = format!("arm{:02}{}", i, side);
+            let next = if i == 14 { format!("hand{}", side) } else { format!("arm{:02}{}", i+1, side) };
+            if !bone(&name) || !normal(&name) || !child(&name, &next) { return false; }
+        }
+        let hand = format!("hand{}", side);
+        if !bone(&hand) || !normal(&hand) || !child(&hand, &format!("finger201{}", side)) ||
+            !child(&hand, if side == "L" { "gripLeft" } else { "gripRight" }) ||
+            !child(&format!("thigh{}", side), &format!("shin{}", side)) ||
+            !child(&format!("shin{}", side), &format!("foot{}", side)) ||
+            !child(&format!("foot{}", side), if side == "L" { "footContactLeft" } else { "footContactRight" }) { return false; }
+    }
+    let morphs: HashSet<&str> = doc["meshes"].as_array().into_iter().flatten()
+        .flat_map(|m| m["extras"]["targetNames"].as_array().into_iter().flatten()).filter_map(|n| n.as_str()).collect();
+    let clips: HashSet<&str> = doc["animations"].as_array().into_iter().flatten().filter_map(|c| c["name"].as_str()).collect();
+    ["CheekPuff.L", "CheekPuff.R", "Blink", "Angry", "Drool"].iter().all(|n| morphs.contains(n)) && clips.contains("idle") && clips.contains("nap")
+}
 fn image_pixels(b: &[u8], mime: &str) -> Result<u64, String> {
     let checked = |w: u32, h: u32| if w == 0 || h == 0 || w > 4096 || h > 4096 { Err("GLB 纹理尺寸需在 1–4096 像素之间".to_string()) } else { Ok(w as u64 * h as u64) };
     if mime == "image/png" && b.len() >= 24 && &b[..8] == b"\x89PNG\r\n\x1a\n" && &b[12..16] == b"IHDR" { return checked(u32::from_be_bytes(b[16..20].try_into().unwrap()), u32::from_be_bytes(b[20..24].try_into().unwrap())); }
