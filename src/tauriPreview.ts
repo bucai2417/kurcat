@@ -1,3 +1,4 @@
+import { readBuiltinGlb } from './builtinGlb';
 import { encodeGlb, resolveGlbAsset } from './glbModel';
 import { saveBrowserGlb, readBrowserGlb, deleteBrowserGlb } from './glbStorage';
 /**
@@ -107,6 +108,16 @@ export function installTauriPreviewShim(): boolean {
   store.deskSkins ??= [];
   store.resources ??= [];
 
+  const allCats = (): CatSkinConfig[] => {
+    const cats = new Map(DEFAULT_BUILTIN_CATS.map(cat => [cat.id, cat]));
+    for (const cat of store.cats as CatSkinConfig[]) {
+      const builtin = cats.get(cat.id);
+      cats.set(cat.id, { ...cat, builtin: builtin?.builtin ?? false,
+        ...(cat.id === "builtin-naiwa" && builtin ? { modelProfile: builtin.modelProfile } : {}) });
+    }
+    return [...cats.values()];
+  };
+
   const persist = (required = false) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
@@ -149,7 +160,7 @@ export function installTauriPreviewShim(): boolean {
         return next;
       }
       case 'get_cats':
-        return [...DEFAULT_BUILTIN_CATS, ...(store.cats ?? [])];
+        return allCats();
       case 'import_model_pack': {
         const pack = parseModelPack(args.package);
         const cats = (store.cats ?? []) as CatSkinConfig[];
@@ -166,7 +177,7 @@ export function installTauriPreviewShim(): boolean {
         }
         const oldHash = previous?.modelProfile?.glb?.sha256;
         if (oldHash && !store.cats.some(c => (c as CatSkinConfig).modelProfile?.glb?.sha256 === oldHash)) await deleteBrowserGlb(oldHash).catch(error => console.warn('[models] unused asset cleanup', error));
-        queueMicrotask(() => emit('kuro-cats', [...DEFAULT_BUILTIN_CATS, ...store.cats!]));
+        queueMicrotask(() => emit('kuro-cats', allCats()));
         return pack.skin;
       }
       case 'delete_model_pack': {
@@ -180,21 +191,21 @@ export function installTauriPreviewShim(): boolean {
         if (settings().catBreed === id) store.settings = { ...settings(), catBreed: 'black' };
         try { persist(true); } catch (error) { store.cats = cats; store.settings = oldSettings; throw error; }
         if (oldHash && !store.cats.some(c => (c as CatSkinConfig).modelProfile?.glb?.sha256 === oldHash)) await deleteBrowserGlb(oldHash).catch(error => console.warn('[models] unused asset cleanup', error));
-        const result = [...DEFAULT_BUILTIN_CATS, ...store.cats];
+        const result = allCats();
         queueMicrotask(() => { emit('kuro-cats', result); emit('kuro-settings', { ...settings() }); });
         return result;
       }
       case 'read_model_glb': {
-        const cat = ((store.cats ?? []) as CatSkinConfig[]).find(c => c.id === args.id);
+        const cat = allCats().find(c => c.id === args.id);
         if (!cat?.modelProfile?.glb) throw Error('没有对应的 3D 模型');
-        return encodeGlb(await readBrowserGlb(cat.modelProfile.glb.sha256));
+        return encodeGlb(await readBuiltinGlb(cat.modelProfile.glb) ?? await readBrowserGlb(cat.modelProfile.glb.sha256));
       }
       case 'open_model_exports':
         throw Error('浏览器预览会将模型保存到下载目录，请从浏览器下载记录中打开；桌面版可直接打开导出文件夹');
       case 'export_model_pack': {
-        const cat = [...DEFAULT_BUILTIN_CATS, ...((store.cats ?? []) as CatSkinConfig[])].find(c => c.id === args.id);
+        const cat = allCats().find(c => c.id === args.id);
         if (!cat) throw Error('模型不存在');
-        const pack = exportModelPack(cat, cat.modelProfile?.glb ? { data: encodeGlb(await readBrowserGlb(cat.modelProfile.glb.sha256)) } : undefined); const name = pack.skin.id + '.kurocat.json';
+        const pack = exportModelPack(cat, cat.modelProfile?.glb ? { data: encodeGlb(await readBuiltinGlb(cat.modelProfile.glb) ?? await readBrowserGlb(cat.modelProfile.glb.sha256)) } : undefined); const name = pack.skin.id + '.kurocat.json';
         const url = URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json;charset=utf-8' }));
         const link = document.createElement('a'); link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10000);

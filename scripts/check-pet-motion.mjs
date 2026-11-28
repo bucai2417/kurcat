@@ -1072,13 +1072,15 @@ function examplePack() {
 
 test('model packages preserve Chinese text, round-trip builtins and expose renderer capabilities', () => {
   for (const cat of DEFAULT_BUILTIN_CATS.filter(c => c.id !== 'dafeiyu')) {
-    const pack = parseModelPack(JSON.stringify(exportModelPack(cat)));
+    const asset = cat.modelProfile?.glb
+      ? { data: readFileSync(new URL('../art/naiwa/naiwa.glb', import.meta.url)).toString('base64') }
+      : undefined;
+    const pack = parseModelPack(JSON.stringify(exportModelPack(cat, asset)));
     assert.equal(pack.skin.name, cat.name); assert.equal(pack.skin.id, cat.id + '-custom');
-    const frog = cat.modelProfile?.adapters.includes('canvas-naiwa-v1');
-    assert.deepEqual(modelModes(pack.skin), frog ? ['2d'] : ['2d', '3d']);
+    assert.deepEqual(modelModes(pack.skin), ['2d', '3d']);
     assert.ok(modelActions(pack.skin, '2d').includes('tailGround'));
     assert.ok(!modelActions(pack.skin, '2d').includes('roll'));
-    assert.equal(modelActions(pack.skin, '3d').includes('roll'), !frog);
+    assert.ok(modelActions(pack.skin, '3d').includes('roll'));
   }
   assert.throws(() => exportModelPack(DEFAULT_BUILTIN_CATS.find(c => c.id === 'dafeiyu')));
   const p = examplePack(); p.profile.adapters = ['three-cat-v1'];
@@ -1285,7 +1287,7 @@ test('original Chinese frog package imports, while legacy milk-cat ID keeps the 
   }
   for (const kind of FROG_ACTIONS) assert.ok(modelActions(original.skin, '2d').includes(kind));
   assert.deepEqual(modelActions(original.skin, '3d'), []);
-  assert.equal(MODEL_CONTRACT.rigs.naiwa.future3d.status, 'glb-import-supported');
+  assert.equal(MODEL_CONTRACT.rigs.naiwa.future3d.status, 'builtin-and-glb-import-supported');
 });
 
 test('frog pose is bounded and deterministic, folded feet sway and grooming exchanges hands smoothly', () => {
@@ -1734,6 +1736,8 @@ test('live Naiwa shares normal desks, real prop contacts, gaze and interruptible
     nearVector(world('gripLeft'), e.paws.R.pos.clone().applyMatrix4(actor.motionRoot.matrixWorld), 1e-5, 'right visible hand');
   };
   const step = seconds => { tick(e, seconds, 1 / 30); contacts(); };
+  const clearance = (await import('./lib/naiwa-clearance.mjs')).createArmClearanceCheck(gltf.scene.getObjectByName('Naiwa_Surface'));
+  const clearArms = label => { const result = clearance(); assert.equal(result.buried, 0, label + ': ' + JSON.stringify(result)); };
   // Opt-in offline visual review: only writes ignored cache files, never source assets.
   const review = process.env.NAIWA_REVIEW === '1'
     ? (await import('./lib/naiwa-review.mjs')).createNaiwaReview(bytes) : null;
@@ -1801,13 +1805,42 @@ test('live Naiwa shares normal desks, real prop contacts, gaze and interruptible
   e.setPropConfig({ ...DEFAULT_PROP, enabled: false }); step(1);
   e.triggerIdleAction('wave'); e.idleAct.side = 1; step(.9); assert.equal(e.idleAct?.kind, 'wave');
   snapshot('scene-wave');
-  step(.55); snapshot('scene-wave-high');
+  step(.55); snapshot('scene-wave-high'); clearArms('raised wave');
+  const wavePoints = Array.from({length: 12}, (_, i) => world('arm' + String(i + 3).padStart(2, '0') + 'L'));
+  wavePoints.push(world('handL'));
+  const waveLength = wavePoints.slice(1).reduce((sum, p, i) => sum + p.distanceTo(wavePoints[i]), 0);
+  assert.ok(waveLength > .7, 'waving retains a visible forearm instead of compressing to a stub');
   step(.55); snapshot('scene-wave-swing');
   const before = world('gripLeft');
   e.onKeyDown(74); step(1 / 30);
   assert.equal(e.idleAct, null);
   assert.ok(before.distanceTo(world('gripLeft')) < .5, 'input blends from current wave pose');
   e.onKeyUp(74); step(.8);
+  nearVector(actor.root.scale, scale); nearVector(actor.root.position, origin);
+  const shoulderRest = world('clavicleL'), armRest = world('arm03L');
+  e.triggerIdleAction('stretch');
+  assert.equal(e.idleAct.dur, 3.8);
+  let stretchTime = 0, lastHand = world('gripLeft');
+  for (const age of [.25, .65, 1.2, 1.8, 2.6, 3.3, 4.3]) {
+    while (stretchTime + 1e-6 < age) {
+      const dt = Math.min(1 / 30, age - stretchTime); step(dt); stretchTime += dt;
+      const hand = world('gripLeft');
+      assert.ok(hand.distanceTo(lastHand) < .24, 'stretch hand stays continuous'); lastHand = hand;
+    }
+    if (age === 1.8) {
+      assert.ok(world('clavicleL').distanceTo(shoulderRest) > .035, 'stretch moves the weighted clavicle');
+      assert.ok(world('arm03L').y > armRest.y + .08, 'upper arm rises with shoulder');
+    }
+    clearArms('stretch ' + age);
+    snapshot('scene-stretch-' + String(age).replace('.', '-'));
+  }
+  assert.equal(e.idleAct, null);
+  e.triggerIdleAction('stretch'); step(1.5);
+  const interruptedHand = world('gripLeft');
+  e.onKeyDown(74); step(1 / 30);
+  assert.equal(e.idleAct, null);
+  assert.ok(world('gripLeft').distanceTo(interruptedHand) < .3, 'typing interrupts stretch without teleporting');
+  e.onKeyUp(74); step(1.2);
   nearVector(actor.root.scale, scale); nearVector(actor.root.position, origin);
   for (const layout of ['65', '108']) {
     e.setKeyboardConfig(layout, 'cat');e.setTailKeyConfig('custom', ['enter']);

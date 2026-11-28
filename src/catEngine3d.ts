@@ -2141,7 +2141,7 @@ export class KuroCatEngine3D {
     }
     if (kind === 'sniff' && !this.glbActor?.liveRig) return;
     const durations: Partial<Record<IdleAct3D['kind'], number>> = {
-      sniff: 3.0, stretch: 2.8, wave: this.glbActor?.liveRig ? 3.4 : 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION, listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
+      sniff: 3.0, stretch: this.glbActor?.liveRig ? 3.8 : 2.8, wave: this.glbActor?.liveRig ? 3.4 : 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION, listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
     };
     const dur = durations[kind as IdleAct3D['kind']];
     if (!dur) return;
@@ -2232,7 +2232,11 @@ export class KuroCatEngine3D {
       paw.keyId = k.spec.id;
       paw.t0 = this.elapsed;
       const keyWorld = this.desk.keyTopWorld(k.spec.id, this.tmpV1);
-      paw.dur = clamp(paw.pos.distanceTo(keyWorld) * 0.085, 0.048, 0.095);
+      // A raised Naiwa hand needs travel time; retain the quick response near the desk.
+      const travel = paw.pos.distanceTo(keyWorld);
+      paw.dur = this.glbActor?.liveRig
+        ? clamp(travel * .11, .048, .34)
+        : clamp(travel * .085, .048, .095);
       paw.heavy = this.isCross;
       paw.impacted = false;
       if (paw.heavy) paw.dur = STRIKE_DURATION;
@@ -2858,7 +2862,7 @@ export class KuroCatEngine3D {
         slowBlink: 1.45,
         look: 2.1,
         tail: 1.1,
-        stretch: 2.8,
+        stretch: this.glbActor?.liveRig ? 3.8 : 2.8,
         glance: 2.4,
         groom: 2.6,
         perk: 1.5,

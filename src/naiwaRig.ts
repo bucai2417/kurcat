@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TaperTube3D } from './keyboard3d';
-import { waveMotion, sniffMotion, rollLimbs, type NaiwaGesture } from './naiwaMotion';
+import { waveMotion, stretchMotion, sniffMotion, rollLimbs, type NaiwaGesture } from './naiwaMotion';
+import { NaiwaTorso } from './naiwaTorso';
 import type { GroundRollPose } from './groundRoll3d';
 
 /** Live desktop pose. Contacts are world-space points from the shared pet engine. */
@@ -16,7 +17,7 @@ export interface NaiwaContacts {
   tongue?: THREE.Vector3; tongueWeight: number; stomp: number; stompLift: number;
 }
 interface Segment { bone: THREE.Bone; correction: THREE.Quaternion; length: number }
-interface Arm { segments: Segment[]; hand: Segment; grip: THREE.Object3D; fingers: Array<{ bone: THREE.Bone; axis: THREE.Vector3 }>; twist: number; mode: number; cup: number; curl: number }
+interface Arm { shoulder: THREE.Bone; lift: number; reach: number; segments: Segment[]; hand: Segment; grip: THREE.Object3D; fingers: Array<{ bone: THREE.Bone; axis: THREE.Vector3 }>; twist: number; mode: number; cup: number; curl: number }
 const Y = new THREE.Vector3(0, 1, 0);
 const clamp = THREE.MathUtils.clamp;
 const ease = (x: number) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
@@ -43,6 +44,8 @@ export class NaiwaRig {
   private bones: THREE.Bone[] = [];
   private arms: Arm[];
   private meshes: THREE.Mesh[] = [];
+  private torso: NaiwaTorso;
+  private stretch = { left: 0, right: 0, open: 0, gather: 0, settle: 0 };
   private expression = 0;
   private time = 0;
   private gesture?: NaiwaGesture;
@@ -82,6 +85,7 @@ export class NaiwaRig {
       this.pupils.push({ mesh, positions: Float32Array.from(mesh.geometry.attributes.position.array),
         normals: Float32Array.from(mesh.geometry.attributes.normal.array), center: mesh.geometry.boundingBox!.getCenter(new THREE.Vector3()) });
     }
+    this.torso = new NaiwaTorso(root, get('Naiwa_Surface') as THREE.SkinnedMesh);
     this.head = get('head') as THREE.Bone;
     this.mouth = get('mouth'); this.headTouch = get('headTouch');
     // Constructor runs in the bind pose, before AnimationMixer changes the bones.
@@ -108,7 +112,7 @@ export class NaiwaRig {
         const axis = Y.clone().applyQuaternion(q).cross(normal).normalize().applyQuaternion(q.invert());
         return [{ bone, axis }];
       });
-      return { segments, hand, grip: get(side === 'L' ? 'gripLeft' : 'gripRight'), fingers, twist: 0, mode: 0, cup: 0, curl: 0 };
+      return { shoulder: get('clavicle' + side) as THREE.Bone, lift: 0, reach: 0, segments, hand, grip: get(side === 'L' ? 'gripLeft' : 'gripRight'), fingers, twist: 0, mode: 0, cup: 0, curl: 0 };
     });
     for (const name of ['pelvis','spine','chest','thighL','shinL','footL','thighR','shinR','footR','footContactLeft','footContactRight']) get(name);
   }
@@ -126,6 +130,12 @@ export class NaiwaRig {
     this.gesture = input.gesture;
     this.sleeping = input.sleeping;
     const response = 1 - Math.exp(-16 * dt);
+    const st = stretchMotion(input.gesture?.kind === 'stretch' ? input.gesture.age : 4);
+    const left = stretchMotion(input.gesture?.kind === 'stretch' ? input.gesture.age : 4, -1);
+    for (const [key, value] of Object.entries({ left: left.lift, right: st.lift, open: st.open, gather: st.gather, settle: st.settle })) {
+      const k = key as keyof typeof this.stretch;
+      this.stretch[k] += (value - this.stretch[k]) * response;
+    }
     const w = input.gesture?.kind === 'wave' ? waveMotion(input.gesture.age) : { lift: 0, swing: 0 };
     if (input.gesture?.kind === 'wave') this.wave.side = input.gesture.side;
     this.wave.lift += (w.lift - this.wave.lift) * response;
@@ -145,6 +155,9 @@ export class NaiwaRig {
     this.rotate('head', input.head.pitch * .65, input.head.yaw * .75, input.head.roll * .70);
     this.rotate('chest', -.055 * this.inhale - .055 * tuck,
       .07 * this.wave.swing * this.wave.lift + .055 * this.roll.wiggle, -.07 * this.wave.side * this.wave.lift);
+    this.rotate('spine', -.075 * this.stretch.open + .045 * this.stretch.gather, 0, .018 * this.stretch.settle);
+    this.rotate('chest', -.11 * this.stretch.open, 0, .035 * (this.stretch.left - this.stretch.right));
+    this.rotate('head', -.10 * this.stretch.open + .025 * this.stretch.settle, 0, 0);
     this.rotate('head', -.11 * this.inhale + .035 * this.wave.lift,
       -.06 * this.wave.side * this.wave.lift, -.055 * this.roll.wiggle);
     this.expression += (Math.max(clamp(input.anger, 0, 1), this.roll.play * .72) - this.expression) * (1 - Math.exp(-12 * dt));
@@ -189,9 +202,23 @@ export class NaiwaRig {
       embrace.lerp(support, this.roll.brace);
       out.lerpVectors(home, embrace, this.roll.tuck); return true;
     }
+    if (this.gesture?.kind === 'stretch' || this.stretch.open > .005) {
+      const lift = side < 0 ? this.stretch.left : this.stretch.right;
+      out.copy(position(this.head)).add(new THREE.Vector3(side * (.80 + .10 * lift), .26 + .10 * lift, .30));
+      out.lerpVectors(home, out, lift);
+      // Lift around the front of the belly before reaching overhead. The palm
+      // itself is a contact boundary, so its path must clear the body too.
+      const arc = Math.sin(Math.PI * lift);
+      out.x += side * .18 * arc; out.z += .42 * arc;
+      out.y -= .05 * this.stretch.gather;
+      return true;
+    }
     if (this.gesture?.kind === 'wave' && side === this.wave.side) {
-      out.copy(position(this.head)).add(new THREE.Vector3(side * (.72 + .075 * this.wave.swing), -.30 + .035 * this.wave.swing, .36));
-      out.lerpVectors(home, out, this.wave.lift); return true;
+      out.copy(position(this.head)).add(new THREE.Vector3(side * (1.12 + .065 * this.wave.swing), .02 + .045 * this.wave.swing, .42));
+      out.lerpVectors(home, out, this.wave.lift);
+      const arc = Math.sin(Math.PI * this.wave.lift);
+      out.x += side * .16 * arc; out.z += .38 * arc;
+      return true;
     }
     return false;
   }
@@ -202,6 +229,7 @@ export class NaiwaRig {
     }
   }
   contacts(dt: number, input: NaiwaContacts): void {
+    this.torso.update();
     this.solveArm(this.arms[0], input.left, input.leftMode, dt, -1);
     this.solveArm(this.arms[1], input.right, input.rightMode, dt, 1);
     // Feet stay available for grounded tantrums and alternating roll kicks.
@@ -290,13 +318,31 @@ export class NaiwaRig {
   }
   private solveArm(arm: Arm, target: THREE.Vector3, mode: NaiwaContacts['leftMode'], dt: number, side: number): void {
     const scale = this.root.getWorldScale(new THREE.Vector3()).x;
+    // Move the existing weighted clavicle, including the two rooted shoulder segments.
+    // Local overrides reset before every mixer sample; the filtered intent never accumulates.
+    const base = position(arm.segments[0].bone);
+    const lift = ease((target.y - base.y + .15 * scale) / (.85 * scale));
+    const reach = clamp((target.z - base.z - .45 * scale) / (1.5 * scale), -.25, 1);
+    const response = 1 - Math.exp(-9 * dt);
+    arm.lift += (lift - arm.lift) * response;
+    arm.reach += (reach - arm.reach) * response;
+    const origin = position(arm.shoulder);
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-.055 * arm.reach, -side * .13 * arm.reach, side * .17 * arm.lift));
+    const matrix = new THREE.Matrix4().makeTranslation(...origin.toArray()).multiply(new THREE.Matrix4().makeRotationFromQuaternion(q))
+      .multiply(new THREE.Matrix4().makeTranslation(...origin.clone().negate().toArray())).multiply(arm.shoulder.matrixWorld);
+    const moved = new THREE.Vector3().setFromMatrixPosition(matrix).add(new THREE.Vector3(side * .025 * arm.lift, .065 * arm.lift, .06 * arm.reach).multiplyScalar(scale));
+    matrix.setPosition(moved); worldMatrix(arm.shoulder, matrix);
     const shoulder = position(arm.segments[0].bone);
-    const waveLift = this.gesture?.kind === 'wave' && side === this.wave.side ? this.wave.lift : 1;
+    const waveLift = this.gesture?.kind === 'stretch' || this.stretch.open > .005
+      ? (side < 0 ? this.stretch.left : this.stretch.right)
+      : this.gesture?.kind === 'wave' && side === this.wave.side ? this.wave.lift : 1;
     arm.mode += ((mode === 'wave' ? waveLift : mode === 'cup' ? .55 : 0) - arm.mode) * (1 - Math.exp(-14 * dt));
     arm.cup += ((mode === 'cup' ? 1 : 0) - arm.cup) * (1 - Math.exp(-14 * dt));
     // Palm faces down at the desk; lifting turns the entire forearm. The cup
     // palm is more upright, keeping its wrist in front of Naiwa's rounded chest.
-    const direction = new THREE.Vector3(side * (.09 + .48 * arm.mode), .72 * arm.mode + .35 * arm.cup, (1 - .53 * arm.mode) * (1 - .8 * arm.cup)).normalize();
+    const raised = clamp(arm.mode - .55 * arm.cup, 0, 1);
+    const stretchLift = side < 0 ? this.stretch.left : this.stretch.right;
+    const direction = new THREE.Vector3(side * (.09 + .48 * arm.mode - .8 * raised), .72 * arm.mode + .35 * arm.cup, (1 - .53 * arm.mode) * (1 - .8 * arm.cup)).normalize();
     const normal = new THREE.Vector3(0, -(1 - arm.mode), arm.mode).normalize();
     const palmQ = frame(direction, normal).multiply(arm.hand.correction);
     const gripOffset = arm.grip.position.clone().multiplyScalar(scale).applyQuaternion(palmQ);
@@ -304,15 +350,18 @@ export class NaiwaRig {
     // Keep the shoulder tangent continuous and bend the elbow outward when raised.
     // A straight shoulder-to-wave curve would compress twelve segments into a stub.
     const startDirection = Y.clone().applyQuaternion(arm.segments[0].bone.getWorldQuaternion(new THREE.Quaternion())).normalize();
-    const c1 = shoulder.clone().addScaledVector(startDirection, (.48 - .26 * arm.mode) * scale)
+    const c1 = shoulder.clone().addScaledVector(startDirection, (.48 + .14 * raised - .12 * stretchLift) * scale)
       .add(new THREE.Vector3(side * .10 * arm.mode * scale, .08 * arm.mode * scale, 0));
-    const c2 = wrist.clone().addScaledVector(direction, -(.38 - .16 * arm.mode) * scale)
+    const c2 = wrist.clone().addScaledVector(direction, -(.38 + .36 * raised - .14 * stretchLift) * scale)
       .add(new THREE.Vector3(side * .04 * arm.mode * scale, 0, .30 * arm.cup * scale));
     const curve = new THREE.CubicBezierCurve3(shoulder, c1, c2, wrist);
     // Arc-length sampling avoids a visible short/long segment seam near the palm.
     const points = curve.getSpacedPoints(arm.segments.length);
     const wristSegmentLength = points[points.length - 2].distanceTo(wrist);
     points[points.length - 2].copy(wrist).addScaledVector(direction, -wristSegmentLength);
+    // Solve around the measured animated trunk, then relax along its surface.
+    // The rooted shoulder and final wrist tangent remain fixed for a seamless join.
+    this.torso.route(points, side);
     const tangents = arm.segments.map((_, i) => points[i + 1].clone().sub(points[i]).normalize());
     let transported = new THREE.Vector3(0, 0, 1);
     transported.addScaledVector(tangents[0], -transported.dot(tangents[0])).normalize();

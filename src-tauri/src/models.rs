@@ -270,7 +270,7 @@ mod tests {
         let ids: std::collections::HashSet<_> = builtins.iter().map(|cat| &cat.id).collect();
         assert_eq!(ids.len(), builtins.len());
         assert!(builtins.iter().any(|cat| cat.id == "builtin-milk-cat" && cat.name == "奶猫"));
-        assert!(builtins.iter().any(|cat| cat.id == "builtin-naiwa" && mode(cat, "3d") == "2d"));
+        assert!(builtins.iter().any(|cat| cat.id == "builtin-naiwa" && mode(cat, "3d") == "3d"));
         let mut duplicate_mode = package;
         duplicate_mode["profile"]["adapters"] = json!(["canvas-cat-v1", "canvas-naiwa-v1"]);
         assert!(validate(duplicate_mode).unwrap_err().contains("同一个 2D/3D 模式"));

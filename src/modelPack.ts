@@ -104,8 +104,9 @@ export function exportModelPack(cat: CatSkinConfig, asset?: GlbAsset): ModelPack
   if (cat.id === 'dafeiyu') throw Error('大肥鱼使用专用绘制器，暂不支持导出为猫咪模型包');
   const profile = cat.modelProfile ?? { adapters: ['canvas-cat-v1','three-cat-v1'] as ModelProfile['adapters'], behaviorContract: 'cat-v1' as const };
   const { modelProfile: _profile, ...skin } = cat;
+  skin.id = cat.builtin ? cat.id.slice(0,28) + '-custom' : cat.id;
   if (profile.glb) return { format: 'kurocat-model', version: 2, profile, skin: { ...skin, builtin: false }, ...(asset ? { asset } : {}) };
-  const pack = parseModelPack({ format: 'kurocat-model', version: 1, profile, skin: { ...skin, id: cat.builtin ? cat.id.slice(0,28) + '-custom' : cat.id } });
+  const pack = parseModelPack({ format: 'kurocat-model', version: 1, profile, skin });
   delete pack.skin.modelProfile;
   return pack;
 }

@@ -1,6 +1,5 @@
 import { KuroCatEngine3D } from './catEngine3d';
-import { parseModelPack } from './modelPack';
-import { encodeGlb, resolveGlbAsset } from './glbModel';
+import { DEFAULT_BUILTIN_CATS } from './catSkins';
 import { DEFAULT_PROP, PROP_KINDS, type PropKind } from './prop';
 import type { KeyboardLayoutId } from './keyboardLayout';
 
@@ -56,15 +55,9 @@ function error(message: string) {
 async function startPreview() {
   engine = new KuroCatEngine3D(canvas, { embedded: true });
   engine.setIdleAutoEnabled(false); engine.setMoodTrackingEnabled(true);
-  const [manifest, binary] = await Promise.all([
-    fetch(new URL('../model-store/naiwa-3d.kurocat.json', import.meta.url)),
-    fetch(new URL('../art/naiwa/naiwa.glb', import.meta.url)),
-  ]);
-  if (!manifest.ok || !binary.ok) throw Error('模型文件读取失败，请通过项目开发服务器打开预览');
-  const pack = parseModelPack({ ...await manifest.json(), asset: { data: encodeGlb(new Uint8Array(await binary.arrayBuffer())) } });
-  await resolveGlbAsset(pack.profile.glb!, pack.asset, true);
+  const skin = DEFAULT_BUILTIN_CATS.find(cat => cat.id === 'builtin-naiwa')!;
   engine.setKeyboardConfig('65', 'cat'); configureProp();
-  await engine.snapshot(pack.skin);
+  await engine.snapshot(skin);
   ready = true; loading.hidden = true;
   for (const control of document.querySelectorAll<HTMLFieldSetElement>('aside fieldset')) control.disabled = false;
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) button.disabled = false;

@@ -158,3 +158,36 @@ test('batch import validates multiple files and catalogs together without losing
   const tooMany = Array.from({ length: 51 }, (_, i) => { const p = clone(); p.skin.id = 'cat-' + i; return p; });
   assert.throws(() => parseModelFiles([{ name: 'catalog.json', text: JSON.stringify({ format: 'kurocat-catalog', version: 1, models: tooMany }) }]), /50/);
 });
+
+
+test('preview keeps built-in Naiwa in both modes after old saved cosmetic overrides', async () => {
+  const { DEFAULT_BUILTIN_CATS } = await import('../src/catSkins.ts');
+  const { modelModes, modelMode } = await import('../src/modelPack.ts');
+  const saved = Object.fromEntries(['window','localStorage','document'].map(k => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  const memory = new Map();
+  const builtin = DEFAULT_BUILTIN_CATS.find(c => c.id === 'builtin-naiwa');
+  globalThis.localStorage = { getItem: key => memory.get(key) ?? null, setItem: (key,value) => memory.set(key,value) };
+  globalThis.document = { documentElement: { classList: { add() {} } } };
+  try {
+    for (const legacy of [false, true]) {
+      if (legacy) memory.set('kurocat-preview-v1', JSON.stringify({ cats: [{ ...builtin, furColor: '#abcdef', modelProfile: { adapters: ['canvas-naiwa-v1'], behaviorContract: 'cat-v1' } }] }));
+      globalThis.window = {};
+      assert.equal(installTauriPreviewShim(), true);
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const cats = await invoke('get_cats');
+      const cat = cats.find(c => c.id === 'builtin-naiwa');
+      assert.equal(cats.filter(c => c.id === cat.id).length, 1);
+      assert.deepEqual(modelModes(cat), ['2d', '3d']);
+      assert.equal(modelMode(cat, '3d'), '3d');
+      assert.equal(cat.modelProfile.glb.sha256, builtin.modelProfile.glb.sha256);
+      if (legacy) assert.equal(cat.furColor, '#abcdef');
+      await invoke('update_settings', { patch: { catBreed: cat.id, renderMode: '3d' } });
+      assert.equal((await invoke('get_settings')).renderMode, '3d');
+      await assert.rejects(invoke('delete_model_pack', { id: cat.id }), /内置/);
+    }
+  } finally {
+    for (const [key, descriptor] of Object.entries(saved)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+  }
+});

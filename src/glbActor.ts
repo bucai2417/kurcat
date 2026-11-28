@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { NaiwaRig, type NaiwaFrame, type NaiwaContacts } from './naiwaRig';
 import type { GroundRollPose } from './groundRoll3d';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { readBuiltinGlb } from './builtinGlb';
 import { invoke } from '@tauri-apps/api/core';
 import type { CatSkinConfig } from './catSkins';
 import { decodeGlb, glbHash, pendingGlb, validateGlbMapping, type GlbProfile } from './glbModel';
@@ -98,7 +99,7 @@ export class GlbActor {
   }
   static async load(cat: CatSkinConfig): Promise<GlbActor> {
     const profile = cat.modelProfile!.glb!;
-    const bytes = pendingGlb(profile.sha256) ?? decodeGlb(await invoke<string>('read_model_glb', { id: cat.id }));
+    const bytes = pendingGlb(profile.sha256) ?? await readBuiltinGlb(profile) ?? decodeGlb(await invoke<string>('read_model_glb', { id: cat.id }));
     validateGlbMapping(profile, bytes, cat.modelProfile!.adapters.includes('three-naiwa-v1'));
     if (await glbHash(bytes) !== profile.sha256) throw Error('已保存的 3D 文件校验失败，请重新导入');
     const manager = new THREE.LoadingManager();

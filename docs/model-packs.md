@@ -29,7 +29,7 @@ DIY-Cat 1.0.0 沿用原来的模型包格式和设置目录，升级改名无需
 
 ## 完整示例
 
-仓库提供可直接导入的 [薄荷云朵外观包](../model-store/mint-cloud.kurocat.json) 和 [奶蛙 3D 清单包](../model-store/naiwa-3d.kurocat.json)。奶蛙包包含实时软臂、视线跟随与共享行为，导入时会下载并校验对应 GLB。一个最小可用外观包如下：
+仓库提供可直接导入的 [薄荷云朵外观包](../model-store/mint-cloud.kurocat.json) 和 [奶蛙 3D 清单包](../model-store/naiwa-3d.kurocat.json)。奶蛙已随应用内置，选“奶蛙”切到 3D 即可。独立奶蛙包用于自定义副本，包含实时软臂、视线跟随与共享行为，导入时会下载并校验对应 GLB。一个最小可用外观包如下：
 
 ```json
 {
@@ -59,7 +59,7 @@ DIY-Cat 1.0.0 沿用原来的模型包格式和设置目录，升级改名无需
 | --- | --- |
 | `format` / `version` | `kurocat-model`；外观包为 `1`，GLB 包为 `2`；格式版本与修订号不同 |
 | `profile.behaviorContract` | 固定为 `cat-v1` |
-| `profile.adapters` | 每个模式最多一个；版本 1 用 `canvas-cat-v1`、`three-cat-v1`、`canvas-naiwa-v1`；版本 2 用 `three-glb-v1` 或 `three-naiwa-v1` |
+| `profile.adapters` | 每个模式最多一个；版本 1 用 `canvas-cat-v1`、`three-cat-v1`、`canvas-naiwa-v1`；版本 2 用 `three-glb-v1` 或 `three-naiwa-v1`，可同时带一个 2D 适配器 |
 | `profile.author` / `license` | 可选文本，各最多 100 个字符 |
 | `profile.revision` | 模型修订号，可选，1–2147483647 的整数；省略按 1 比较，发布更新时递增 |
 | `profile.description` | 可选简介，最多 240 个字符 |
@@ -80,13 +80,13 @@ DIY-Cat 1.0.0 沿用原来的模型包格式和设置目录，升级改名无需
 | 骨架 | 适配器 / 模式 | 导入导出 | 部件与行为 |
 | --- | --- | --- | --- |
 | `cat` | `canvas-cat-v1`（2D）、`three-cat-v1`（3D） | 支持配色、花纹和斑点包 | 头、耳、身体、双臂、爪、尾巴与眼皮；含内置奶猫 |
-| `naiwa` 奶蛙 | `canvas-naiwa-v1`（内置 2D）、`three-naiwa-v1`（导入 3D） | 2D 配色包；3D 为版本 2 GLB 包 | 无耳、无尾；2D 由内置绘制器形变，3D 使用作者文件的软手臂、手指与实际动画 |
+| `naiwa` 奶蛙 | `canvas-naiwa-v1`（内置 2D）、`three-naiwa-v1`（内置 / 导入 3D） | 2D 配色包；3D 为版本 2 GLB 包 | 无耳、无尾；2D 由内置绘制器形变，3D 使用作者文件的软手臂、手指与实际动画 |
 | `glb` | `three-glb-v1`（导入 3D） | 版本 2 GLB 包 | 部件由文件决定，动作由 `profile.glb.animations` 声明 |
 | `dafeiyu` 大肥鱼 | 内置专用 2D 绘制器 | 当前不开放换肤包 | 固定图像、双手与鲸尾；支持喝水、伸展、招手 |
 
 奶蛙的 `behaviorContract` **仍为 `cat-v1`**；它表示共同的输入与反应协议，不代表猫咪外形。原奶蛙文件使用 `canvas-naiwa-v1` 即可导入；此前的“不支持的模型适配器或行为版本”现已拆成明确的错误提示。每个 2D / 3D 模式最多一个适配器，不能在同一包同时声明 `canvas-cat-v1` 和 `canvas-naiwa-v1`。
 
-旧自定义奶猫即使 ID 为 `naiwa`，没有奶蛙适配器声明时仍保持猫咪骨架。内置奶猫和奶蛙使用 `builtin-milk-cat`、`builtin-naiwa`，不会覆盖旧自定义模型；导出内置外观会生成带 `-custom` 后缀的副本 ID。
+旧自定义奶猫即使 ID 为 `naiwa`，没有奶蛙适配器声明时仍保持猫咪骨架。内置奶猫和奶蛙使用 `builtin-milk-cat`、`builtin-naiwa`，不会覆盖旧自定义模型；导出内置外观会生成带 `-custom` 后缀的副本 ID。内置奶蛙导出为版本 2，携带 `canvas-naiwa-v1`、`three-naiwa-v1` 与完整 GLB，可以离线重新导入。更新旧版配色时保留内置 3D 能力；3D 材质来自 GLB，不受 2D 配色字段控制。
 
 ### 内置 2D 奶蛙动作与外观
 

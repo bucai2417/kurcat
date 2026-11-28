@@ -97,7 +97,7 @@ export function setupModelLibrary(host: LibraryHost): () => void {
     const thumb = button('查看图片', 'image-' + note + '-' + cat.id, () => showImage(cat, thumb));
     thumb.classList.add('model-thumb'); thumb.setAttribute('aria-label', '查看 ' + cat.name + ' 的模型图片');
     thumb.addEventListener('preview-visible', () => {
-      if (cat.modelProfile?.glb) { thumb.textContent = '查看 3D'; return; }
+      if (cat.modelProfile?.glb) { thumb.textContent = modelModes(cat).length > 1 ? '2D / 3D' : '查看 3D'; return; }
       void previews.image(cat, modelModes(cat)[0]).then(url => {
         if (!thumb.isConnected) return;
         const image = document.createElement('img'); image.src = url; image.alt = ''; image.width = 76; image.height = 80;

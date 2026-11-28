@@ -27,6 +27,8 @@ assert.ok(wp('gripRight').distanceTo(contacts.left)<1e-5);
 assert.ok(wp('gripLeft').distanceTo(contacts.right)<1e-5);
 // Real contact locations, including all desk edges and the mouth's cup target.
 const fixedScale=pet.root.scale.clone(), fixedOrigin=pet.root.position.clone();
+const {createArmClearanceCheck} = await import('./lib/naiwa-clearance.mjs');
+const clearance = createArmClearanceCheck(gltf.scene.getObjectByName('Naiwa_Surface'));
 const palm=v(0,0,0), direction=v(0,0,0), end=v(0,0,0);
 for (const [name,left,right,mode] of [
  ['keyboard-left',v(-.9,.15,1.6),v(.15,.15,.8),'desk'],
@@ -46,7 +48,19 @@ for (const [name,left,right,mode] of [
   end.copy(wp('finger201L')).sub(wp('handL')).normalize();
   assert.ok(direction.dot(end)>.97,name+' wrist tangent');
  }
+ const check = clearance();
+ assert.equal(check.buried, 0, name+' arm must stay outside the torso: '+JSON.stringify(check));
+ if (process.argv.includes('--clearance')) console.log(name,check);
 }
+// Positive control: the old direct shoulder-to-key curve must be detected.
+const route = pet.liveRig.torso.route;
+pet.liveRig.torso.route = () => {};
+step(); const unprotected = clearance();
+pet.liveRig.torso.route = route;
+step(); const protectedPose = clearance();
+assert.ok(unprotected.buried > 0, 'surface probe must detect the original belly penetration');
+assert.equal(protectedPose.buried, 0, 'routing clears the actual belly skin');
+if (process.argv.includes('--clearance')) console.log({unprotected, protectedPose});
 const morph = name => { let result=0;gltf.scene.traverse(m=>{const i=m.morphTargetDictionary?.[name];if(i!==undefined) result=Math.max(result,m.morphTargetInfluences[i]);});return result; };
 assert.equal(morph('CheekPuff.L'),0,'neutral clip cannot inflate cheeks');
 for(let i=0;i<30;i++)step({...base,anger:1});

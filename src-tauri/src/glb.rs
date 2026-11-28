@@ -251,6 +251,13 @@ fn image_pixels(b: &[u8], mime: &str) -> Result<u64, String> {
 }
 fn path(p: &Profile) -> Result<PathBuf, String> { p.validate()?; Ok(crate::config::app_data_dir().join("models").join(format!("{}.glb", p.sha256))) }
 pub fn read(p: &Profile) -> Result<Vec<u8>, String> {
+    // The same checked binary is available offline for MCP reads and pack export.
+    let builtin = crate::cats::builtin_cats().into_iter().find(|c| c.id == "builtin-naiwa")
+        .and_then(|c| c.model_profile).and_then(|m| m.glb);
+    if builtin.as_ref().is_some_and(|g| g.sha256 == p.sha256) {
+        let bytes = include_bytes!("../../art/naiwa/naiwa.glb").to_vec();
+        validate(&bytes, p)?; return Ok(bytes);
+    }
     let mut bytes = Vec::new();
     std::fs::File::open(path(p)?).map_err(|_| "模型文件丢失，请重新导入 GLB 模型包".to_string())?.take((MAX_BYTES + 1) as u64).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     validate(&bytes, p)?; Ok(bytes)

@@ -10,6 +10,15 @@ export function waveMotion(age: number) {
   const swing = Math.sin((age - .88) * Math.PI * 2.5) * smooth(.88, 1.1, age) * (1 - smooth(2.05, 2.35, age));
   return { lift, swing };
 }
+/** Seated stretch: gather, open the chest, reach with a slight left/right delay, release. */
+export function stretchMotion(age: number, side = 1) {
+  const delay = side < 0 ? .12 : 0;
+  const lift = smooth(.25 + delay, 1.15 + delay, age) * (1 - smooth(2.55 + delay, 3.7, age));
+  const gather = smooth(0, .22, age) * (1 - smooth(.30, .65, age));
+  const open = smooth(.40, 1.25, age) * (1 - smooth(2.5, 3.75, age));
+  const settle = Math.sin((age - 2.65) * 5) * smooth(2.65, 2.9, age) * (1 - smooth(3.1, 3.8, age));
+  return { lift, gather, open, settle };
+}
 export function sniffMotion(age: number) {
   const drip = smooth(.30, 1.20, age) * (1 - smooth(1.85, 2.05, age));
   const inhale = smooth(1.78, 1.94, age) * (1 - smooth(2.02, 2.65, age));

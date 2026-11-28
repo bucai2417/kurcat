@@ -128,3 +128,35 @@ test('incomplete Naiwa hierarchy or pupils cannot opt into live controls', async
     assert.throws(() => validateGlbMapping(pack.profile.glb, changed, true), /完整骨架/, reason);
   }
 });
+
+
+test('bundled Naiwa loads offline, retries failures and exports an importable dual-mode copy', async () => {
+  const { readBuiltinGlb } = await import('../src/builtinGlb.ts');
+  const { DEFAULT_BUILTIN_CATS } = await import('../src/catSkins.ts');
+  const cat = DEFAULT_BUILTIN_CATS.find(c => c.id === 'builtin-naiwa');
+  const profile = cat.modelProfile.glb;
+  const bytes = new Uint8Array(await readFile(new URL('../art/naiwa/naiwa.glb', import.meta.url)));
+  const original = globalThis.fetch; let calls = 0;
+  try {
+    globalThis.fetch = async url => {
+      assert.equal(url.protocol, 'file:', 'Node must read only the bundled asset URL');
+      assert.ok(url.pathname.endsWith('/art/naiwa/naiwa.glb'));
+      calls++;
+      if (calls === 1) return new Response('', { status: 404 });
+      if (calls === 2) return new Response(new Uint8Array([1,2,3]));
+      return new Response(bytes);
+    };
+    assert.equal(await readBuiltinGlb({ ...profile, sha256: '0'.repeat(64) }), undefined);
+    assert.equal(calls, 0);
+    await assert.rejects(readBuiltinGlb(profile), /安装文件/);
+    await assert.rejects(readBuiltinGlb(profile), /校验失败/);
+    const [a, b] = await Promise.all([readBuiltinGlb(profile), readBuiltinGlb(profile)]);
+    assert.equal(calls, 3); assert.deepEqual(a, bytes); assert.equal(a, b);
+    await assert.rejects(readBuiltinGlb({ ...profile, animations: { ...profile.animations, wave: 'missing' } }), /动画片段/);
+    const pack = parseModelPack(JSON.stringify(exportModelPack(cat, { data: encodeGlb(a) })));
+    assert.equal(pack.skin.id, 'builtin-naiwa-custom'); assert.equal(pack.skin.builtin, false);
+    assert.deepEqual(modelModes(pack.skin), ['2d', '3d']);
+    assert.deepEqual(await resolveGlbAsset(pack.profile.glb, pack.asset), bytes);
+    assert.equal(calls, 3, 'round trip needs no remote fetch');
+  } finally { globalThis.fetch = original; clearPendingGlbs(); }
+});

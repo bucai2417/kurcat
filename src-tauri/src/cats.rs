@@ -501,7 +501,10 @@ pub fn all_cats() -> Vec<CatSkinConfig> {
         if let Some(existing) = list.iter_mut().find(|x| x.id == c.id) {
             // Allow user to customize even built-in look while preserving id
             let was_builtin = existing.builtin;
+            let bundled_profile = if existing.id == "builtin-naiwa" { existing.model_profile.clone() } else { None };
             *existing = c;
+            // Saved 2D-era cosmetic preferences must not remove the bundled 3D rig.
+            if bundled_profile.is_some() { existing.model_profile = bundled_profile; }
             existing.builtin = was_builtin;
         } else {
             list.push(c);
@@ -548,7 +551,7 @@ pub fn cat_exists(id: &str) -> bool {
 pub fn cat_schema_guide() -> serde_json::Value {
     serde_json::json!({
         "rigs": crate::models::contract()["rigs"].clone(),
-        "rigGuide": "Call get_builtin_rigs before designing a skin. Cat supports canvas-cat-v1/three-cat-v1; 2D naiwa requires canvas-naiwa-v1 and behaviorContract cat-v1. 3D naiwa uses three-naiwa-v1 with a version 2 GLB package; arbitrary GLB uses three-glb-v1. Query get_idle_actions: complete three-naiwa-v1 rigs support shared live cat actions, head/pupil gaze and keyboard/mouse/prop contacts; generic GLB supports mapped clips only. Dafeiyu is fixed art, not importable. Rig identity is NOT inferred from id or name. Built-in 2D frog has no ears/tail: ordinary keys (including space) and mouse use fluid arms/hands; only configured tail keys and tailGround use feet. Its angry cheeks inflate smoothly. Dedicated 3D Naiwa uses idle/nap base clips and the shared live cat controller; tail keys use reachable foot contacts with hand fallback. Cheeks follow anger only. Generic imported 3D behavior depends on mapped clips. Prefer import_model_pack for validation and explicit conflict handling.",
+        "rigGuide": "Call get_builtin_rigs before designing a skin. Cat supports canvas-cat-v1/three-cat-v1; 2D naiwa requires canvas-naiwa-v1 and behaviorContract cat-v1. 3D naiwa uses three-naiwa-v1 with a version 2 GLB package; arbitrary GLB uses three-glb-v1. Query get_idle_actions: complete three-naiwa-v1 rigs support shared live cat actions, head/pupil gaze and keyboard/mouse/prop contacts; generic GLB supports mapped clips only. Dafeiyu is fixed art, not importable. Rig identity is NOT inferred from id or name. Built-in 2D frog has no ears/tail: ordinary keys (including space) and mouse use fluid arms/hands; only configured tail keys and tailGround use feet. Its angry cheeks inflate smoothly. Built-in Naiwa includes both 2D and 3D, with an offline bundled GLB; no import is required. Export includes both modes and embedded GLB under a -custom ID. Dedicated 3D Naiwa uses idle/nap base clips and the shared live cat controller; shoulder/chest follow the hands, soft arms route around the deformed torso, and a 3.8-second staggered stretch returns smoothly on input. Tail keys use a retractable tongue with hand fallback; tailGround uses feet. 3D cheek puff is disabled; anger uses eyelids and mouth. Generic imported 3D behavior depends on mapped clips. Prefer import_model_pack for validation and explicit conflict handling.",
         "description": "DIY-Cat Custom Cat Skin Schema. Pass any custom cat JSON to upsert_cat (with activate: true) to immediately add and render it live on the user's desktop!",
         "patterns": {
             "solid": "Single coat color (e.g., British Shorthair blue, white Persian, golden chinchilla, black cat)",

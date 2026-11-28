@@ -95,12 +95,28 @@
     "builtin": true,
     "modelProfile": {
       "adapters": [
-        "canvas-naiwa-v1"
+        "canvas-naiwa-v1",
+        "three-naiwa-v1"
       ],
       "behaviorContract": "cat-v1",
       "author": "奶蛙",
-      "description": "参考设计图的金黄奶蛙；圆润坐姿、自然操作键鼠，双手敲键和持物，侧身伸脚替代尾巴按键；无耳无尾。",
-      "revision": 3
+      "description": "内置奶蛙，支持 2D 与 3D 切换，无需导入。3D 使用连续软臂、肩胸联动和腹部避让，支持键鼠与道具交互、视线跟随、舌头按键、招手、伸懒腰、打滚及坐姿打盹。",
+      "revision": 4,
+      "glb": {
+        "sha256": "22bf496fb36b004aa7ad71fc2db4101269eef7a0a904796dfce0c2db13d25932",
+        "animations": {
+          "idle": "idle",
+          "typing": "typing",
+          "mouse": "mouse",
+          "sway": "sway",
+          "wave": "wave",
+          "nap": "nap",
+          "angry": "angry",
+          "delight": "delight"
+        },
+        "height": 2.3,
+        "yaw": 0
+      }
     }
   }
 ]
