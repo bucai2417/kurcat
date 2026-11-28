@@ -46,9 +46,9 @@ loader.register(parser => ({
   },
 }));
 const result = await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '');
-const expected = { idle: 4, typing: 3, mouse: 3, sway: 5, wave: 4, nap: 6, angry: 3 };
+const expected = { idle: 4, typing: 3, mouse: 3, sway: 5, wave: 4, nap: 6, angry: 3, delight: 8 };
 assert.equal(json.skins.length, 1);
-assert.equal(json.skins[0].joints.length, 64);
+assert.equal(json.skins[0].joints.length, 80);
 assert.equal(json.meshes.length, 11);
 assert.deepEqual(result.animations.map(a => a.name).sort(), Object.keys(expected).sort());
 const names = new Set(json.nodes.map(n => n.name));
@@ -79,6 +79,7 @@ for (const clip of result.animations) {
   action.clampWhenFinished = true;
   action.play();
   let previous = null;
+  let firstSamples = null;
   let maxStep = 0;
   let maxStepFrame = 0;
   let maxStepPoint = [];
@@ -99,11 +100,14 @@ for (const clip of result.animations) {
         samples.push(point.clone());
       }
     }
+    if (!firstSamples) firstSamples = samples.map(p => p.clone());
     if (previous) for (let i = 0; i < samples.length; i++) { const distance = previous[i].distanceTo(samples[i]); if (distance > maxStep) { maxStep = distance; maxStepFrame = tick; maxStepPoint = samples[i].toArray(); } }
     previous = samples;
   }
+  const loopSeam = Math.max(...previous.map((p, i) => p.distanceTo(firstSamples[i])));
+  assert.ok(loopSeam < .025, clip.name + ' discontinuous loop seam: ' + loopSeam);
   assert.ok(maxStep < .25, clip.name + ' abrupt one-frame jump: ' + maxStep);
-  const report = { seconds: clip.duration, channels: clip.tracks.length, largestVertexStep: +maxStep.toFixed(5), largestStepFrame: maxStepFrame, largestStepPoint: maxStepPoint, min: bounds.min.toArray(), max: bounds.max.toArray() };
+  const report = { seconds: clip.duration, channels: clip.tracks.length, loopSeam: +loopSeam.toFixed(6), largestVertexStep: +maxStep.toFixed(5), largestStepFrame: maxStepFrame, largestStepPoint: maxStepPoint, min: bounds.min.toArray(), max: bounds.max.toArray() };
   allSamples[clip.name] = report;
   console.log('PASS ' + clip.name + ': ' + clip.duration + 's, max sampled step ' + maxStep.toFixed(4));
 }
@@ -117,6 +121,6 @@ mixer.stopAllAction();
 mixer.clipAction(result.animations.find(a => a.name === 'idle')).reset().play();
 mixer.setTime(0);
 assert.equal(drool.morphTargetInfluences[drool.morphTargetDictionary.Drool], 0, 'Drool leaked into idle');
-const report = { file: 'naiwa.glb', bytes: bytes.length, meshCount: meshes.length, vertexCount: meshes.reduce((n,m) => n + m.geometry.getAttribute('position').count, 0), triangleCount: meshes.reduce((n,m) => n + (m.geometry.index?.count ?? m.geometry.getAttribute('position').count) / 3, 0), embeddedImages: imageSizes, bones: 64, clips: allSamples, checks: ['embedded PNG integrity and UV/material binding (no GPU rendering)', 'normalized weights', '64-bone skin', 'required sockets', '7 named clips and durations', 'finite sampled deformation at 30 fps', 'bounded frame-to-frame motion', 'sleep eyelid closure and drool', 'idle drool reset', 'no studio camera/light'] };
+const report = { file: 'naiwa.glb', bytes: bytes.length, meshCount: meshes.length, vertexCount: meshes.reduce((n,m) => n + m.geometry.getAttribute('position').count, 0), triangleCount: meshes.reduce((n,m) => n + (m.geometry.index?.count ?? m.geometry.getAttribute('position').count) / 3, 0), embeddedImages: imageSizes, bones: 80, clips: allSamples, checks: ['embedded PNG integrity and UV/material binding (no GPU rendering)', 'normalized weights', '80-bone skin', 'required sockets', '8 named clips and durations', 'finite sampled deformation at 30 fps', 'bounded frame-to-frame motion', 'loop seam continuity', 'sleep eyelid closure and drool', 'idle drool reset', 'no studio camera/light'] };
 if (process.argv.includes('--report')) await fs.writeFile(new URL('../art/naiwa/validation.json', import.meta.url), JSON.stringify(report, null, 2) + '\n');
-console.log('PASS Naiwa GLB: ' + meshes.length + ' meshes, 64 bones, 7 clips (' + bytes.length + ' bytes)');
+console.log('PASS Naiwa GLB: ' + meshes.length + ' meshes, 80 bones, 8 clips (' + bytes.length + ' bytes)');

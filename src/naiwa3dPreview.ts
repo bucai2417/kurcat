@@ -49,12 +49,16 @@ function startPreview() {
   const orbit = new OrbitControls(camera, renderer.domElement);
   orbit.enableDamping = !reducedMotion.matches;
   orbit.dampingFactor = .12;
-  orbit.minDistance = 2.5;
+  orbit.minDistance = .65;
   orbit.maxDistance = 12;
   orbit.maxPolarAngle = Math.PI * .53;
   function setView(view: string) {
     orbit.target.set(0, 1.5, 0);
-    if (view === 'front') camera.position.set(0, 1.5, 7.5);
+    if (view === 'hands') {
+      selectClip('rest');
+      orbit.target.set(.78, 1.04, .16);
+      camera.position.set(1.25, 1.17, 1.45);
+    } else if (view === 'front') camera.position.set(0, 1.5, 7.5);
     else if (view === 'side') camera.position.set(7.5, 1.5, 0);
     else if (view === 'back') camera.position.set(0, 1.5, -7.5);
     else camera.position.set(3.4, 2.7, 7.4);

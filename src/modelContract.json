@@ -379,7 +379,7 @@
           "footContactLeft",
           "footContactRight"
         ],
-        "notes": "后续可复用归一化 lift/squash/lean/tilt/sleep/drool/gaze/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂、掌心与手指需要连续形变，脸颊只在嘴边局部膨胀，sleep 保持坐姿，drool 随睡意出现、醒来收回。Blender 建模初版位于 art/naiwa/，含 64 骨骼和 7 段动作，可在 naiwa3d.html 独立预览；桌宠模型库当前不能导入 three-naiwa-v1 或 GLB。",
+        "notes": "后续可复用归一化 lift/squash/lean/tilt/sleep/drool/gaze/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂、掌心与手指需要连续形变，脸颊只在嘴边局部膨胀，sleep 保持坐姿，drool 随睡意出现、醒来收回。Blender 建模初版位于 art/naiwa/，含 80 骨骼和 8 段动作，可在 naiwa3d.html 独立预览；桌宠模型库当前不能导入 three-naiwa-v1 或 GLB。",
         "designDoc": "docs/naiwa-3d-design.md"
       },
       "notes": "不通过 ID/名称猜测骨架；profile.adapters 必须包含 canvas-naiwa-v1。无耳、无尾，猫咪花纹/斑点字段不会绘制。",

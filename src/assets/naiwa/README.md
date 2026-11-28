@@ -32,4 +32,4 @@ python scripts/extract-naiwa-art.py path/to/reference.png
 
 已有开发预览服务中打开 `/harness.html?breed=builtin-naiwa&idle=0`，对照参考图测试双手敲键、点鼠标、原尾巴按键、嘴边鼓腮、坐着打盹 · 流口水、左右晃身、好奇探头、交替摆脚和五种道具。奶蛙专属合成音效已移除，键鼠音效仍独立设置。停止按钮会结束当前动作及道具交互。
 
-当前模型包只导入配色和配置，不包含任意图片、骨架或动画。桌宠中的奶蛙仍使用 2D；桌宠模型库尚未接入 `three-naiwa-v1`、外部 GLB 或 Blender 动作导入。已制作独立的 [3D 作者模型](../../../art/naiwa/README.md)，包含 Blender 源文件、GLB、64 根骨骼与 7 段动画，可在 `/naiwa3d.html` 检查。具体协议见 [模型包说明](../../../docs/model-packs.md)，后续 Blender 制作与接入见 [3D 奶蛙设计](../../../docs/naiwa-3d-design.md)。
+当前模型包只导入配色和配置，不包含任意图片、骨架或动画。桌宠中的奶蛙仍使用 2D；桌宠模型库尚未接入 `three-naiwa-v1`、外部 GLB 或 Blender 动作导入。已制作独立的 [3D 作者模型](../../../art/naiwa/README.md)，包含 Blender 源文件、GLB、80 根骨骼与 8 段动画，可在 `/naiwa3d.html` 检查。具体协议见 [模型包说明](../../../docs/model-packs.md)，后续 Blender 制作与接入见 [3D 奶蛙设计](../../../docs/naiwa-3d-design.md)。

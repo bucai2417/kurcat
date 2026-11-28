@@ -2,9 +2,11 @@
 Outputs are authoring evidence, not desktop runtime tests. Never saves the open file.
 """
 import bpy, bmesh, json, math
+import sys
 from pathlib import Path
 from mathutils import Vector
 ROOT=Path(__file__).resolve().parents[2]
+LOW_MEMORY = '--low-memory' in sys.argv
 assert bpy.app.background,'Use a separate background Blender process'
 author=bpy.data.scenes['DIYCat_Naiwa_Studio']
 out=ROOT/'art/naiwa/previews';out.mkdir(parents=True,exist_ok=True)
@@ -27,7 +29,7 @@ assert euler==2, f'Unexpected finger/limb tunnel: Euler characteristic {euler}'
 print('PASS continuous skin: one closed component, Euler 2, no finger tunnels',flush=True)
 bm.free()
 def configure(scene):
-    scene.render.engine='CYCLES';scene.cycles.samples=16;scene.cycles.use_denoising=True
+    scene.render.engine='CYCLES';scene.cycles.samples=32 if LOW_MEMORY else 16;scene.cycles.use_denoising=not LOW_MEMORY
     scene.render.resolution_x=700;scene.render.resolution_y=700;scene.render.resolution_percentage=100
     scene.render.use_compositing=False;scene.render.use_sequencer=False
     scene.render.image_settings.file_format='PNG'
@@ -48,12 +50,18 @@ author.render.resolution_x=800;author.render.resolution_y=900
 author.camera.data.ortho_scale=3.48
 for name,xyz in [('front',(0,-9,1.51)),('standing',(3.2,-9,2.6)),('side',(9,0,1.51)),('back',(0,9,1.51))]:
     camera_at(author,xyz,target=(0,0,1.51));render(author,name)
+author.camera.data.ortho_scale=.80
+camera_at(author,(2,-4,1.3),target=(.78,-.13,1.06));render(author,'hand-detail')
+author.camera.data.ortho_scale=3.48
 configure(author)
 rig.data.pose_position='POSE'
 camera_at(author,(3.7,-9,3.3),target=(0,0,1.25))
 ranges={clip['name']:clip for clip in json.loads(author['clip_ranges'])}
 for name,clip,seconds in [('seated','idle',0),('mouse','mouse',1.5),('nap','nap',3),('wave','wave',1.5),('angry','angry',1.5)]:
     author.frame_set(ranges[clip]['start']+round(seconds*30));render(author,name)
+camera_at(author,(3.2,-9,2.7),target=(0,0,1.5))
+for name,seconds in [('delight-belly',2),('delight-touch',4.5),('delight-transition',3.2)]:
+    author.frame_set(ranges['delight']['start']+round(seconds*30));render(author,name)
 # A fresh glTF import is independent of Blender's original modifiers/constraints.
 check=bpy.data.scenes.new('Naiwa_Export_Check');check.render.fps=30
 bpy.context.window.scene=check
@@ -71,7 +79,7 @@ for col in author.collection.children:
             if ob==author.camera:check.camera=duplicate
 check.world=author.world;check.view_settings.view_transform=author.view_settings.view_transform
 configure(check)
-for name,time in [('nap',3),('wave',1.5)]:
+for name,time in [('nap',3),('wave',1.5),('delight',4.5)]:
     for ob in imported:
         owners=[ob]
         if ob.type=='MESH' and ob.data.shape_keys:owners.append(ob.data.shape_keys)
@@ -80,6 +88,7 @@ for name,time in [('nap',3),('wave',1.5)]:
             if not ad:continue
             ad.action=None
             for track in ad.nla_tracks:track.mute=track.name!=name
+    camera_at(check,(3.2,-9,2.7),target=(0,0,1.5 if name=='delight' else 1.25))
     check.frame_set(1+int(time*30))
     render(check,'export-'+name)
-print('Rendered source views and independent GLB nap/wave into',out)
+print('Rendered source views and independent GLB nap/wave/delight into',out)

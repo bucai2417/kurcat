@@ -24,7 +24,7 @@ studio = bpy.data.collections.new('NAIWA_Studio')
 scene.collection.children.link(character)
 scene.collection.children.link(studio)
 scene['integration_status'] = 'Authoring prototype. Desktop external GLB adapter is not implemented.'
-scene['reference'] = 'User Naiwa front / side / back reference, 2026-11-27'
+scene['reference'] = 'User Naiwa front / side / back reference, 2026-11-28; hand posture also studied from supplied motion video'
 
 def smooth(a,b,x):
     t = max(0., min(1., (x-a)/(b-a)))
@@ -97,7 +97,7 @@ def catmull(values,count=5):
             result.append(tuple(.5*((2*b)+(-a+c)*t+(2*a-5*b+4*c-d)*t*t+(-a+3*b-3*c+d)*t*t*t)))
     result.append(values[-1]);return result
 # Ring profile: z, half width, depth, Y centre. Front is -Y.
-profile=[(.70,.07,.12,.015),(.78,.28,.29,.01),(.91,.44,.40,-.01),(1.10,.57,.49,-.025),(1.35,.65,.55,-.025),(1.60,.665,.56,-.015),(1.83,.62,.51,.005),(2.04,.52,.43,.025),(2.21,.425,.355,.035),(2.36,.35,.30,.025),(2.52,.32,.28,.01),(2.70,.32,.28,0),(2.88,.303,.263,.005),(3.04,.249,.224,.015),(3.15,.155,.146,.025),(3.20,.012,.012,.025)]
+profile=[(.70,.07,.12,.015),(.78,.28,.29,.01),(.91,.44,.40,-.01),(1.10,.57,.49,-.025),(1.35,.65,.55,-.025),(1.60,.665,.56,-.015),(1.83,.62,.51,.005),(2.04,.52,.43,.025),(2.21,.425,.355,.035),(2.36,.375,.31,.025),(2.52,.345,.29,.01),(2.70,.326,.28,0),(2.88,.303,.263,.005),(3.04,.249,.224,.015),(3.15,.155,.146,.025),(3.20,.012,.012,.025)]
 rings=catmull(profile,5);n=64
 for z,rx,ry,cy in rings:
     for i in range(n):
@@ -109,27 +109,42 @@ for j in range(len(rings)-1):
 faces.extend([tuple(reversed(range(n))),tuple((len(rings)-1)*n+i for i in range(n))])
 # The root begins INSIDE the neck/shoulder volume, so its union never makes a
 # separate deltoid cap. The wrist continues the same descending tangent.
-arm_path=[(.20,.045,2.40),(.51,.035,2.16),(.75,.005,1.91),(.845,-.035,1.65),(.845,-.075,1.40),(.815,-.12,1.17),(.79,-.16,.99)]
-arm_r=[.145,.155,.14,.12,.103,.087,.071]
-paths={};digit_paths={};leg_paths={};toes={}
+arm_path=[(.20,.045,2.36),(.52,.035,2.19),(.80,.005,1.98),(.84,-.035,1.72),(.84,-.08,1.46),(.805,-.12,1.24),(.78,-.155,1.085)]
+arm_r=[.18,.17,.14,.125,.105,.093,.076]
+paths={};digit_paths={};leg_paths={};toes={};hand_tips={};hand_normals={};grips={}
 for side,sign in [('L',1),('R',-1)]:
     p=[(sign*x,y,z) for x,y,z in arm_path]; paths[side]=p
     ar=catmull([(*a,r) for a,r in zip(p,arm_r)],5)
     tube([a[:3] for a in ar],[a[3] for a in ar])
-    # An elongated palm shares the arm tangent; fingertips curl softly inward.
-    # Three close fingers + one thumb, not an outstretched miniature human hand.
-    palm=(sign*.784,-.172,.968)
-    ellipsoid(palm,(.095,.067,.087))
+    # The resting palm faces inward 48 degrees, as in the supplied three views.
+    # A thick oval palm and short curled digits share the wrist's volume.
+    angle=math.radians(48)
+    across=Vector((sign*math.cos(angle),-math.sin(angle),0))
+    forward=Vector((-sign*math.sin(angle),-math.cos(angle),0))
+    center=Vector((sign*.775,-.16,1.045))
+    def hand_point(u,v,z):return tuple(center+across*u+forward*v+Vector((0,0,z)))
+    hand_normals[side]=forward
+    hand_tips[side]=hand_point(0,.012,-.065)
+    grips[side]=hand_point(0,.065,-.045)
+    pv=[];pf=[];ellipsoid((0,0,0),(.096,.070,.088),pv,pf,32,20)
+    off=len(verts);verts.extend(hand_point(*v) for v in pv);faces.extend(tuple(off+i for i in f) for f in pf)
     for digit in range(3):
-        dx=(digit-1)*.080
-        pp=[(sign*(.784+dx),-.175,.946),(sign*(.784+dx),-.195,.838+abs(digit-1)*.01),(sign*(.784+dx),-.215,.765+abs(digit-1)*.018)]
+        lane=digit-1
+        # Webbed roots separate monotonically into rounded pads: no tunnels.
+        pp=[hand_point(lane*.053,.008,-.032),
+            hand_point(lane*.080,.020,-.102+abs(lane)*.008),
+            hand_point(lane*.080,.059,-.132+abs(lane)*.010)]
         digit_paths[f'finger{digit+1}.{side}']=pp
-        sp=catmull([(*a,r) for a,r in zip(pp,[.030,.024,.020])],5)
-        tube([a[:3] for a in sp],[a[3] for a in sp]);ellipsoid(pp[-1],(.022,.023,.025),segments=20,rings=12)
-    pp=[(sign*.727,-.185,.995),(sign*.675,-.205,.967),(sign*.651,-.225,.912)]
+        sp=catmull([(*a,r) for a,r in zip(pp,[.037,.031,.027])],6)
+        tube([a[:3] for a in sp],[a[3] for a in sp])
+        ellipsoid(pp[-1],(.027,.027,.027),segments=24,rings=14)
+    # Fill the thumb web continuously; a bent thumb must not form a tiny tunnel.
+    pv=[];pf=[];ellipsoid((-.076,.028,-.014),(.057,.045,.043),pv,pf,24,14)
+    off=len(verts);verts.extend(hand_point(*v) for v in pv);faces.extend(tuple(off+i for i in f) for f in pf)
+    pp=[hand_point(-.065,.006,.012),hand_point(-.112,.033,-.008),hand_point(-.111,.067,-.040)]
     digit_paths[f'thumb.{side}']=pp
-    sp=catmull([(*a,r) for a,r in zip(pp,[.029,.025,.021])],5)
-    tube([a[:3] for a in sp],[a[3] for a in sp]);ellipsoid(pp[-1],(.022,.023,.025),segments=20,rings=12)
+    sp=catmull([(*a,r) for a,r in zip(pp,[.037,.033,.028])],6)
+    tube([a[:3] for a in sp],[a[3] for a in sp]);ellipsoid(pp[-1],(.029,.029,.030),segments=24,rings=14)
     # Rounded tapered legs with an actual crotch gap below the pelvis.
     lp=[(sign*.31,.035,.91),(sign*.365,.035,.66),(sign*.42,.015,.40),(sign*.46,-.035,.12)]
     leg_paths[side]=lp
@@ -144,7 +159,7 @@ for side,sign in [('L',1),('R',-1)]:
         tube(pp,[.048,.034]);ellipsoid(pp[-1],(.047,.046,.033),segments=20,rings=12)
 body=mesh('Naiwa_Surface',verts,faces)
 bpy.context.view_layer.objects.active=body;body.select_set(True)
-remesh=body.modifiers.new('Continuous shoulder, palm and hip surface','REMESH');remesh.mode='VOXEL';remesh.voxel_size=.014;remesh.use_smooth_shade=True
+remesh=body.modifiers.new('Continuous shoulder, palm and hip surface','REMESH');remesh.mode='VOXEL';remesh.voxel_size=.012;remesh.use_smooth_shade=True
 bpy.ops.object.modifier_apply(modifier=remesh.name)
 print("Naiwa remeshed:",len(body.data.vertices),flush=True)
 # Fair the shoulder union over a broad region, without shrinking the fingers.
@@ -156,7 +171,7 @@ for v in body.data.vertices:
 sm=body.modifiers.new('Continuous shoulder fairing','SMOOTH');sm.factor=.85;sm.iterations=40;sm.vertex_group=shoulder_group.name
 bpy.ops.object.modifier_apply(modifier=sm.name);body.vertex_groups.remove(body.vertex_groups['Shoulder fairing'])
 sm=body.modifiers.new('Relax continuous skin','SMOOTH');sm.factor=.65;sm.iterations=5;bpy.ops.object.modifier_apply(modifier=sm.name)
-dec=body.modifiers.new('Authoring base cage','DECIMATE');dec.ratio=.14;bpy.ops.object.modifier_apply(modifier=dec.name)
+dec=body.modifiers.new('Authoring base cage','DECIMATE');dec.ratio=.12;bpy.ops.object.modifier_apply(modifier=dec.name)
 print('Naiwa base cage:',len(body.data.vertices),flush=True)
 sub=body.modifiers.new('Rounded authoring surface','SUBSURF');sub.levels=1;sub.render_levels=1;bpy.ops.object.modifier_apply(modifier=sub.name)
 print('Naiwa smooth surface:',len(body.data.vertices),flush=True)
@@ -176,7 +191,7 @@ def smooth_array(a,b,x):
 height=np.where(Z>1.63,.55,.40)
 region=(X/.625)**2+((Z-1.63)/height)**2
 belly=(1-smooth_array(.995,1.005,region))*(u[None,:]<.5)
-hand=smooth_array(.56,.61,np.abs(X))*(1-smooth_array(1.00,1.14,Z))
+hand=smooth_array(.55,.60,np.abs(X))*(1-smooth_array(1.085,1.16,Z))
 foot=1-smooth_array(.12,.23,Z)
 dark=np.maximum(hand,foot)
 yellow=np.array([1,.59,.012],dtype=np.float32)
@@ -215,9 +230,18 @@ bone('head',(0,0,2.67),(0,0,3.2),'neck')
 for side,sign in [('L',1),('R',-1)]:
     bone('clavicle.'+side,(sign*.18,0,2.22),paths[side][0],'chest')
     prev='clavicle.'+side
-    for j in range(6):
-        name=f'arm{j+1:02}.{side}';bone(name,paths[side][j],paths[side][j+1],prev);prev=name
-    bone('hand.'+side,paths[side][-1],(sign*.775,-.188,.824),prev)
+    # Only the inner shoulder stays rooted. The visible upper arm bends too.
+    free=catmull(paths[side][1:],12)
+    cumulative=[0.]
+    for a,b in zip(free,free[1:]):cumulative.append(cumulative[-1]+(Vector(b)-Vector(a)).length)
+    rig_path=[paths[side][0],(Vector(paths[side][0])+Vector(paths[side][1]))*.5,paths[side][1]]
+    for j in range(1,13):
+        station=cumulative[-1]*j/12
+        k=next((k for k in range(len(free)-1) if cumulative[k+1]>=station),len(free)-2)
+        rig_path.append(Vector(free[k]).lerp(Vector(free[k+1]),(station-cumulative[k])/(cumulative[k+1]-cumulative[k])))
+    for j in range(len(rig_path)-1):
+        name=f'arm{j+1:02}.{side}';bone(name,rig_path[j],rig_path[j+1],prev);prev=name
+    bone('hand.'+side,paths[side][-1],hand_tips[side],prev)
     for name,pts in digit_paths.items():
         if not name.endswith(side):continue
         base=name.split('.')[0]
@@ -232,7 +256,7 @@ for side,sign in [('L',1),('R',-1)]:
     bone('CTRL_hand.'+side,paths[side][-1],Vector(paths[side][-1])+Vector((0,0,.2)),'root',False)
     bone('CTRL_foot.'+side,lp[3],Vector(lp[3])+Vector((0,0,.2)),'root',False)
     bone('POLE_knee.'+side,(sign*.5,-1,.5),(sign*.5,-1,.7),'root',False)
-    bone('grip'+('Left' if side=='L' else 'Right'),(sign*.784,-.23,.92),(sign*.744,-.23,.92),'hand.'+side,False)
+    bone('grip'+('Left' if side=='L' else 'Right'),grips[side],Vector(grips[side])+hand_normals[side]*.06,'hand.'+side,False)
     bone('footContact'+('Left' if side=='L' else 'Right'),(sign*.46,-.18,.026),(sign*.46,-.28,.026),'foot.'+side,False)
     bone('eye.'+side,(sign*.195,-.226,2.89),(sign*.195,-.37,2.89),'head',False)
 bone('mouth',(0,-.284,2.69),(0,-.39,2.69),'head',False)
@@ -243,6 +267,11 @@ for b in ad.bones:
     collection='Controls' if b.name.startswith(('CTRL','POLE')) or b.name=='root' else 'Deform' if b.use_deform else 'Contact anchors'
     coll=ad.collections.get(collection) or ad.collections.new(collection);coll.assign(b)
     b.bbone_segments=1
+    if b.name.startswith(('arm','hand')):
+        side=b.name[-1];sign=1 if side=='L' else -1
+        portion=1. if b.name.startswith('hand') else max(0,(int(b.name[3:5])-2)/12)
+        a=math.radians(48)*portion
+        b['surface_normal']=[-sign*math.sin(a),-math.cos(a),0]
 for pb in rig.pose.bones:pb.rotation_mode='QUATERNION'
 # Heat weighting uses the separated armpits; no body-to-wrist sheets exist.
 bpy.ops.object.select_all(action='DESELECT');body.select_set(True);rig.select_set(True);bpy.context.view_layer.objects.active=rig
@@ -254,7 +283,8 @@ bpy.context.view_layer.objects.active=body
 bpy.ops.object.vertex_group_limit_total(limit=4)
 bpy.ops.object.vertex_group_normalize_all(lock_active=False)
 body['continuous_surface']=True
-body['rest_pose']='Standing relaxed A-pose; armpit gap retained for free arm movement'
+body['rest_pose']='Standing; inward palms, short curled digits, continuous rounded wrist and shoulder'
+body['hand_design']='Thick palm, three short webbed fingers and opposing thumb; reference 2026-11-28'
 # Local expression shapes.
 body.shape_key_add(name='Basis')
 for name,side in [('CheekPuff.L',1),('CheekPuff.R',-1)]:
@@ -332,13 +362,13 @@ drool.shape_key_add(name='Basis');key=drool.shape_key_add(name='Drool')
 for p,co in zip(key.data,full):p.co=co
 # Optional IK controls; demo clips are FK and export without constraint baking.
 for side in ['L','R']:
-    for name,last,count,target in [('arm','arm06',6,'hand'),('leg','shin',2,'foot')]:
+    for name,last,count,target in [('arm','arm14',14,'hand'),('leg','shin',2,'foot')]:
         prop='IK_'+name+'_'+side;rig[prop]=0.;rig.id_properties_ui(prop).update(min=0,max=1,description='0 = authored FK, 1 = move matching CTRL bone')
         c=rig.pose.bones[last+'.'+side].constraints.new('IK');c.name='Optional '+name+' IK';c.target=rig;c.subtarget='CTRL_'+target+'.'+side;c.chain_count=count;c.use_stretch=(name=='arm')
         if name=='leg':c.pole_target=rig;c.pole_subtarget='POLE_knee.'+side;c.pole_angle=-math.pi/2
         driver=c.driver_add('influence').driver;driver.expression='weight'
         var=driver.variables.new();var.name='weight';var.type='SINGLE_PROP';var.targets[0].id=rig;var.targets[0].data_path='["'+prop+'"]'
-rig['authoring_notes']='Six segment soft arms; FK clips; optional hand and foot IK. Fingers and eyes individually poseable. Z up, front -Y.'
+rig['authoring_notes']='Fourteen segment soft arms; FK clips; optional hand and foot IK. Fingers and eyes individually poseable. Z up, front -Y.'
 # Studio setup.
 scene.render.engine='CYCLES';scene.cycles.samples=24;scene.cycles.use_denoising=True
 scene.render.resolution_x=900;scene.render.resolution_y=900;scene.render.resolution_percentage=100

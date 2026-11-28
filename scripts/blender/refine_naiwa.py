@@ -17,7 +17,7 @@ def nearest(p,names,sharp=2.):
     ws=[(n,1/(d+.14)**sharp) for d,n in pairs];total=sum(w for n,w in ws)
     return {n:w/total for n,w in ws}
 def arm_weights(p, side):
-    names=[f'arm{i:02}.{side}' for i in range(1,7)]+['hand.'+side]
+    names=sorted(n for n in bones if n.startswith('arm') and n.endswith('.'+side))+['hand.'+side]
     lengths=[(bones[n][1]-bones[n][0]).length for n in names]
     starts=[sum(lengths[:i]) for i in range(len(names))]
     stations=[starts[i]+lengths[i]*.5 for i in range(len(names))]
@@ -29,13 +29,15 @@ def arm_weights(p, side):
     position=best[1]
     if position>=stations[-1]:
         digits=[n for n in bones if n.endswith('.'+side) and n.startswith(('finger','thumb'))]
-        mix=1-smooth(.81,.93,p.z)
+        a,b=bones['hand.'+side]
+        along=(p-a).dot((b-a).normalized())
+        mix=smooth(.075,.18,along)
         ws={names[-1]:1-mix}
         for n,w in nearest(p,digits,3.).items():ws[n]=w*mix
         return ws
-    # Overlapping influences keep the soft arm from showing six hard joints.
+    # Overlapping influences keep the soft arm from showing hard joints.
     samples=[('clavicle.'+side,-.10)]+list(zip(names,stations))
-    pairs=sorted([(math.exp(-((position-station)/.23)**2),n) for n,station in samples],reverse=True)[:3]
+    pairs=sorted([(math.exp(-((position-station)/.11)**2),n) for n,station in samples],reverse=True)[:3]
     total=sum(w for w,n in pairs)
     return {n:w/total for w,n in pairs}
 
@@ -51,7 +53,7 @@ for e in body.data.edges:
 arm_regions={};arm_cuts={}
 for side,sign in [('L',1),('R',-1)]:
     seed=min((v for v in body.data.vertices if sign*v.co.x>.65 and .73<v.co.z<1.12),key=lambda v:v.co.z).index
-    for cut in [1.95,1.90,1.85,1.80,1.75,1.70,1.65]:
+    for cut in [1.95,1.90,1.85,1.80,1.75,1.70,1.65,1.60,1.55]:
         region={seed};stack=[seed]
         while stack:
             a=stack.pop()
@@ -62,18 +64,20 @@ for side,sign in [('L',1),('R',-1)]:
     assert all(sign*body.data.vertices[i].co.x>.55 for i in region), 'Armpit clearance is insufficient'
     arm_regions[side]=region;arm_cuts[side]=cut
     print('Arm topology',side,'split at',cut,'vertices',len(region))
+profile=[(1.83,.62,.51,.005),(2.04,.52,.43,.025),(2.21,.425,.355,.035),(2.36,.375,.31,.025),(2.52,.345,.29,.01),(2.70,.326,.28,0)]
 for vertex in body.data.vertices:
     p=vertex.co;x,y,z=p;ax=abs(x);side='L' if x>0 else 'R'
     arm=[n for n in bones if n.endswith('.'+side) and n.startswith(('clavicle','arm','hand','finger','thumb'))]
     leg=[n for n in bones if n.endswith('.'+side) and n.startswith(('thigh','shin','foot','toe'))]
     # In the bind pose, forearms have their own volume clear of the torso.
     cut=arm_cuts[side]
-    shoulder=smooth(cut,2.23,z)
-    armweight=smooth(.65-.38*shoulder,.79-.43*shoulder,ax)*(1-smooth(2.25,2.42,z))
-    # The front/back of the torso must not follow a nearby arm bone.
-    # Restrict the shoulder blend to the actual cylindrical limb volume.
-    arm_distance=min(distance(p,*bones[f'arm{i:02}.{side}']) for i in range(1,7))
-    armweight*=1-smooth(.14,.26,arm_distance)
+    # Compare the surface against the original trunk cross-section. A radial
+    # mask around the arm centre incorrectly leaves its outer skin behind.
+    lo,hi=next(((a,b) for a,b in zip(profile,profile[1:]) if z<=b[0]),(profile[-2],profile[-1]))
+    u=max(0.,min(1.,(z-lo[0])/(hi[0]-lo[0])))
+    rx,ry,cy=[lo[k]+(hi[k]-lo[k])*u for k in (1,2,3)]
+    trunk_radius=math.sqrt((ax/rx)**2+((y-cy)/ry)**2)
+    armweight=smooth(.98,1.20,trunk_radius)*(1-smooth(2.38,2.52,z))
     if z<cut:
         topology_weight=1. if vertex.index in arm_regions[side] else 0.
         blend=smooth(cut-.05,cut,z)

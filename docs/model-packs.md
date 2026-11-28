@@ -99,7 +99,7 @@ DIY-Cat 1.0.0 沿用原来的模型包格式和设置目录，升级改名无需
 
 配色字段为 `furColor`、`furSecondaryColor`、`outlineColor`、`bellyBibColor`、`armColor`、`pawColor`、`pawOutlineColor`、`eyeColorTop`、`eyeColorBottom`、`pupilColor`、`eyeCatchlight`、`mouthColor`、`blushColor`；奶蛙不绘制猫咪耳朵、尾巴、花纹或斑点。部件和形变通道均由 `get_builtin_rigs` 返回，3D 奶蛙条目明确标记 `not-implemented`。
 
-当前奶蛙的坐姿身体和脚掌来自用户提供参考图的拆分素材；打盹保持坐姿，旧趴姿素材不再用于睡觉。手臂、掌心与手指由运行时连续形变生成，见 [素材说明](../src/assets/naiwa/README.md)。模型包仅改变现有素材配色，不包含新的图片或骨骼。另已提供 [3D 奶蛙建模初版](../art/naiwa/README.md)：Blender 源文件、64 骨骼 GLB、7 段动作和独立 HTML 预览。骨架与后续接入见 [制作说明](naiwa-3d-design.md)；这些作者资源仍不能直接导入桌宠的 JSON 模型包。
+当前奶蛙的坐姿身体和脚掌来自用户提供参考图的拆分素材；打盹保持坐姿，旧趴姿素材不再用于睡觉。手臂、掌心与手指由运行时连续形变生成，见 [素材说明](../src/assets/naiwa/README.md)。模型包仅改变现有素材配色，不包含新的图片或骨骼。另已提供 [3D 奶蛙建模初版](../art/naiwa/README.md)：Blender 源文件、80 骨骼 GLB、8 段动作和独立 HTML 预览。骨架与后续接入见 [制作说明](naiwa-3d-design.md)；这些作者资源仍不能直接导入桌宠的 JSON 模型包。
 
 ## 动作与反应契约
 

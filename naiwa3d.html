@@ -50,16 +50,16 @@
 <main>
   <a href="./harness.html?breed=builtin-naiwa&amp;idle=0">返回 2D 交互预览</a>
   <h1>奶蛙 · 站姿预览</h1>
-  <p class="intro">对照设计图查看体型、肩臂和手脚。默认展示自然站姿，也可切换现有动作检查变形。</p>
+  <p class="intro">对照设计图查看圆润的身体、向内收的手掌与短手指。试试“扶肚摸头”，暂停后拖动进度检查肩、肘和手腕的衔接。</p>
   <div class="layout">
     <div>
       <div id="viewport" aria-label="3D 奶蛙预览，可拖动旋转，通过下方按钮切换视角">
         <div id="loading"><p id="load-message" role="status">正在加载模型…</p><button id="retry" hidden>重新加载</button></div>
       </div>
       <div class="views" aria-label="查看角度">
-        <button data-view="front">正面</button><button data-view="side">侧面</button><button data-view="back">背面</button><button data-view="perspective">重置视角</button>
+        <button data-view="front">正面</button><button data-view="side">侧面</button><button data-view="back">背面</button><button data-view="perspective">重置视角</button><button data-view="hands">手部近景</button>
       </div>
-      <p class="help">拖动旋转 · 滚轮缩放 · 双指缩放。也可用上方视角按钮查看。正面适合对照设计图，侧面和背面可检查身体轮廓。</p>
+      <p class="help">拖动旋转 · 滚轮缩放 · 双指缩放。也可用上方视角按钮查看。正面适合对照设计图，侧面和背面可检查身体轮廓；“手部近景”会暂停动作并回到站姿，便于查看掌根与手指。</p>
       <p id="status" role="status" aria-live="polite">正在读取骨架与动作…</p>
     </div>
     <aside aria-label="动作与预览设置">
@@ -72,6 +72,7 @@
         <button data-clip="wave" aria-pressed="false" disabled>招手</button>
         <button data-clip="nap" aria-pressed="false" disabled>打盹流口水</button>
         <button data-clip="angry" aria-pressed="false" disabled>鼓腮跺脚</button>
+        <button data-clip="delight" aria-pressed="false" disabled>扶肚摸头</button>
       </div></fieldset>
       <div class="playback"><button id="play" disabled>暂停</button><button id="restart" disabled>从头播放</button></div>
       <label class="label" for="timeline">动作进度</label>
@@ -82,12 +83,13 @@
     </aside>
   </div>
   <div class="notes">
-    <p>这是可编辑的 3D 建模版本，现有七段动作供检查骨架和变形。键鼠定位参考用于检查手部接触；实际桌宠的道具适配、动态接触和外部 GLB 导入仍需后续接入。</p>
+    <p>这是可编辑的 3D 建模版本，现有八段动作供检查骨架和变形。新增的“扶肚摸头”参考了视频中的扶腹、抬臂和回位姿态。键鼠定位参考用于检查手部接触；实际桌宠的道具适配、动态接触和外部 GLB 导入仍需后续接入。</p>
     <div class="downloads">
       <a href="./art/naiwa/naiwa.blend" download>下载 Blender 源文件</a>
       <a href="./art/naiwa/naiwa.glb" download>下载 GLB 模型与动作</a>
       <a href="./docs/naiwa-3d-design.md">骨架、动作与接入说明</a>
     </div>
+    <details><summary>查看手部与动作渲染</summary><p>真实模型渲染，便于对照上方可交互预览。</p><img src="./art/naiwa/previews/hand-detail.png" alt="奶蛙手部近景：前臂连续连接掌根，手指短而微弯。" loading="lazy" /><img src="./art/naiwa/previews/gesture-sheet.jpg" alt="扶肚摸头连续动作的十二个时间点，从自然垂手到扶腹、抬手触头，再回到站姿。" loading="lazy" /><video controls preload="none" playsinline poster="./art/naiwa/previews/delight-touch.png" style="max-width:100%;height:auto;margin-top:12px"><source src="./art/naiwa/previews/gesture.mp4" type="video/mp4" />浏览器不支持此视频，可下载后播放。</video></details>
     <details><summary>展开原始设计图</summary><img src="./art/naiwa/reference.png" alt="奶蛙原始设计图：黄色头身、奶油色肚皮、绿色眼睛与橄榄色手脚，包含正面、侧面和背面。" loading="lazy" /></details>
   </div>
 </main>
