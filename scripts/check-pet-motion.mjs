@@ -1164,7 +1164,8 @@ test('every shipped catalog package matches its standalone file after normalizat
   for (const cat of standalone) {
     assert.deepEqual(catalog.find(p => p.skin.id === cat.skin.id), parseModelPack(exportModelPack(cat.skin, cat.asset)));
     if (cat.profile.adapters.includes('three-naiwa-v1')) {
-      assert.deepEqual(modelActions(cat.skin, '3d'), MODEL_CONTRACT.adapters['three-cat-v1'].actions);
+      assert.deepEqual(modelActions(cat.skin, '3d'), MODEL_CONTRACT.adapters['three-naiwa-v1'].actions);
+      for (const kind of ['tongueKey', 'sniff']) assert.ok(!MODEL_CONTRACT.adapters['three-cat-v1'].actions.includes(kind));
       continue;
     }
     if (cat.profile.glb) {
@@ -1729,8 +1730,8 @@ test('live Naiwa shares normal desks, real prop contacts, gaze and interruptible
   const scale = actor.root.scale.clone(), origin = actor.root.position.clone();
   const world = name => gltf.scene.getObjectByName(name).getWorldPosition(new Vector3());
   const contacts = () => {
-    nearVector(world('gripRight'), e.paws.L.pos, 1e-5, 'left visible hand');
-    nearVector(world('gripLeft'), e.paws.R.pos, 1e-5, 'right visible hand');
+    nearVector(world('gripRight'), e.paws.L.pos.clone().applyMatrix4(actor.motionRoot.matrixWorld), 1e-5, 'left visible hand');
+    nearVector(world('gripLeft'), e.paws.R.pos.clone().applyMatrix4(actor.motionRoot.matrixWorld), 1e-5, 'right visible hand');
   };
   const step = seconds => { tick(e, seconds, 1 / 30); contacts(); };
   // Opt-in offline visual review: only writes ignored cache files, never source assets.
@@ -1800,12 +1801,46 @@ test('live Naiwa shares normal desks, real prop contacts, gaze and interruptible
   e.setPropConfig({ ...DEFAULT_PROP, enabled: false }); step(1);
   e.triggerIdleAction('wave'); e.idleAct.side = 1; step(.9); assert.equal(e.idleAct?.kind, 'wave');
   snapshot('scene-wave');
+  step(.55); snapshot('scene-wave-high');
+  step(.55); snapshot('scene-wave-swing');
   const before = world('gripLeft');
   e.onKeyDown(74); step(1 / 30);
   assert.equal(e.idleAct, null);
   assert.ok(before.distanceTo(world('gripLeft')) < .5, 'input blends from current wave pose');
   e.onKeyUp(74); step(.8);
   nearVector(actor.root.scale, scale); nearVector(actor.root.position, origin);
+  for (const layout of ['65', '108']) {
+    e.setKeyboardConfig(layout, 'cat');e.setTailKeyConfig('custom', ['enter']);
+    e.onKeyDown(13); step(.3);
+    const tip = actor.root.getObjectByName('NaiwaTongueTip');
+    assert.ok(tip.visible, 'tail-key mapping now uses tongue');
+    const top=desk.keyTopWorld('enter');top.y+=.045;
+    assert.ok(tip.getWorldPosition(new Vector3()).distanceTo(top)<.02,'tongue tip contacts configured key');
+    snapshot('scene-tongue-'+layout);
+    e.onKeyUp(13);step(.8);assert.equal(tip.visible,false,'release retracts tongue');
+  }
+  e.setTailKeyConfig('off', []);
+  e.triggerIdleAction('tongueKey', true);e.onMouseDown('left');e.onMouseUp('left');step(.22);
+  assert.ok(actor.root.getObjectByName('NaiwaTongueTip').visible,'menu click does not cancel tongue demo');
+  step(1);assert.equal(actor.root.getObjectByName('NaiwaTongueTip').visible,false,'demo retracts');
+  e.triggerIdleAction('sniff');step(1.3);snapshot('scene-sniff');
+  assert.ok(actor.root.getObjectByName('NaiwaNoseDrop').visible);
+  step(.67);snapshot('scene-sniff-inhale');step(1.3);
+  assert.equal(actor.root.getObjectByName('NaiwaNoseDrop').visible,false);
+  e.triggerIdleAction('roll');e.idleAct.side=1;
+  let previous=0;
+  for(const age of [.65,1.3,2.0,2.4,2.8,3.7,4.3,4.9]) {
+    step(age-previous);previous=age;snapshot('scene-roll-'+String(age).replace('.','-'));
+    assert.equal(morph('CheekPuff.L'),0,'roll never inflates cheeks');
+    if(age===2.4)assert.ok(morph('Frown')>.2,'tantrum face accompanies kicks');
+    if(age===4.9)assert.ok(morph('Frown')<.02,'tantrum expression clears on recovery');
+    const bounds=new Box3();actor.motionRoot.traverseVisible(o=>{if(o.isMesh)bounds.union(new Box3().setFromObject(o,true));});
+    assert.ok(bounds.min.y>-.03,'articulated roll stays grounded at '+age+' ('+bounds.min.y+')');
+  }
+  e.triggerIdleAction('roll');step(2.2);e.onKeyDown(65);step(.3);snapshot('scene-roll-interrupt');
+  e.onKeyUp(65);step(1.3);
+  assert.equal(e.rollPose.tuck,0,'interrupted roll returns to sitting');
+  assert.ok(actor.motionRoot.position.length()<1e-6);
   e.triggerIdleAction('nap'); step(3.5);
   assert.equal(e.asleep, true); assert.ok(morph('Drool') > .9);
   snapshot('scene-nap');

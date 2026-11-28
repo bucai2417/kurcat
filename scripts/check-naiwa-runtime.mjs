@@ -17,7 +17,7 @@ const size=new T.Box3().setFromObject(pet.root).getSize(new T.Vector3());
 console.log('Seated size:',size.toArray());
 assert.ok(Math.abs(size.y-2.3)<1e-6);
 const base={head:{pitch:0,yaw:0,roll:0},lean:0,hunch:0,blink:0,anger:0,sleeping:0};
-const contacts={left:v(-1.16,.15,.96),right:v(.50,.15,1.25),leftMode:'desk',rightMode:'desk',footWeight:0,stomp:0,stompLift:0};
+const contacts={left:v(-1.16,.15,.96),right:v(.50,.15,1.25),leftMode:'desk',rightMode:'desk',tongueWeight:0,stomp:0,stompLift:0};
 function step(frame=base,contact=contacts,state='idle') {
  pet.update(1/60,state,false); pet.pose(1/60,frame);pet.contacts(1/60,contact);
 }
@@ -50,7 +50,9 @@ for (const [name,left,right,mode] of [
 const morph = name => { let result=0;gltf.scene.traverse(m=>{const i=m.morphTargetDictionary?.[name];if(i!==undefined) result=Math.max(result,m.morphTargetInfluences[i]);});return result; };
 assert.equal(morph('CheekPuff.L'),0,'neutral clip cannot inflate cheeks');
 for(let i=0;i<30;i++)step({...base,anger:1});
-assert.ok(morph('CheekPuff.L')>.25 && morph('CheekPuff.L')<=.3);
+assert.equal(morph('CheekPuff.L'),0,'anger never inflates cheeks');
+assert.equal(morph('CheekPuff.R'),0);
+assert.ok(morph('Angry')>.7,'eyelids still express anger');
 for(let i=0;i<90;i++)step();
 assert.ok(morph('CheekPuff.L')<1e-6,'cheeks must deflate on calm');
 
@@ -76,14 +78,42 @@ assert.ok(pet.current.time>=2.4 && pet.current.time<=3.6);
 for(let i=0;i<40;i++)step();
 assert.equal(morph('Drool'),0);assert.equal(morph('Blink'),0);
 assert.deepEqual(pet.root.scale,fixedScale);assert.deepEqual(pet.root.position,fixedOrigin);
-assert.equal(pet.liveRig.canFootReach(v(2,.15,1.5)),false,'far configured tail keys fall back to hands');
-const foot=wp('footContactLeft');assert.equal(pet.liveRig.canFootReach(foot),true);
-step(base,{...contacts,foot:foot.clone().add(v(.01,.03,.01)),footWeight:1});
-assert.ok(wp('footContactLeft').distanceTo(foot.clone().add(v(.01,.03,.01)))<1e-4);
+// Tongue follows real keyboard targets, leaves idle hands alone and retracts on interruption.
+const tip=()=>pet.root.getObjectByName('NaiwaTongueTip');
+for(const target of [v(-1,.20,1.2),v(1.8,.20,1.45),v(.1,.20,1.5)]) {
+ assert.equal(pet.liveRig.canTongueReach(target),true);
+ for(let i=0;i<24;i++)step(base,{...contacts,tongue:target,tongueWeight:1});
+ assert.ok(tip().visible);assert.ok(tip().getWorldPosition(v(0,0,0)).distanceTo(target)<1e-5);
+ assert.ok(wp('gripRight').distanceTo(contacts.left)<1e-5);
+ assert.ok([...pet.root.getObjectByName('NaiwaTongue').geometry.attributes.position.array].every(Number.isFinite));
+}
+assert.equal(pet.liveRig.canTongueReach(v(100,0,0)),false);
+for(const [frame,contact] of [[base,contacts],[{...base,sleeping:1},{...contacts,tongue:v(0,.2,1),tongueWeight:1}],
+ [base,{...contacts,leftMode:'cup',tongue:v(0,.2,1),tongueWeight:1}]]) {
+ for(let i=0;i<30;i++)step(frame,contact);
+ assert.equal(tip().visible,false,'tongue retracts when idle, sleeping or holding a prop');
+}
+const {naiwaGroundRollPose}=await import('../src/naiwaMotion.ts');
+const visibleBounds=root=>{const box=new T.Box3();root.traverseVisible(o=>{if(o.isMesh)box.union(new T.Box3().setFromObject(o,true));});return box;};
+const kickSamples=[];
+for(let i=0;i<=288;i++) {
+ const age=i/60,roll=naiwaGroundRollPose(age,1);
+ step({...base,gesture:{kind:'roll',age,duration:4.8,side:1},roll});
+ kickSamples.push(wp('footL').y-wp('footR').y);
+ if(i%30===0 && roll.tuck>.15){pet.roll(roll);pet.finishFrame(1);assert.ok(visibleBounds(pet.motionRoot).min.y>-.025, 'floor at '+age);}
+}
+assert.ok(Math.max(...kickSamples)-Math.min(...kickSamples)>.12,'feet alternate relative to the seated torso');
+for(let i=0;i<60;i++)step();
+const foot=wp('footContactLeft');step(base,{...contacts,stomp:1,stompLift:.15});
+assert.ok(wp('footContactLeft').y>foot.y+.03,'ground tantrum still lifts a foot');
+for(let i=0;i<75;i++)step({...base,gesture:{kind:'sniff',age:i/60,duration:3,side:1}});
+assert.equal(pet.root.getObjectByName('NaiwaNoseDrop').visible,true);
+for(let i=0;i<24;i++)step();
+assert.equal(pet.root.getObjectByName('NaiwaNoseDrop').visible,false,'input interruption retracts nose drop');
 const {groundRollPose,recoverGroundRoll}=await import('../src/groundRoll3d.ts');
 for(const age of [.8,1.5,2.3,3.5,4.5,4.8]) {
  step();pet.roll(groundRollPose(age,1));pet.finishFrame(1);
- const bounds=new T.Box3().setFromObject(pet.motionRoot,true);
+ const bounds=visibleBounds(pet.motionRoot);
  assert.ok(bounds.min.y>-.025,'roll stays above floor');
  assert.deepEqual(pet.root.scale,fixedScale);
 }
@@ -92,7 +122,7 @@ for(const age of [0,.15,.5,.9,1.05]) {step();pet.roll(recoverGroundRoll(rolled,a
 assert.ok(pet.motionRoot.quaternion.angleTo(new T.Quaternion())<1e-6);
 assert.ok(pet.motionRoot.position.length()<1e-6);
 for(let i=0;i<60;i++)step();
-console.log('Naiwa runtime: seated size, desk/cup/wave contacts, wrist tangents, gaze, cheeks, sleep, foot reach and grounded roll passed.');
+console.log('Naiwa runtime: seated size, desk/cup/wave contacts, wrist tangents, gaze, cheeks, sleep, tongue contacts, sniff interruption and articulated grounded roll passed.');
 
 // Optional review uses the actual runtime-deformed vertices, not authored clip stills.
 if (process.argv.includes('--review')) {

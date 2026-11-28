@@ -918,6 +918,17 @@ function syncMenuUI(): void {
     renderStatus.textContent = '3D 加载失败，当前显示 2D 兼容预览。请检查显卡或 WebGL 支持后重启；3D 专属动作暂不可用。';
   }
   const allowedActions = modelActions(activeCat, webgl3dUnavailable ? '2d' : effectiveMode());
+  const tongueKeys = allowedActions.includes('tongueKey');
+  const footKeys = !tongueKeys && allowedActions.includes('footSwing');
+  const tailLabel = document.getElementById('tail-key-label');
+  if (tailLabel) tailLabel.textContent = tongueKeys ? '舌头按键' : footKeys ? '脚部按键' : '尾巴拍键';
+  const tailHint = document.getElementById('tail-key-hint');
+  if (tailHint) {
+    tailHint.hidden = !tongueKeys && !footKeys;
+    tailHint.textContent = tongueKeys
+      ? '沿用尾巴按键设置，由舌头伸长触键；普通键鼠用手，起床气用脚跺地。'
+      : footKeys ? '沿用尾巴按键设置，由脚触键；普通键鼠仍用手。' : '';
+  }
   document.querySelectorAll<HTMLButtonElement>('[data-idleaction]').forEach(btn => {
     const action = btn.dataset.idleaction ?? '';
     btn.hidden = !allowedActions.includes(action);

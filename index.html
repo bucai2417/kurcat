@@ -58,13 +58,14 @@
       </div>
       <p id="render-mode-status" class="menu-hint model-error" role="status" hidden></p>
       <div class="menu-scale-row">
-        <span class="menu-scale-label">尾巴拍键</span>
+        <span class="menu-scale-label" id="tail-key-label">尾巴拍键</span>
         <div class="kb-pills" id="tail-mode-pills">
           <button class="kb-pill active" data-tailmode="smart">智能（右侧）</button>
           <button class="kb-pill" data-tailmode="edge">外侧功能键</button>
           <button class="kb-pill" data-tailmode="off">关闭</button>
         </div>
       </div>
+      <p class="menu-hint" id="tail-key-hint" hidden></p>
       <div class="menu-scale-row">
         <span class="menu-scale-label">待机动作</span>
         <div class="kb-pills" id="idle-action-pills">
@@ -82,6 +83,8 @@
           <button class="kb-pill" data-idleaction="frogSway" hidden>左右晃身</button>
           <button class="kb-pill" data-idleaction="frogPeek" hidden>好奇探头</button>
           <button class="kb-pill" data-idleaction="footSwing" hidden>交替摆脚</button>
+          <button class="kb-pill" data-idleaction="tongueKey" hidden>伸舌头按键</button>
+          <button class="kb-pill" data-idleaction="sniff" hidden>吸吸鼻涕</button>
           <button class="kb-pill" data-idleaction="tailGround">尾巴拍地</button>
           <button class="kb-pill" data-idleaction="calm">安抚起床气</button>
           <button class="kb-pill" data-idleaction="roll" data-model-only="3d" hidden>地上打滚</button>

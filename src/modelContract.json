@@ -85,9 +85,11 @@
         "roll",
         "listen",
         "shimmy",
-        "pawCheck"
+        "pawCheck",
+        "tongueKey",
+        "sniff"
       ],
-      "dynamicActions": "Shared cat-v1 live desktop controller; idle/nap base clips, soft-arm contact solving, head/pupil gaze, foot taps, shared props and grounded roll. Requires the complete Naiwa rig signature."
+      "dynamicActions": "Shared cat-v1 live desktop controller; idle/nap base clips, soft-arm contacts, head/pupil gaze, tongue key taps, props, articulated ground roll, foot tantrums and silent sniff. Cheek puffs are disabled. Requires the complete Naiwa rig signature."
     }
   },
   "specialModels": {
@@ -160,7 +162,9 @@
     "bellyPat": "拍拍肚皮",
     "frogSway": "左右晃身",
     "frogPeek": "好奇探头",
-    "footSwing": "交替摆脚"
+    "footSwing": "交替摆脚",
+    "tongueKey": "伸舌头按键",
+    "sniff": "吸吸鼻涕"
   },
   "skinRules": {
     "requiredColors": [
@@ -410,7 +414,7 @@
           "footContactRight",
           "headTouch"
         ],
-        "notes": "版本 2 three-naiwa-v1 GLB 通过完整骨架、挂点、表情和 idle/nap 校验后，复用 3D 猫咪交互引擎。按坐姿待机高度归一化；软臂跟随真实键鼠和道具接触点，瞳孔先动、头部随后转向，局部鼓腮仅随生气状态。支持共用待机动作、道具反应、跺脚和打滚；脚够不到的键由手完成。源文件保留 80 骨骼和 8 段作者动画，趴睡仍待制作。",
+        "notes": "版本 2 three-naiwa-v1 GLB 通过完整骨架、挂点、表情和 idle/nap 校验后，复用 3D 猫咪交互引擎。坐姿尺度固定；软臂跟随真实键鼠和道具接触点，瞳孔先动、头部随后转向；鼓腮始终禁用。普通键鼠用手，原尾巴按键由伸缩舌头接替，不可达时回退双手；起床气仍用脚跺地。支持招手、抱手交替蹬腿打滚、吸鼻涕及共用动作与道具。舌头和鼻涕由运行时生成，无需新增必需骨骼。源文件保留 80 骨骼和 8 段作者动画，趴睡仍待制作。",
         "designDoc": "docs/naiwa-3d-design.md",
         "runtime": "src/catEngine3d.ts",
         "baseClips": [
@@ -418,7 +422,7 @@
           "nap"
         ]
       },
-      "notes": "不通过 ID/名称猜测骨架。2D 换肤使用 canvas-naiwa-v1；3D 使用版本 2 three-naiwa-v1 包和 GLB 材质。裸 GLB 仅在完整结构通过校验时识别为奶蛙，其余使用 three-glb-v1。奶蛙没有猫耳与尾巴，原尾巴行为改用脚；2D 专属小跳等动作不会自动移植到 3D。",
+      "notes": "不通过 ID/名称猜测骨架。2D 换肤使用 canvas-naiwa-v1；3D 使用版本 2 three-naiwa-v1 包和 GLB 材质。裸 GLB 仅在完整结构通过校验时识别为奶蛙，其余使用 three-glb-v1。奶蛙没有猫耳与尾巴，2D 原尾巴行为改用脚；3D 原尾巴按键改用舌头，拍地改用脚；2D 专属小跳等动作不会自动移植到 3D。",
       "deformation": {
         "arms": "手臂、掌心与三指连续曲面，无固定肘部或独立手掌贴片；随接触方向伸缩、转向和惯性回弹，点鼠标轻压、握道具收拢，指尖保持接触",
         "cheeks": "嘴巴左右两侧各自鼓起小腮包，保持头部轮廓与五官位置，安抚后逐渐回落；搭配斜压眼皮、收紧嘴型、轻微泛红与短腮纹",

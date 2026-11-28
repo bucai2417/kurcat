@@ -181,7 +181,7 @@ def pose(kind,t,duration):
         for ctrl,target in [('hand',hand),('foot',ankle)]:
             b=rig.pose.bones['CTRL_'+ctrl+'.'+side];m=b.bone.matrix_local.copy();m.translation=target;b.matrix=m
     shape(body,'Breathe',breath)
-    shape(body,'CheekPuff.L',anger*.8);shape(body,'CheekPuff.R',anger*.7)
+    shape(body,'CheekPuff.L',0);shape(body,'CheekPuff.R',0)
     shape(scene.objects['Mouth'],'Frown',anger*.7)
     blink=math.exp(-((t-duration*.55)/.075)**2)
     for ob in shape_objects:

@@ -1,3 +1,4 @@
+import { naiwaGroundRollPose } from './naiwaMotion';
 import { GlbActor } from './glbActor';
 import type { DeskSkinConfig } from './deskSkin';
 import { SleepReaction, drawPetCaption } from './sleepReaction';
@@ -86,7 +87,7 @@ interface Fx3D {
 }
 
 interface IdleAct3D {
-  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk' | 'wave' | 'cuddle' | 'roll' | 'listen' | 'shimmy' | 'pawCheck';
+  kind: 'tilt' | 'ear' | 'slowBlink' | 'look' | 'tail' | 'stretch' | 'glance' | 'groom' | 'perk' | 'wave' | 'cuddle' | 'roll' | 'listen' | 'shimmy' | 'pawCheck' | 'sniff';
   t0: number;
   dur: number;
   side: -1 | 1;
@@ -2123,6 +2124,12 @@ export class KuroCatEngine3D {
     if (this.sleepReaction.visible(this.elapsed)) return;
     const kind = rawKind === 'sleep' ? 'nap' : rawKind;
     if (kind === 'drink') { this.clickProp(); return; }
+    if (kind === 'tongueKey') {
+      if (!this.glbActor?.liveRig) return;
+      this.wake(); this.triggerTailPatDemo();
+      if (fromMenu) this.menuActionMouseGraceUntil = this.elapsed + 0.20;
+      this.wakeRendering(); return;
+    }
     if (this.currentSkin?.modelProfile?.glb && !this.glbActor?.supportsContacts && kind !== 'nap') {
       if (this.glbActor?.trigger(kind)) { this.wake(); this.isCross = false; this.annoy = 0; this.wakeRendering(); }
       return;
@@ -2132,8 +2139,9 @@ export class KuroCatEngine3D {
       if (fromMenu) this.menuActionMouseGraceUntil = this.elapsed + 0.20;
       return;
     }
+    if (kind === 'sniff' && !this.glbActor?.liveRig) return;
     const durations: Partial<Record<IdleAct3D['kind'], number>> = {
-      stretch: 2.8, wave: 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION, listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
+      sniff: 3.0, stretch: 2.8, wave: this.glbActor?.liveRig ? 3.4 : 2.6, groom: 2.8, cuddle: 3.2, tilt: 2.2, slowBlink: 2.4, roll: GROUND_ROLL_DURATION, listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
     };
     const dur = durations[kind as IdleAct3D['kind']];
     if (!dur) return;
@@ -2193,7 +2201,7 @@ export class KuroCatEngine3D {
           this.tailKeyMode !== 'off' &&
           (this.desk.isRightEdgeTailKey(k.spec.id) ||
             (this.tailKeyMode === 'smart' && (k.spec.id === 'space' || k.spec.id === 'enter'))));
-    if (useTail && (!this.glbActor?.liveRig || this.glbActor.liveRig.canFootReach(this.desk.keyTopWorld(k.spec.id, this.tmpV1)))) {
+    if (useTail && (!this.glbActor?.liveRig || this.glbActor.liveRig.canTongueReach(this.desk.keyTopWorld(k.spec.id, this.tmpV1)))) {
       this.triggerTailKey(k.spec.id, k.spec.bubble || k.spec.label || k.spec.id);
       return;
     }
@@ -2650,7 +2658,7 @@ export class KuroCatEngine3D {
   private updateGroundRollPose(): void {
     if (this.idleAct?.kind === 'roll') {
       this.rollRecovery = null;
-      this.rollPose = groundRollPose(this.elapsed - this.idleAct.t0, this.idleAct.side);
+      this.rollPose = (this.glbActor?.liveRig ? naiwaGroundRollPose : groundRollPose)(this.elapsed - this.idleAct.t0, this.idleAct.side);
     } else if (this.rollPose.tuck > 0) {
       this.rollRecovery ??= { from: { ...this.rollPose }, t0: this.elapsed };
       this.rollPose = recoverGroundRoll(this.rollRecovery.from, this.elapsed - this.rollRecovery.t0);
@@ -2818,7 +2826,7 @@ export class KuroCatEngine3D {
         ? [...this.tailKeyIdSet].filter((id) => this.desk.getKeyById(id))
         : ['enter', 'space'].filter((id) => this.desk.getKeyById(id) &&
             (this.tailKeyMode !== 'edge' || this.desk.isRightEdgeTailKey(id)));
-      const reachable = ids.filter(id => !this.glbActor?.liveRig || this.glbActor.liveRig.canFootReach(this.desk.keyTopWorld(id, this.tmpV1)));
+      const reachable = ids.filter(id => !this.glbActor?.liveRig || this.glbActor.liveRig.canTongueReach(this.desk.keyTopWorld(id, this.tmpV1)));
       const pick = reachable[Math.floor(Math.random() * reachable.length)];
       if (pick) this.tailSlapKey(pick);
     }
@@ -2842,6 +2850,7 @@ export class KuroCatEngine3D {
       const kinds: IdleAct3D['kind'][] = [
         'tilt', 'tilt', 'ear', 'slowBlink', 'look', 'tail', 'stretch', 'glance', 'groom', 'perk', 'wave', 'cuddle', 'listen', 'shimmy', 'pawCheck',
       ];
+      if (this.glbActor?.liveRig) kinds.push('sniff');
       const kind = kinds[Math.floor(Math.random() * kinds.length)];
       const durMap: Record<IdleAct3D['kind'], number> = {
         tilt: 1.9,
@@ -2853,7 +2862,8 @@ export class KuroCatEngine3D {
         glance: 2.4,
         groom: 2.6,
         perk: 1.5,
-        wave: 2.6,
+        wave: this.glbActor?.liveRig ? 3.4 : 2.6,
+        sniff: 3.0,
         cuddle: 3.2,
         roll: GROUND_ROLL_DURATION,
         listen: 2.8, shimmy: 2.4, pawCheck: 3.0,
@@ -3042,7 +3052,8 @@ export class KuroCatEngine3D {
       this.typingReactions.kind === 'excited' && typingPose.amount > .3 ? 'delight' :
       this.typingReactions.kind === 'groove' && typingPose.amount > .3 ? 'sway' : 'idle', this.idleAutoEnabled && !this.privacyMode);
     this.glbActor?.pose(dt, { head: this.headRot, lean: this.bend.x, hunch: this.bend.z,
-      blink: 0, anger: this.privacyMode ? 0 : cross, sleeping: this.sleepAmt });
+      blink: 0, anger: this.privacyMode ? 0 : cross, sleeping: this.sleepAmt,
+      gesture: act ? { kind: act.kind, age: t - act.t0, duration: act.dur, side: act.side } : undefined, roll: this.rollPose });
     this.positionProp();
 
     // 5b) Smooth drop-on gaming headset animation + reactive KuroCat-lime/cyan RGB earcup glow!
@@ -3253,6 +3264,7 @@ export class KuroCatEngine3D {
         this.tmpPawLocal.set(paw.side * 0.28, 0.73 + 0.045 * Math.sin(t * 5 + paw.side), 0.62);
         this.attachLocal(this.tmpPawLocal, this.tmpV2);
         this.tmpV2.lerpVectors(tuckHome, this.tmpV2, this.rollPose.tuck);
+        this.glbActor?.liveRig?.handGoal(paw.side, tuckHome, this.tmpV2);
         paw.pos.copy(paw.spring.step(this.tmpV2, dt));
         // A pending input starts from the recovered hand position, never its old desk target.
         paw.from.copy(paw.pos);
@@ -3330,6 +3342,7 @@ export class KuroCatEngine3D {
           else this.tmpV2.add(new THREE.Vector3(paw.side * .28, -.48, .48));
         }
         this.tmpV2.lerpVectors(tuckHome, this.tmpV2, actEnv);
+        this.glbActor?.liveRig?.handGoal(paw.side, tuckHome, this.tmpV2);
         paw.pos.copy(paw.spring.step(this.tmpV2, dt));
         paw.last.copy(paw.pos);
         return;
@@ -3415,7 +3428,7 @@ export class KuroCatEngine3D {
     };
     this.glbActor?.contacts(dt, { left: this.paws.L.pos, right: this.paws.R.pos,
       leftMode: mode(this.paws.L), rightMode: mode(this.paws.R),
-      foot: this.tailTap.keyId ? this.tailTap.tip : undefined, footWeight: rolling ? 0 : this.tailTap.reach,
+      tongue: this.tailTap.keyId ? this.tailTap.tip : undefined, tongueWeight: rolling || this.privacyMode || this.propPhase !== 'rest' ? 0 : this.tailTap.reach,
       stomp: rolling ? 0 : this.groundTail.amount, stompLift: this.groundTail.lift });
     this.applyGroundRoll();
     this.glbActor?.roll(this.rollPose);
