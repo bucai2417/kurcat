@@ -1,5 +1,6 @@
+import { clearPendingGlbs, resolveGlbAsset } from './glbModel';
 import { ModelPreviews } from './modelPreview';
-import { parseModelFiles } from './modelImport';
+import { readModelFiles, materializeModelPack } from './modelImport';
 import type { CatSkinConfig } from './catSkins';
 import {
   MODEL_CONTRACT, DEFAULT_MODEL_CATALOG, MODEL_PUBLISH_PAGE, MODEL_GUIDE_PAGE,
@@ -73,11 +74,18 @@ export function setupModelLibrary(host: LibraryHost): () => void {
       b.setAttribute('aria-pressed', String(m === mode)); switches.append(b);
     }
     host.resize(); panel.scrollIntoView({ block: 'nearest' });
-    void previews.image(cat, mode).then(url => {
+    const prepare = async () => {
+      if (cat.modelProfile?.glb && !host.models().some(c => c.id === cat.id && c.modelProfile?.glb?.sha256 === cat.modelProfile?.glb?.sha256)) {
+        const pack = [pending, ...batch, ...(catalog ?? [])].find(p => p?.skin === cat);
+        if (pack) await resolveGlbAsset(cat.modelProfile.glb, pack.asset);
+      }
+      return previews.image(cat, mode);
+    };
+    void prepare().then(url => {
       if (id !== gallerySerial) return;
       image.src = url; image.hidden = false; hint.textContent = mode.toUpperCase() + ' 静态外观；实际陪伴时会有动作与互动。'; host.resize();
-    }).catch(() => {
-      if (id === gallerySerial) { hint.textContent = '图片生成失败，可重新点击上方的模式按钮重试。'; host.resize(); }
+    }).catch(error => {
+      if (id === gallerySerial) { hint.textContent = '图片生成失败：' + (error instanceof Error ? error.message : String(error)) + '。可重新点击模式按钮重试。'; host.resize(); }
     });
   }
   el('model-gallery-close').addEventListener('click', () => {
@@ -89,6 +97,7 @@ export function setupModelLibrary(host: LibraryHost): () => void {
     const thumb = button('查看图片', 'image-' + note + '-' + cat.id, () => showImage(cat, thumb));
     thumb.classList.add('model-thumb'); thumb.setAttribute('aria-label', '查看 ' + cat.name + ' 的模型图片');
     thumb.addEventListener('preview-visible', () => {
+      if (cat.modelProfile?.glb) { thumb.textContent = '查看 3D'; return; }
       void previews.image(cat, modelModes(cat)[0]).then(url => {
         if (!thumb.isConnected) return;
         const image = document.createElement('img'); image.src = url; image.alt = ''; image.width = 76; image.height = 80;
@@ -193,15 +202,8 @@ export function setupModelLibrary(host: LibraryHost): () => void {
     const selected = [...(file.files ?? [])]; if (!selected.length) return;
     pending = null; batch = []; preview.hidden = true;
     void run(async () => {
-      if (selected.length > 50 || selected.reduce((n, f) => n + f.size, 0) > MODEL_CONTRACT.maxBytes) throw Error('一次最多 50 个文件，合计不能超过 256 KB');
-      const texts = [];
-      for (const f of selected) {
-        let text: string;
-        try { text = new TextDecoder('utf-8', { fatal: true }).decode(await f.arrayBuffer()); }
-        catch { throw Error(f.name + '：文件编码不是 UTF-8'); }
-        texts.push({ name: f.name, text });
-      }
-      selectBatch(parseModelFiles(texts));
+      clearPendingGlbs();
+      selectBatch(await readModelFiles(selected));
     }); file.value = '';
   });
   replace.addEventListener('change', update);
@@ -217,7 +219,7 @@ export function setupModelLibrary(host: LibraryHost): () => void {
       if (state !== 'new' && state !== 'installed' && !replace.checked) { skipped++; remaining.push(pack); continue; }
       try {
         if (state === 'installed') { if (!multiple) await host.activate(pack.skin.id); else skipped++; }
-        else { await host.install(pack, state !== 'new' && replace.checked, !multiple); imported++; }
+        else { await host.install(await materializeModelPack(pack), state !== 'new' && replace.checked, !multiple); imported++; }
       } catch (e) { remaining.push(pack); failures.push(pack.skin.name + '：' + String(e)); }
     }
     if (remaining.length) selectBatch(remaining, multiple);

@@ -490,7 +490,7 @@ pub fn setup_tray(app: &AppHandle, initial: &AppSettings) -> tauri::Result<()> {
                             let (stage, msg) = if info.has_update {
                                 ("available", format!("发现新版本 v{}", info.latest_version))
                             } else {
-                                ("up_to_date", format!("已是最新版本 v{}", info.current_version))
+                                ("up_to_date", if info.check_message.is_empty() { format!("已是最新版本 v{}", info.current_version) } else { info.check_message.clone() })
                             };
                             let _ = app_clone.emit(
                                 "kuro-update-status",

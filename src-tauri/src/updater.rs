@@ -5,6 +5,8 @@ use tauri::{AppHandle, Emitter};
 const REPO_API_RELEASES: &str = "https://api.github.com/repos/bucai2417/kurcat/releases?per_page=100";
 const REPO_RELEASES_PAGE: &str = "https://github.com/bucai2417/kurcat/releases";
 
+const REPO_UPDATE_INDEX: &str = "https://raw.githubusercontent.com/bucai2417/kurcat/main/updates/stable.json";
+
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +22,8 @@ pub struct UpdateInfo {
     pub asset_size: Option<u64>,
     pub install_kind: String,
     pub notes_summary: String,
+    #[serde(default)]
+    pub check_message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,6 +68,8 @@ pub fn parse_semver(raw: &str) -> (u64, u64, u64) {
 pub fn is_newer_version(latest: &str, current: &str) -> bool {
     parse_semver(latest) > parse_semver(current)
 }
+
+pub(crate) fn hash_bytes(bytes: &[u8]) -> String { let mut h = Sha256::new(); h.update(bytes); h.finish_hex() }
 
 fn extract_sha256(digest: &Option<String>) -> Option<String> {
     let raw = digest.as_deref()?.trim();
@@ -230,7 +236,6 @@ fn parse_http_url(url: &str) -> Result<(bool, String, u16, String), String> {
 }
 
 /// Compact pure-Rust FIPS 180-4 SHA-256 hasher (zero external crate overhead, zero PowerShell).
-#[cfg(any(windows, test))]
 struct Sha256 {
     state: [u32; 8],
     buf: [u8; 64],
@@ -238,7 +243,6 @@ struct Sha256 {
     total_bytes: u64,
 }
 
-#[cfg(any(windows, test))]
 impl Sha256 {
     const K: [u32; 64] = [
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -564,11 +568,11 @@ mod winhttp_client {
 }
 
 #[cfg(windows)]
-fn fetch_releases_json() -> Result<String, String> {
+fn fetch_winhttp_json(url: &str) -> Result<String, String> {
     let ua = format!("DIY-Cat/{}", CURRENT_VERSION);
     let mut body = Vec::with_capacity(8192);
     winhttp_client::get_stream(
-        REPO_API_RELEASES,
+        url,
         &ua,
         Some("Accept: application/vnd.github+json\r\n"),
         20_000,
@@ -581,15 +585,14 @@ fn fetch_releases_json() -> Result<String, String> {
         },
     )?;
 
-    let text = String::from_utf8_lossy(&body).trim().to_string();
+    let text = String::from_utf8(body).map_err(|_| "更新响应不是有效 UTF-8".to_string())?.trim().to_string();
     if text.is_empty() {
         return Err("GitHub 返回空响应".to_string());
     }
     Ok(text)
 }
 
-#[cfg(not(windows))]
-fn fetch_releases_json() -> Result<String, String> {
+fn fetch_curl_json(url: &str) -> Result<String, String> {
     use std::process::Command;
 
     let curl_bin = if cfg!(target_os = "macos") {
@@ -597,9 +600,15 @@ fn fetch_releases_json() -> Result<String, String> {
     } else {
         "curl"
     };
-    let output = Command::new(curl_bin)
-        .args([
-            "-fsSL",
+    let mut command = Command::new(curl_bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let output = command.args([
+            "-q", "-fsSL", "--proto", "=https", "--proto-redir", "=https",
+            "--max-filesize", "2097152",
             "--connect-timeout",
             "10",
             "--max-time",
@@ -608,7 +617,7 @@ fn fetch_releases_json() -> Result<String, String> {
             &format!("User-Agent: DIY-Cat/{}", CURRENT_VERSION),
             "-H",
             "Accept: application/vnd.github+json",
-            REPO_API_RELEASES,
+            url,
         ])
         .output()
         .map_err(|e| format!("无法调用 curl 检查更新: {}", e))?;
@@ -622,27 +631,53 @@ fn fetch_releases_json() -> Result<String, String> {
         });
     }
 
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if output.stdout.len() > 2 * 1024 * 1024 { return Err("更新响应超过大小限制".into()); }
+    let text = String::from_utf8(output.stdout).map_err(|_| "更新响应不是有效 UTF-8".to_string())?.trim().to_string();
     if text.is_empty() {
         return Err("GitHub 返回空响应".to_string());
     }
     Ok(text)
 }
 
+// The installer accepts only this project's release attachments, including when
+// an update object is passed back from the UI or the fallback index is used.
+fn own_release_url(url: &str, download: bool) -> bool {
+    let prefix = if download {
+        "https://github.com/bucai2417/kurcat/releases/download/"
+    } else {
+        "https://github.com/bucai2417/kurcat/releases/tag/"
+    };
+    let Some(path) = url.strip_prefix(prefix) else { return !download && url == REPO_RELEASES_PAGE; };
+    let parts: Vec<&str> = path.split('/').collect();
+    parts.len() == (if download { 2 } else { 1 })
+        && parts.iter().all(|part| !part.is_empty() && *part != "." && *part != ".."
+            && part.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)))
+        && (!download || parts[1].to_ascii_lowercase().starts_with("diy-cat-"))
+}
+
 // A fork can contain older upstream 5.x releases. Only the DIY-Cat channel is
 // eligible; choose its highest stable version even when GitHub's "latest" points
 // at an old upstream tag. Drafts and prereleases never trigger automatic updates.
 fn update_info_from_releases(raw_json: &str, install_kind: &str) -> Result<UpdateInfo, String> {
-    let releases: Vec<GhRelease> = serde_json::from_str(raw_json)
+    let mut releases: Vec<GhRelease> = serde_json::from_str(raw_json)
         .map_err(|e| format!("解析发布列表失败: {}", e))?;
+    for release in &mut releases {
+        release.assets.retain(|a| own_release_url(&a.browser_download_url, true)
+            && a.browser_download_url.rsplit('/').next() == Some(a.name.as_str()));
+    }
     let rel = releases.into_iter().filter(|r| {
         let tag = r.tag_name.trim().trim_start_matches(['v', 'V']);
         let parts: Vec<&str> = tag.split('.').collect();
         !r.draft && !r.prerelease && parts.len() == 3
             && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u64>().is_ok())
             && r.assets.iter().any(|a| a.name.to_ascii_lowercase().starts_with("diy-cat-"))
-    }).max_by_key(|r| parse_semver(&r.tag_name))
-      .ok_or_else(|| "你的仓库尚未发布带安装包的 DIY-Cat 正式版本，请稍后再试或查看发布页".to_string())?;
+    }).max_by_key(|r| parse_semver(&r.tag_name));
+    let Some(rel) = rel else { return Ok(UpdateInfo {
+        current_version: CURRENT_VERSION.into(), latest_version: CURRENT_VERSION.into(), has_update: false,
+        release_url: REPO_RELEASES_PAGE.into(), asset_name: None, download_url: None,
+        asset_sha256: None, asset_size: None, install_kind: install_kind.into(), notes_summary: String::new(),
+        check_message: "暂未发布带安装包的 DIY-Cat 正式版本。可稍后重试或打开发布页。".into(),
+    }); };
     let latest_clean = rel.tag_name.trim().trim_start_matches(['v', 'V']).to_string();
     let has_update = is_newer_version(&latest_clean, CURRENT_VERSION);
     let asset = select_asset(&rel.assets, install_kind);
@@ -650,18 +685,41 @@ fn update_info_from_releases(raw_json: &str, install_kind: &str) -> Result<Updat
         current_version: CURRENT_VERSION.to_string(),
         latest_version: latest_clean,
         has_update,
-        release_url: rel.html_url.clone().unwrap_or_else(|| REPO_RELEASES_PAGE.to_string()),
+        release_url: rel.html_url.clone().filter(|url| own_release_url(url, false)).unwrap_or_else(|| REPO_RELEASES_PAGE.to_string()),
         asset_name: asset.map(|a| a.name.clone()),
         download_url: asset.map(|a| a.browser_download_url.clone()),
         asset_sha256: asset.and_then(|a| extract_sha256(&a.digest)),
         asset_size: asset.and_then(|a| a.size),
         install_kind: install_kind.to_string(),
         notes_summary: summarize_notes(rel.body.as_deref()),
+        check_message: String::new(),
     })
 }
 
+fn fetch_update_json(url: &str) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        match fetch_winhttp_json(url) {
+            Ok(body) => Ok(body),
+            // curl also honors HTTPS_PROXY. Keep certificate verification enabled.
+            Err(native) => fetch_curl_json(url).map_err(|fallback| format!("{}；备用请求失败：{}", native, fallback)),
+        }
+    }
+    #[cfg(not(windows))]
+    { fetch_curl_json(url) }
+}
+
 pub fn check_latest_update() -> Result<UpdateInfo, String> {
-    update_info_from_releases(&fetch_releases_json()?, detect_install_kind())
+    match fetch_update_json(REPO_API_RELEASES).and_then(|raw| update_info_from_releases(&raw, detect_install_kind())) {
+        Ok(info) => Ok(info),
+        Err(primary) => match fetch_update_json(REPO_UPDATE_INDEX).and_then(|raw| update_info_from_releases(&raw, detect_install_kind())) {
+            Ok(mut info) => {
+                info.check_message = format!("{} 已使用备用发布目录（v{}）。目录可能延迟，请稍后重试以确认最新版本。", info.check_message, info.latest_version).trim().to_string();
+                Ok(info)
+            },
+            Err(_) => Err(format!("无法连接 GitHub 更新服务和备用目录。请检查网络、代理或稍后重试。详细信息：{}", primary)),
+        }
+    }
 }
 
 fn emit_progress(app: &AppHandle, stage: &str, message: impl Into<String>, info: Option<UpdateInfo>) {
@@ -1022,6 +1080,10 @@ fn install_macos_update(app: &AppHandle, info: &UpdateInfo) -> Result<(), String
 }
 
 pub fn perform_update_install(app: &AppHandle, info: UpdateInfo) -> Result<(), String> {
+    if !own_release_url(&info.release_url, false)
+        || info.download_url.as_deref().is_some_and(|url| !own_release_url(url, true)) {
+        return Err("更新地址不属于 bucai2417/kurcat 正式发布，请重新检查更新".into());
+    }
     if !info.has_update {
         emit_progress(
             app,
@@ -1117,7 +1179,8 @@ mod tests {
     fn release_channel_reports_unpublished_and_current_versions() {
         let upstream = release("v5.0.0", &["KuroCat-5.0.0-x64-setup.exe"]);
         for raw in ["[]".to_string(), serde_json::json!([upstream]).to_string()] {
-            assert!(update_info_from_releases(&raw, "windows-nsis").unwrap_err().contains("尚未发布"));
+            let info = update_info_from_releases(&raw, "windows-nsis").unwrap();
+            assert!(!info.has_update); assert!(info.check_message.contains("暂未发布"));
         }
         let initial = release(&format!("v{}", CURRENT_VERSION), &["DIY-Cat-1.0.0-x64-setup.exe"]);
         let info = update_info_from_releases(&serde_json::json!([initial]).to_string(), "windows-nsis").unwrap();
@@ -1142,6 +1205,21 @@ mod tests {
         }
         let info = update_info_from_releases(&raw, "manual").unwrap();
         assert!(info.has_update); assert!(info.download_url.is_none());
+    }
+
+    #[test]
+    fn update_urls_stay_in_own_release_channel() {
+        for bad in ["https://github.com.evil.test/bucai2417/kurcat/releases/download/v1.1.0/DIY-Cat.exe",
+            "https://github.com/qianyiai/kurocat/releases/download/v1.1.0/DIY-Cat.exe",
+            "https://github.com/bucai2417/kurcat/releases/download/../DIY-Cat.exe",
+            "https://github.com/bucai2417/kurcat/releases/download/v1.1.0/DIY-Cat.exe?redirect=x",
+            "http://github.com/bucai2417/kurcat/releases/download/v1.1.0/DIY-Cat.exe"] {
+            assert!(!own_release_url(bad, true));
+        }
+        let mut invalid = release("v9.0.0", &["DIY-Cat-9.0.0-x64-setup.exe"]);
+        invalid["assets"][0]["browser_download_url"] = serde_json::json!("https://example.com/DIY-Cat-9.0.0-x64-setup.exe");
+        let raw = serde_json::json!([invalid, release("v1.1.0", &["DIY-Cat-1.1.0-x64-setup.exe"])]).to_string();
+        assert_eq!(update_info_from_releases(&raw, "windows-nsis").unwrap().latest_version, "1.1.0");
     }
 
     #[test]

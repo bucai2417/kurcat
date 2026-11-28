@@ -61,6 +61,18 @@
         "pawCheck"
       ],
       "rig": "cat"
+    },
+    "three-glb-v1": {
+      "mode": "3d",
+      "rig": "glb",
+      "actions": [],
+      "dynamicActions": "profile.glb.animations; only supplied clips are exposed"
+    },
+    "three-naiwa-v1": {
+      "mode": "3d",
+      "rig": "naiwa",
+      "actions": [],
+      "dynamicActions": "profile.glb.animations; same GLB runtime, Naiwa authoring rig"
     }
   },
   "specialModels": {
@@ -305,7 +317,8 @@
       "name": "奶蛙",
       "status": "available",
       "adapters": [
-        "canvas-naiwa-v1"
+        "canvas-naiwa-v1",
+        "three-naiwa-v1"
       ],
       "builtinIds": [
         "builtin-naiwa"
@@ -365,12 +378,14 @@
         "tailGround": "跺脚抗议",
         "groom": "揉揉脸",
         "cuddle": "抱肚撒娇",
-        "nap": "坐着打盹 · 流口水"
+        "nap": "坐着打盹 · 流口水",
+        "sway": "轻轻摇摆",
+        "delight": "扶肚摸头"
       },
       "sounds": [],
       "future3d": {
-        "status": "not-implemented",
-        "adapter": null,
+        "status": "glb-import-supported",
+        "adapter": "three-naiwa-v1",
         "poseContract": "src/naiwaPose.ts",
         "requiredAnchors": [
           "mouth",
@@ -379,10 +394,10 @@
           "footContactLeft",
           "footContactRight"
         ],
-        "notes": "后续可复用归一化 lift/squash/lean/tilt/sleep/drool/gaze/lids/cheeks/mouthOpen/bellyPat/hands/feet 参数；双臂、掌心与手指需要连续形变，脸颊只在嘴边局部膨胀，sleep 保持坐姿，drool 随睡意出现、醒来收回。Blender 建模初版位于 art/naiwa/，含 80 骨骼和 8 段动作，可在 naiwa3d.html 独立预览；桌宠模型库当前不能导入 three-naiwa-v1 或 GLB。",
+        "notes": "可导入版本 2 的 three-naiwa-v1 GLB 包；源文件 art/naiwa/naiwa.blend，80 骨骼、8 段动作。手腕沿掌心方向连续弯曲，手指独立。使用 profile.glb.animations 映射输入、睡觉、情绪和菜单动作。道具抓握对位、趴睡片段尚待制作。",
         "designDoc": "docs/naiwa-3d-design.md"
       },
-      "notes": "不通过 ID/名称猜测骨架；profile.adapters 必须包含 canvas-naiwa-v1。无耳、无尾，猫咪花纹/斑点字段不会绘制。",
+      "notes": "不通过 ID/名称猜测骨架。2D 换肤使用 canvas-naiwa-v1；3D 使用版本 2 three-naiwa-v1 包和 GLB。2D 无耳、无尾，不绘制猫咪花纹/斑点；3D 使用 GLB 材质和动作，不自动继承 2D 行为或道具握持。",
       "deformation": {
         "arms": "手臂、掌心与三指连续曲面，无固定肘部或独立手掌贴片；随接触方向伸缩、转向和惯性回弹，点鼠标轻压、握道具收拢，指尖保持接触",
         "cheeks": "嘴巴左右两侧各自鼓起小腮包，保持头部轮廓与五官位置，安抚后逐渐回落；搭配斜压眼皮、收紧嘴型、轻微泛红与短腮纹",
@@ -402,9 +417,68 @@
         ],
         "renderer": "src/naiwaRenderer.ts",
         "armSurface": "src/naiwaDeform.ts",
-        "sleep": "保持参考图坐姿，缓慢点头、闭眼呼吸、嘴角流口水；结束或打断时平滑恢复"
+        "sleep": "保持参考图坐姿，缓慢点头、闭眼呼吸、嘴角流口水；结束或打断时平滑恢复",
+        "scope": "内置 2D 程序化形变；3D 骨架、蒙皮与烘焙片段见 docs/naiwa-3d-design.md。"
       },
-      "soundNotes": "奶蛙互动保持静音；键盘和鼠标音效由独立开关控制。"
+      "soundNotes": "奶蛙互动保持静音；键盘和鼠标音效由独立开关控制。",
+      "modes": [
+        "2d",
+        "3d"
+      ],
+      "skinFieldsScope": "canvas-naiwa-v1 only; 3D colors are authored in GLB materials",
+      "inputMappingScope": "下面的 inputMapping/actionLabels/deformation 描述内置 2D；导入 3D 以 profile.glb.animations 的实际片段为准。"
+    },
+    "glb": {
+      "name": "自定义 GLB 骨架",
+      "description": "自包含 GLB，使用 profile.glb.animations 映射实际存在的动作；未提供的动作不会伪造。",
+      "actionLabels": {
+        "sway": "轻轻摇摆",
+        "delight": "开心庆祝",
+        "pet": "抚摸反应"
+      },
+      "status": "available-import",
+      "adapters": [
+        "three-glb-v1"
+      ],
+      "modes": [
+        "3d"
+      ],
+      "skinImport": false,
+      "modelImport": true
     }
-  }
+  },
+  "glb": {
+    "packageVersion": 2,
+    "maxBytes": 16777216,
+    "packageMaxBytes": 24117248,
+    "storage": "Binary assets stored separately by SHA-256; export embeds Base64",
+    "rawImport": ".glb",
+    "externalFiles": false,
+    "compressedGeometry": false,
+    "behaviors": [
+      "idle",
+      "typing",
+      "mouse",
+      "nap",
+      "angry",
+      "delight",
+      "sway",
+      "wave",
+      "pet",
+      "stretch",
+      "tilt",
+      "slowBlink",
+      "groom",
+      "cuddle",
+      "roll",
+      "listen",
+      "shimmy",
+      "pawCheck"
+    ],
+    "propInteraction": false
+  },
+  "packageVersions": [
+    1,
+    2
+  ]
 }

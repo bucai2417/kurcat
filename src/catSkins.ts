@@ -1,3 +1,4 @@
+import type { GlbProfile } from './glbModel';
 import companions from './builtinCompanions.json';
 export interface CatSpot {
   part: 'head' | 'body' | 'leftArm' | 'rightArm';
@@ -13,7 +14,8 @@ export interface CatSpot {
 export type CatPattern = 'solid' | 'bicolor' | 'tuxedo' | 'tabby' | 'calico' | 'siamese';
 
 export interface ModelProfile {
-  adapters: ('canvas-cat-v1' | 'canvas-naiwa-v1' | 'three-cat-v1')[];
+  glb?: GlbProfile;
+  adapters: ('canvas-cat-v1' | 'canvas-naiwa-v1' | 'three-cat-v1' | 'three-glb-v1' | 'three-naiwa-v1')[];
   behaviorContract: 'cat-v1';
   author?: string;
   license?: string;

@@ -32,7 +32,7 @@ const VALID_KEY_IDS: &[&str] = &[
 
 fn tool_definitions() -> Value {
     json!([
-        {"name":"get_builtin_rigs","description":"Discover actual built-in rigs BEFORE designing skins: cat (2D/3D), naiwa 奶蛙 (2D; seated hand typing/mouse use; feet replace tail keys, no tail/ears), dafeiyu 大肥鱼 (fixed 2D art, NOT skin-importable). Returns supported fields, parts, deformation channels (fluid arms, puffed cheeks), action labels, input mapping and future-3D limitations.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+        {"name":"get_builtin_rigs","description":"Discover rigs BEFORE designing skins: cat (built-in 2D/3D), naiwa 奶蛙 (built-in canvas-naiwa-v1 2D; imported three-naiwa-v1 GLB in version 2 packages), dafeiyu 大肥鱼 (fixed 2D art, NOT skin-importable), and generic imported GLB. Naiwa skin fields, inputMapping and deformation describe its built-in 2D renderer; imported 3D uses GLB materials and actual profile.glb.animations clips. Returns parts, labels, import limits and remaining prop-grip limitations.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"get_resource_contract","description":"Get the versioned keyboard/mouse resource schema and supported 2D/3D modes; appearance-only packages inherit fixed interaction geometry.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"list_resources","description":"List installed custom keyboard/mouse packages and independent mode selections. Built-in themes remain available through desk tools.","inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
         {"name":"import_resource_pack","description":"Validate and install a DIY-Cat keyboard or mouse package. Existing IDs require explicit replace; package kind cannot change.","inputSchema":{"type":"object","required":["package"],"properties":{"package":{"type":"object"},"replace":{"type":"boolean","default":false}},"additionalProperties":false}},
@@ -41,7 +41,7 @@ fn tool_definitions() -> Value {
         {"name":"switch_resource","description":"Use an installed keyboard/mouse independently in 2D or 3D, without switching pet mode. Empty id restores the desk theme for that slot.","inputSchema":{"type":"object","required":["kind","mode","id"],"properties":{"kind":{"type":"string","enum":["keyboard","mouse"]},"mode":{"type":"string","enum":["2d","3d"]},"id":{"type":"string"}},"additionalProperties":false}},
         {
             "name": "get_model_contract",
-            "description": "Get model package version, renderer adapters, supported reactions, action labels, metadata/revision rules, default GitHub catalog, publishing links and explicit-update policy. Packages customize built-in cat (2D/3D) or naiwa (2D) rigs; raw GLB/VRM/Live2D rigs are not supported.",
+            "description": "Get model package version, renderer adapters, supported reactions, action labels, metadata/revision rules, default GitHub catalog, publishing links and explicit-update policy. Version 1 customizes built-in cat/naiwa skins. Version 2 imports self-contained GLB via three-glb-v1 or three-naiwa-v1; profile.glb maps real named clips. VRM/Live2D and imported prop grips are not supported. UI also accepts raw .glb.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -50,7 +50,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "import_model_pack",
-            "description": "Validate and install a version 1 data-only cat or naiwa model package. Optional profile.revision and description are preserved. Existing IDs require replace:true, including downgrades; built-in IDs are protected. Optionally activate with a compatible render mode.",
+            "description": "Validate and install a version 1 skin or version 2 GLB model package. GLB requires asset.data Base64 (16 MiB binary limit), SHA-256, height/yaw and clip mapping; resolve GitHub Raw asset.url on the client before invoking. Optional profile.revision and description are preserved. Existing IDs require replace:true, including downgrades; built-in IDs are protected. Optionally activate with a compatible render mode.",
             "inputSchema": {
                 "type": "object",
                 "required": [
@@ -73,7 +73,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "export_model_pack",
-            "description": "Return the complete version 1 package JSON for a cat. Save it as UTF-8 .kurocat.json. Built-in cats export with a new custom ID; the dedicated whale renderer cannot be exported.",
+            "description": "Return the complete version 1 skin or version 2 GLB package JSON (including asset.data) for a model. Save it as UTF-8 .kurocat.json. Built-in cats export with a new custom ID; the dedicated whale renderer cannot be exported.",
             "inputSchema": {
                 "type": "object",
                 "required": [
@@ -283,7 +283,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "trigger_idle_action",
-            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tantrum (tail slap for cats, foot stomp for naiwa); calm soothes it. Naiwa additionally supports frogHop, frogCroak (silent cheek puff), bellyPat, frogSway, frogPeek and footSwing. An action may be ignored while privacy or an incompatible interaction is active.",
+            "description": "Queue a supported action without changing automatic idle preferences. Use get_idle_actions for this model. tailGround starts a 2-5 second tantrum (tail slap for cats, foot stomp for naiwa); calm soothes it. Built-in 2D Naiwa additionally supports frogHop, frogCroak (silent cheek puff), bellyPat, frogSway, frogPeek and footSwing; imported 3D exposes only its mapped GLB clips. An action may be ignored while privacy or an incompatible interaction is active.",
             "inputSchema": {
                 "type": "object",
                 "required": ["kind"],
@@ -971,7 +971,7 @@ pub fn handle_jsonrpc(req: &Value, on_change: &dyn Fn()) -> Option<Value> {
                     "name": SERVER_NAME,
                     "version": SERVER_VERSION
                 },
-                "instructions": "First use get_builtin_rigs to discover skin-importable cat/naiwa rigs and fixed-art dafeiyu. Naiwa is 2D only, uses hands for typing/mouse/props and feet only for tail-key taps, and adds silent frogHop/frogCroak/bellyPat/frogSway/frogPeek/footSwing actions. Milk cat is a cat skin, not a frog. Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
+                "instructions": "First use get_builtin_rigs to discover skin-importable cat/naiwa rigs and fixed-art dafeiyu. Naiwa has canvas-naiwa-v1 for 2D and three-naiwa-v1 for imported animated GLB; its 2D rig uses hands for typing/mouse/props and feet only for tail-key taps, and adds silent frogHop/frogCroak/bellyPat/frogSway/frogPeek/footSwing actions. Milk cat is a cat skin, not a frog. Use get_resource_contract/list_resources/import_resource_pack/export_resource_pack/delete_resource_pack/switch_resource for independent 2D/3D keyboard and mouse resources. Use get_model_contract for versioned 2D/3D packages, import_model_pack/export_model_pack for sharing, delete_cat for local removal, and list_cats/get_idle_actions for the active model capabilities. trigger_idle_action supports sleep, tailGround and calm without changing auto-idle. update_settings includes render mode, collar, headphones, tail controls and input sounds; keycap tools take mode to keep 2D/3D independent. get_mood reports saved requests, not live state. Existing skin, desk, props and RGB tools remain available."
             }))
         }
         "ping" => Ok(json!({})),
@@ -1133,7 +1133,7 @@ fn handle_http_conn(mut stream: TcpStream, enabled: &AtomicBool, on_change: &dyn
     }
 
     if method == "POST" && (path == "/mcp" || path == "/") {
-        if content_length > 2 * 1024 * 1024 {
+        if content_length > crate::glb::MAX_PACKAGE + 65536 {
             write_http_response(
                 &mut stream,
                 "413 Payload Too Large",

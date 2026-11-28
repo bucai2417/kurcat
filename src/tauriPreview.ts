@@ -1,3 +1,5 @@
+import { encodeGlb, resolveGlbAsset } from './glbModel';
+import { saveBrowserGlb, readBrowserGlb, deleteBrowserGlb } from './glbStorage';
 /**
  * Browser preview shim.
  *
@@ -105,10 +107,11 @@ export function installTauriPreviewShim(): boolean {
   store.deskSkins ??= [];
   store.resources ??= [];
 
-  const persist = () => {
+  const persist = (required = false) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
     } catch {
+      if (required) throw Error('无法保存模型设置，请检查存储空间或浏览器存储权限');
       /* storage may be unavailable (private mode); preview still works in memory */
     }
   };
@@ -151,7 +154,18 @@ export function installTauriPreviewShim(): boolean {
         const pack = parseModelPack(args.package);
         const cats = (store.cats ?? []) as CatSkinConfig[];
         if (!args.replace && cats.some(c => c.id === pack.skin.id)) throw Error('该模型 ID 已存在；请选择替换，或修改模型包的 ID');
-        store.cats = cats.filter(c => c.id !== pack.skin.id).concat(pack.skin); persist();
+        const previous = cats.find(c => c.id === pack.skin.id);
+        if (!previous && cats.length >= 50) throw Error('自定义模型最多 50 个');
+        if (pack.profile.glb) await saveBrowserGlb(pack.profile.glb.sha256, await resolveGlbAsset(pack.profile.glb, pack.asset));
+        store.cats = cats.filter(c => c.id !== pack.skin.id).concat(pack.skin);
+        try { persist(true); } catch (error) {
+          store.cats = cats;
+          const hash = pack.profile.glb?.sha256;
+          if (hash && !cats.some(c => c.modelProfile?.glb?.sha256 === hash)) await deleteBrowserGlb(hash).catch(() => {});
+          throw error;
+        }
+        const oldHash = previous?.modelProfile?.glb?.sha256;
+        if (oldHash && !store.cats.some(c => (c as CatSkinConfig).modelProfile?.glb?.sha256 === oldHash)) await deleteBrowserGlb(oldHash).catch(error => console.warn('[models] unused asset cleanup', error));
         queueMicrotask(() => emit('kuro-cats', [...DEFAULT_BUILTIN_CATS, ...store.cats!]));
         return pack.skin;
       }
@@ -160,19 +174,27 @@ export function installTauriPreviewShim(): boolean {
         if (DEFAULT_BUILTIN_CATS.some(c => c.id === id)) throw Error('内置模型不能删除');
         const cats = (store.cats ?? []) as CatSkinConfig[];
         if (!cats.some(c => c.id === id)) throw Error('模型不存在或已被删除');
+        const oldHash = cats.find(c => c.id === id)?.modelProfile?.glb?.sha256;
+        const oldSettings = store.settings;
         store.cats = cats.filter(c => c.id !== id);
         if (settings().catBreed === id) store.settings = { ...settings(), catBreed: 'black' };
-        persist();
+        try { persist(true); } catch (error) { store.cats = cats; store.settings = oldSettings; throw error; }
+        if (oldHash && !store.cats.some(c => (c as CatSkinConfig).modelProfile?.glb?.sha256 === oldHash)) await deleteBrowserGlb(oldHash).catch(error => console.warn('[models] unused asset cleanup', error));
         const result = [...DEFAULT_BUILTIN_CATS, ...store.cats];
         queueMicrotask(() => { emit('kuro-cats', result); emit('kuro-settings', { ...settings() }); });
         return result;
+      }
+      case 'read_model_glb': {
+        const cat = ((store.cats ?? []) as CatSkinConfig[]).find(c => c.id === args.id);
+        if (!cat?.modelProfile?.glb) throw Error('没有对应的 3D 模型');
+        return encodeGlb(await readBrowserGlb(cat.modelProfile.glb.sha256));
       }
       case 'open_model_exports':
         throw Error('浏览器预览会将模型保存到下载目录，请从浏览器下载记录中打开；桌面版可直接打开导出文件夹');
       case 'export_model_pack': {
         const cat = [...DEFAULT_BUILTIN_CATS, ...((store.cats ?? []) as CatSkinConfig[])].find(c => c.id === args.id);
         if (!cat) throw Error('模型不存在');
-        const pack = exportModelPack(cat); const name = pack.skin.id + '.kurocat.json';
+        const pack = exportModelPack(cat, cat.modelProfile?.glb ? { data: encodeGlb(await readBrowserGlb(cat.modelProfile.glb.sha256)) } : undefined); const name = pack.skin.id + '.kurocat.json';
         const url = URL.createObjectURL(new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json;charset=utf-8' }));
         const link = document.createElement('a'); link.href = url; link.download = name; document.body.append(link); link.click(); link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
@@ -222,6 +244,7 @@ export function installTauriPreviewShim(): boolean {
           assetSize: null,
           installKind: 'preview',
           notesSummary: '',
+          checkMessage: '浏览器预览无法检查已安装桌面版本；请在桌面程序中检查更新或访问 GitHub Releases。',
         };
       case 'is_win7_ulw_mode':
         return false;

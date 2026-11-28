@@ -1,3 +1,4 @@
+import { GlbActor } from './glbActor';
 import type { DeskSkinConfig } from './deskSkin';
 import { SleepReaction, drawPetCaption } from './sleepReaction';
 import { modelHitArea } from './modelHitArea';
@@ -1505,9 +1506,10 @@ export class KuroCatEngine3D {
     return { ...this.viewport };
   }
 
-  /** Capture synchronously while the WebGL drawing buffer is valid. */
-  public snapshot(skin: CatSkinConfig): string {
+  /** Wait for imported assets, then capture while the WebGL drawing buffer is valid. */
+  public async snapshot(skin: CatSkinConfig): Promise<string> {
     this.setCatSkin(skin); this.setIdleAutoEnabled(false);
+    await this.glbReady;
     this.update(1 / 60); this.renderer.render(this.scene, this.camera);
     return this.canvas.toDataURL('image/png');
   }
@@ -1643,12 +1645,38 @@ export class KuroCatEngine3D {
     }, sleepMs);
   };
 
+  private glbActor?: GlbActor;
+  private glbKey = '';
+  private glbGeneration = 0;
+  private glbReady: Promise<void> = Promise.resolve();
+  private loadGlb(skin: CatSkinConfig): void {
+    const profile = skin.modelProfile?.glb;
+    const key = profile ? JSON.stringify([skin.id, profile]) : '';
+    if (key === this.glbKey) return;
+    this.glbKey = key; const generation = ++this.glbGeneration;
+    this.glbActor?.dispose(); this.glbActor = undefined;
+    this.rollRoot.visible = !profile;
+    this.desk.setNaiwaLayout(null);
+    this.glbReady = profile ? GlbActor.load(skin).then(actor => {
+      if (generation !== this.glbGeneration) { actor.dispose(); return; }
+      this.glbActor = actor; this.scene.add(actor.root);
+      if (skin.modelProfile!.adapters.includes('three-naiwa-v1')) this.desk.setNaiwaLayout(actor.root);
+      this.wakeRendering();
+    }) : Promise.resolve();
+    void this.glbReady.catch(error => {
+      if (generation !== this.glbGeneration) return;
+      this.glbKey = ''; // Re-selecting the model retries a failed load.
+      if (!this.previewOnly) window.dispatchEvent(new CustomEvent('diycat-model-error', { detail: String(error instanceof Error ? error.message : error) }));
+    });
+  }
+
   public setCatSkin(skin: CatSkinConfig): void {
     if (this.currentSkin && this.currentSkin.id !== skin.id) {
       this.resetWakeReaction();
       this.releaseInputs(); this.idleAct = null;
     }
     this.currentSkin = skin;
+    this.loadGlb(skin);
     const p = resolveFurPalette3D(skin, this.renderStyle);
     this.currentPalette = p;
     this.furSystem.applyPalette(p, skin.spots || []);
@@ -1828,9 +1856,9 @@ export class KuroCatEngine3D {
   } {
     return {
       petBox: this.windowRegion(0.5, 0.5, 0.5, 0.5),
-      cat: { cx: 0.5, cy: 0.44, rx: 0.30, ry: 0.36 },
+      cat: (this.glbActor && modelHitArea(this.glbActor.root, this.camera, this.viewport.width, this.viewport.height)) || { cx: 0.5, cy: 0.44, rx: 0.30, ry: 0.36 },
       desk: { cx: 0.5, cy: 0.78, rx: 0.40, ry: 0.20 },
-      prop: this.propEnabled ? this.propScreenRegion() : null,
+      prop: this.propEnabled && !this.currentSkin?.modelProfile?.glb ? this.propScreenRegion() : null,
       menuBox: null,
     };
   }
@@ -1850,6 +1878,7 @@ export class KuroCatEngine3D {
 
   /** Clicking the cup refills it, or drinks from it if it still has liquid. */
   public clickProp(): 'refilled' | 'sipped' | 'busy' {
+    if (this.currentSkin?.modelProfile?.glb) return 'busy';
     if (!this.propHandle || this.privacyMode || this.sleepReaction.visible(this.elapsed) || this.rollPose.tuck > 0 || this.idleAct?.kind === 'roll') return 'busy';
     if (this.propPhase !== 'rest') return 'busy';
     this.wake();
@@ -2020,6 +2049,7 @@ export class KuroCatEngine3D {
   public setPrivacyMode(active: boolean): void {
     this.privacyMode = active;
     if (active) {
+      this.glbActor?.interrupt();
       this.resetWakeReaction();
       this.releaseInputs();
       this.typingReactions.reset();
@@ -2085,11 +2115,15 @@ export class KuroCatEngine3D {
 
   public triggerIdleAction(rawKind: string, fromMenu = false): void {
     if (this.privacyMode || this.propPhase !== 'rest' || this.rollPose.tuck > 0) return;
-    if (rawKind === 'calm') { this.calmSleepReaction(); return; }
+    if (rawKind === 'calm') { this.calmSleepReaction(); this.glbActor?.interrupt(); return; }
     if (rawKind === 'tailGround') { this.wake(); this.beginSleepReaction(); return; }
     if (this.sleepReaction.visible(this.elapsed)) return;
     const kind = rawKind === 'sleep' ? 'nap' : rawKind;
     if (kind === 'drink') { this.clickProp(); return; }
+    if (this.currentSkin?.modelProfile?.glb && kind !== 'nap') {
+      if (this.glbActor?.trigger(kind)) { this.wake(); this.isCross = false; this.annoy = 0; this.wakeRendering(); }
+      return;
+    }
     if (kind === 'nap') {
       this.triggerSleepDemo();
       if (fromMenu) this.menuActionMouseGraceUntil = this.elapsed + 0.20;
@@ -2337,7 +2371,7 @@ export class KuroCatEngine3D {
     let overHead = false;
     if (!this.privacyMode && insideCanvas && allowPetting && !this.leftMouseDown && !this.rightMouseDown) {
       this.raycaster.setFromCamera(this.cursorNdc, this.camera);
-      const hits = this.raycaster.intersectObjects(this.petMeshes, false);
+      const hits = this.raycaster.intersectObjects(this.glbActor ? [this.glbActor.root] : this.petMeshes, !!this.glbActor);
       overHead = hits.length > 0 && hits[0].point.y >= 1.15;
       if (overHead && moved) {
         this.calmSleepReaction();
@@ -2788,7 +2822,7 @@ export class KuroCatEngine3D {
     if (this.idleAct && t > this.idleAct.t0 + this.idleAct.dur) this.idleAct = null;
     if (
       this.idleAutoEnabled &&
-      this.propPhase === 'rest' && this.propMoodT === 0 &&
+      !this.currentSkin?.modelProfile?.glb && this.propPhase === 'rest' && this.propMoodT === 0 &&
       !this.idleAct &&
       this.rollPose.tuck === 0 &&
       t >= this.nextIdleAct &&
@@ -3386,6 +3420,10 @@ export class KuroCatEngine3D {
       this.spawnFx('z', zPos, new THREE.Vector3(0.08, 0.36, 0), 0.31, 2.3);
     }
 
+    this.glbActor?.update(dt, this.privacyMode ? 'idle' : this.petting ? 'pet' : this.sleepReaction.active(t) ? 'angry' : this.asleep ? 'nap' :
+      t - this.lastKey < .4 ? (this.isCross ? 'angry' : 'typing') : t - this.lastMouse < .25 ? 'mouse' :
+      this.typingReactions.kind === 'excited' && typingPose.amount > .3 ? 'delight' :
+      this.typingReactions.kind === 'groove' && typingPose.amount > .3 ? 'sway' : 'idle', this.idleAutoEnabled && !this.privacyMode);
     const wakeAngry = this.sleepReaction.active(t);
     const caption = wakeAngry ? '还没睡够呢！' : t < this.soothedUntil ? '好啦，原谅你了' :
       propReaction.amount > 0.35 && this.propMood ? ({ coffee: '精神回来啦！', boba: '甜甜的好幸福', cola: '嗝，气泡冒出来了', energy: '元气充满！', pudding: '再来一口嘛' }[this.propMood] ?? '') :

@@ -135,6 +135,7 @@ interface UpdateInfo {
   assetSize: number | null;
   installKind: string;
   notesSummary: string;
+  checkMessage?: string;
 }
 
 interface UpdateProgressEvent {
@@ -1237,6 +1238,7 @@ function handleUpdateProgressEvent(ev: UpdateProgressEvent, fromManual = false):
 
   switch (ev.stage) {
     case 'checking':
+      latestUpdateInfo = null;
       updateBusy = true;
       setUpdateHint('检测中...');
       showUpdateToast('🔍 正在检查新版本...', { busy: true });
@@ -1247,7 +1249,7 @@ function handleUpdateProgressEvent(ev: UpdateProgressEvent, fromManual = false):
         const ver = latestUpdateInfo.latestVersion;
         setUpdateHint(`⬆ v${ver}`, 'ready');
         if (fromManual || dismissedVersion !== ver) {
-          showUpdateToast(`✨ 发现新版本 v${ver}`, {
+          showUpdateToast(`✨ 发现新版本 v${ver}${latestUpdateInfo.checkMessage ? " · " + latestUpdateInfo.checkMessage : ""}`, {
             showInstall: Boolean(latestUpdateInfo.downloadUrl),
             showOpen: !latestUpdateInfo.downloadUrl,
           });
@@ -1256,8 +1258,8 @@ function handleUpdateProgressEvent(ev: UpdateProgressEvent, fromManual = false):
       break;
     case 'up_to_date':
       updateBusy = false;
-      setUpdateHint(`✓ v${appVersion}`);
-      showUpdateToast(`✓ 已是最新版本 v${appVersion}`, { autoHideMs: 2600 });
+      setUpdateHint(latestUpdateInfo?.checkMessage ? "已检查（详见提示）" : `✓ v${appVersion}`);
+      showUpdateToast(latestUpdateInfo?.checkMessage || `✓ 已是最新版本 v${appVersion}`, latestUpdateInfo?.checkMessage ? { showOpen: true } : { autoHideMs: 2600 });
       break;
     case 'downloading':
     case 'verifying':
@@ -1271,7 +1273,7 @@ function handleUpdateProgressEvent(ev: UpdateProgressEvent, fromManual = false):
       setUpdateHint('检查失败', 'error');
       showUpdateToast(`⚠ ${ev.message}`, {
         showOpen: true,
-        autoHideMs: 5200,
+        // Keep actionable diagnostics visible until dismissed or retried.
       });
       break;
   }
@@ -1295,11 +1297,6 @@ async function triggerInstallUpdate(): Promise<void> {
 
 async function triggerManualUpdateCheck(): Promise<void> {
   if (updateBusy) return;
-  // If we already know an update is ready, clicking the menu item immediately starts installing it!
-  if (latestUpdateInfo?.hasUpdate && latestUpdateInfo.downloadUrl) {
-    await triggerInstallUpdate();
-    return;
-  }
   updateBusy = true;
   setUpdateHint('检测中...');
   closeContextMenu();
@@ -2216,3 +2213,9 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
+
+window.addEventListener('diycat-model-error', event => {
+  console.error('3D 模型加载失败', (event as CustomEvent<string>).detail);
+  const status = document.getElementById('model-status');
+  if (status) { status.textContent = '3D 模型加载失败：' + (event as CustomEvent<string>).detail + '。请重新导入或切换模型。'; status.classList.add('model-error'); }
+});

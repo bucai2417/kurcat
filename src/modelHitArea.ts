@@ -11,7 +11,7 @@ export function modelHitArea(root: THREE.Object3D, camera: THREE.Camera,
     if (!(obj instanceof THREE.Mesh)) return;
     const geometry = obj.geometry;
     if (!geometry.boundingBox) geometry.computeBoundingBox();
-    const box = geometry.boundingBox;
+    const box = obj instanceof THREE.SkinnedMesh ? obj.boundingBox ?? geometry.boundingBox : geometry.boundingBox;
     if (!box) return;
     for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y])
       for (const z of [box.min.z, box.max.z]) {

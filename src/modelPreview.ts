@@ -41,7 +41,7 @@ export class ModelPreviews {
           catch (error) { canvas.parentElement?.remove(); throw error; }
         }
         this.three.setDeskSkin(desk);
-        url = this.three.snapshot(cat);
+        url = await this.three.snapshot(cat);
       }
       if (this.cache.size >= 64) this.cache.delete(this.cache.keys().next().value!);
       this.cache.set(key, url); return url;

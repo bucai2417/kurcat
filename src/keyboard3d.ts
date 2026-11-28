@@ -606,6 +606,32 @@ export class KeyboardAndMouse3D {
   private rightPress = 0;
   private wheelGlow = 0;
   private lastDeskHopY = Number.NaN;
+  private naiwaLayout: { scale: number; origin: THREE.Vector3; yaw: number } | null = null;
+
+  /** Align the bundled Naiwa's baked desk space; generic GLBs retain the standard desk. */
+  public setNaiwaLayout(root: THREE.Object3D | null): void {
+    this.naiwaLayout = root ? { scale: root.scale.x, origin: root.position.clone(), yaw: root.rotation.y } : null;
+    this.applyActorLayout();
+  }
+
+  private applyActorLayout(): void {
+    const layout = this.naiwaLayout;
+    this.deskGroup.scale.setScalar(layout?.scale ?? 1);
+    this.deskGroup.rotation.y = layout?.yaw ?? 0;
+    this.deskGroup.position.copy(layout?.origin ?? new THREE.Vector3());
+    this.lastDeskHopY = Number.NaN;
+    const ratio = layout ? 1.32 / this.boardWidth : 1;
+    this.boardGroup.scale.setScalar(ratio);
+    this.boardGroup.rotation.set(layout ? 0 : .06, layout ? 0 : -.042, 0);
+    this.boardGroup.position.set(layout ? 0 : .24,
+      layout ? .496 - (this.boardH + .008 + this.capH) * ratio : .015,
+      layout ? 1 : 1.08);
+    this.mouseHome.set(layout ? -1 : this.layoutId === '108' ? -1.46 : -1.16,
+      layout ? .40 : .015, layout ? .91 : .96);
+    this.mouseOffset.set(0, 0, 0); this.mouseTarget.set(0, 0, 0);
+    this.mouseFollow.x.set(0, 0, 0); this.mouseFollow.v.set(0, 0, 0);
+    this.mouseGroup.position.copy(this.mouseHome);
+  }
 
   private privacyPlate: THREE.Mesh | null = null;
   private privacyMat: THREE.MeshBasicMaterial;
@@ -1021,6 +1047,7 @@ export class KeyboardAndMouse3D {
     edgeMesh.visible = false;
     this.boardGroup.add(edgeMesh);
 
+    this.applyActorLayout();
     this.deskGroup.updateMatrixWorld(false);
     this.boardGroup.updateMatrixWorld(false);
     // Re-apply overrides/lighting to the freshly built key instances.
@@ -1298,6 +1325,7 @@ export class KeyboardAndMouse3D {
   }
 
   public setMouseNormalized(nx: number, ny: number): void {
+    if (this.naiwaLayout) return; // Baked mouse clip owns its contact trajectory.
     this.mouseTarget.set((nx - 0.5) * 0.22, 0, (ny - 0.5) * 0.14);
   }
 
@@ -1326,7 +1354,7 @@ export class KeyboardAndMouse3D {
     privacyAlpha: number,
   ): void {
     if (deskHopY !== this.lastDeskHopY) {
-      this.deskGroup.position.y = deskHopY;
+      this.deskGroup.position.y = (this.naiwaLayout?.origin.y ?? 0) + deskHopY * (this.naiwaLayout?.scale ?? 1);
       this.lastDeskHopY = deskHopY;
     }
 

@@ -1,0 +1,33 @@
+name: Refresh update fallback index
+on:
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: update-release-index
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'bucai2417/kurcat'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node scripts/update-release-index.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Commit public release metadata
+        shell: bash
+        run: |
+          git add -- updates/stable.json
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(updates): refresh published release index"
+          git push origin HEAD:main

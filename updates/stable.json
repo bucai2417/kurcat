@@ -1,0 +1,84 @@
+[
+  {
+    "tag_name": "v1.0.0",
+    "html_url": "https://github.com/bucai2417/kurcat/releases/tag/v1.0.0",
+    "body": "# DIY-Cat 1.0.0\n\nDIY-Cat 在 KuroCat 的基础上继续开发，首次正式发布使用 1.0.0 版本号。应用名称、检查更新与下载安装来源已切换到 [bucai2417/kurcat](https://github.com/bucai2417/kurcat)。保留原设置目录、MCP 服务 ID 和宠物包格式，方便迁移已有配置。\n\n## 更新内容\n\n- **2D / 3D 资源商城**：宠物、键盘、鼠标分开浏览，并按 2D / 3D 筛选。支持本机多模型库、图片预览、搜索、批量导入、导出、删除和同 ID 替换确认。\n- **键盘与鼠标独立替换**：分别保存 2D / 3D 的键盘和鼠标选择，支持键帽外形、图案、材质、颜色与自定义图例；个人键帽编辑优先。提供四份薄荷主题键鼠示例包。\n- **GitHub 模型生态**：商城读取本仓库的公开资源目录；上传宠物包或键鼠包后，由 Actions 校验并生成目录。UI 提供制作教程、模板和当前设计导出入口。MCP 增加资源管理能力。\n- **更丰富的猫咪互动**：优化道具拿取与使用动作、道具命中区域、连续输入反应、2D 眼皮表情、3D 耳朵活动与连贯打滚。\n- **睡眠被打断的起床气**：按键、鼠标按下或滚轮会吵醒打盹猫咪，2D / 3D 都会拍尾并显示冲击特效和文字。随机 2–5 秒自动恢复，抚摸可提前安抚；普通鼠标移动不会吵醒。\n- **输入音效**：键盘与鼠标音效可分别开关，提供红轴、茶轴、青轴和静音轴音色及音量设置；同步呼噜声开关和菜单状态。\n- **窗口与设置修复**：区分点击和拖动，清理失焦及取消后的拖动状态；菜单随屏幕边缘调整，优化设置界面与 3D 画面的位置关系。\n- **锁定穿透时自动避让**：未按 Alt 时，鼠标进入宠物、键鼠或道具区域会隐藏整个宠物画面；移出或按 Alt 后恢复。\n- **增加 Android 签名 APK 与旧版 Windows 实验包**，全部通过 GitHub Actions 构建。\n\n## 下载选择\n\n| 系统 | 文件 | 说明 |\n| --- | --- | --- |\n| Windows 10 / 11 x64 | `DIY-Cat-1.0.0-x64-setup.exe` | 安装版 |\n| Windows 10 / 11 x64 | `DIY-Cat-1.0.0-x64-portable.zip` / `DIY-Cat-1.0.0-windows-x64.exe` | 便携版 |\n| macOS Intel / Apple Silicon | `DIY-Cat-v1.0.0-macos-universal.dmg` | Universal 应用，也提供 app.tar.gz |\n| Linux amd64 / arm64 | `DIY-Cat-v1.0.0-linux-<arch>.deb` / `.AppImage` | 按 CPU 架构选择 |\n| Android 8.0+ | `DIY-Cat-1.0.0-android.apk` | 2D 悬浮宠物，另附 SHA-256 |\n| Windows 7 SP1 / 8.1 x64 | `DIY-Cat-1.0.0-win7-x64-experimental.zip` | 实验兼容包，见下方限制 |\n\n## 使用方法\n\n1. 安装或解压对应平台的文件后启动。macOS 首次运行按系统提示授予辅助功能与输入监控权限；Android 需允许显示在其他应用上层，输入响应按需开启辅助功能服务。\n2. 右键猫咪打开设置，在模型库内选择“宠物 / 键盘 / 鼠标”和“2D / 3D”。先查看图片，再使用或安装；安装本身不会自动替换当前键鼠。\n3. 点击加载 / 刷新 GitHub 目录获取资源。键盘和鼠标分别点“用于 2D / 3D”；恢复跟随桌面主题可取消对应位置的替换。已有个人键帽覆盖仍优先，需要时在键帽编辑器清除。\n4. 制作资源时先导出模板或当前设计，用 UTF-8 保存 JSON，再导入验证。宠物包扩展名为 `.kurocat.json`，键鼠包为 `.diycat.json`。可多选文件导入；删除只移除本机副本，使用中的资源会回退到内置默认项或桌面主题。\n5. 从猫咪或道具处按住拖动可移动窗口，原地点击道具触发使用。锁定鼠标穿透后按住 Alt 可临时操作宠物；不按 Alt 时指针移入会隐藏画面以便点击下面的窗口。\n6. 在音效设置中分别控制呼噜、键盘、鼠标声音，并选择轴体音色。猫咪睡觉被吵醒后可抚摸安抚，也可等待 2–5 秒自然恢复。\n\n## 制作与发布教程\n\n- [完整制作教程：宠物、键盘、鼠标（2D / 3D）](https://github.com/bucai2417/kurcat/blob/v1.0.0/docs/RESOURCE_AUTHORING.md)\n- [模型包协议、动作与兼容要求](https://github.com/bucai2417/kurcat/blob/v1.0.0/docs/model-packs.md)\n- [将资源发布到 GitHub 商城目录](https://github.com/bucai2417/kurcat/blob/v1.0.0/model-store/README.md)\n- [Android 安装与权限](https://github.com/bucai2417/kurcat/blob/v1.0.0/docs/ANDROID.md)\n- [旧版 Windows 使用与排查](https://github.com/bucai2417/kurcat/blob/v1.0.0/docs/LEGACY_WINDOWS.md)\n\n## 当前范围与验证说明\n\n- 资源包配置现有程序化绘制器，继承其互动动作；**不能直接导入任意 GLB、VRM、Live2D 或自行绑定的骨架文件**。教程包含后续适配器应提供的部件、锚点和动作映射要求。\n- “多模型”指模型库保存和切换，桌面当前显示一只宠物。\n- Android 当前仅提供 2D 悬浮宠物，尚无桌面版 3D、模型商城、键鼠资源包和 MCP。签名与上游 APK 不同，旧上游版本可能需要卸载后安装；后续 DIY-Cat 更新保持同一签名。\n- Win7 / 8.1 包使用专用 Rust 目标和旧系统透明呈现路径，需兼容的 WebView2 109 与系统运行库；**通过编译不代表已完成旧系统真机兼容测试**。\n- 本次使用 GitHub Actions 编译；自动检查涵盖 TypeScript、资源与模型协议、行为测试及平台构建。尚未完成各目标系统的交互实测，欢迎在 Issues 提供系统版本和复现步骤。\n",
+    "published_at": "2026-11-26T08:13:42Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "DIY-Cat-1.0.0-android.apk",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-1.0.0-android.apk",
+        "size": 5303813,
+        "digest": "sha256:7effd80343007f52c9b66553afcdaa9439805226bb8b337a1fbaa1058d8d7794"
+      },
+      {
+        "name": "DIY-Cat-1.0.0-android.apk.sha256",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-1.0.0-android.apk.sha256",
+        "size": 92,
+        "digest": "sha256:3e9c2d34b6c8409c1080d0c994c253e8d8630bd8bc64a31a33839cbe30591c53"
+      },
+      {
+        "name": "DIY-Cat-1.0.0-win7-x64-experimental.zip",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-1.0.0-win7-x64-experimental.zip",
+        "size": 2501843,
+        "digest": "sha256:1de5534400d7021845a3510c0d8d7c912891d573a2732ab1e5ead49b7600ab33"
+      },
+      {
+        "name": "DIY-Cat-1.0.0-windows-x64.exe",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-1.0.0-windows-x64.exe",
+        "size": 5019136,
+        "digest": "sha256:01aa95de7743bbf3d2ada2d6831b0a5d03a0b338d74501b3ab186915e6843c95"
+      },
+      {
+        "name": "DIY-Cat-1.0.0-x64-portable.zip",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-1.0.0-x64-portable.zip",
+        "size": 2621556,
+        "digest": "sha256:c4d314fbb677a4135a018a41e8997825520f5fc34750b75cac7d8f2d222232f2"
+      },
+      {
+        "name": "DIY-Cat-1.0.0-x64-setup.exe",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-1.0.0-x64-setup.exe",
+        "size": 2415550,
+        "digest": "sha256:dcc72c5f9abc5b245755c659c49568c0f141f4a4c9f6ecddaf17b23ce94c8c7f"
+      },
+      {
+        "name": "DIY-Cat-v1.0.0-linux-amd64.AppImage",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-v1.0.0-linux-amd64.AppImage",
+        "size": 81476088,
+        "digest": "sha256:57bb7c35d9c531a6d8ae5ab37d8f7fcc7db41726887e730d5eb74364231c9249"
+      },
+      {
+        "name": "DIY-Cat-v1.0.0-linux-amd64.deb",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-v1.0.0-linux-amd64.deb",
+        "size": 2700602,
+        "digest": "sha256:678c9fc1dec0b3b3d5fb1547a6db3c4fd30cbdbabc51a6c7a1e6195db5787923"
+      },
+      {
+        "name": "DIY-Cat-v1.0.0-linux-arm64.AppImage",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-v1.0.0-linux-arm64.AppImage",
+        "size": 79542792,
+        "digest": "sha256:7c341ea1732aa6c324e58982cde0ea48617939e9bdf2e8bf1ae67227061ac212"
+      },
+      {
+        "name": "DIY-Cat-v1.0.0-linux-arm64.deb",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-v1.0.0-linux-arm64.deb",
+        "size": 2649668,
+        "digest": "sha256:a076a458b0cd6d59633bc282564c011a3c3ecfce6dab102f440171a8d1de34cf"
+      },
+      {
+        "name": "DIY-Cat-v1.0.0-macos-universal.app.tar.gz",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-v1.0.0-macos-universal.app.tar.gz",
+        "size": 6080448,
+        "digest": "sha256:1e3478e8cedf9e0f60f717377cc094ce9824803b5eacb425cd4d0e66b3d8e73c"
+      },
+      {
+        "name": "DIY-Cat-v1.0.0-macos-universal.dmg",
+        "browser_download_url": "https://github.com/bucai2417/kurcat/releases/download/v1.0.0/DIY-Cat-v1.0.0-macos-universal.dmg",
+        "size": 6597571,
+        "digest": "sha256:fb24d8ff3113439015e6ae499a9601f42b08e028098a9dccf4fa143fd437cbd6"
+      }
+    ]
+  }
+]

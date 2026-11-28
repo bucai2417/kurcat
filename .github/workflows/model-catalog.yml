@@ -6,6 +6,10 @@ on:
     paths:
       - 'model-store/**'
       - 'src/modelPack.ts'
+      - 'src/glbModel.ts'
+      - 'src/modelImport.ts'
+      - 'src/glbStorage.ts'
+      - 'scripts/check-glb-import.mjs'
       - 'src/catSkins.ts'
       - 'src/modelContract.json'
       - 'src/resourceContract.json'
@@ -21,6 +25,10 @@ on:
     paths:
       - 'model-store/**'
       - 'src/modelPack.ts'
+      - 'src/glbModel.ts'
+      - 'src/modelImport.ts'
+      - 'src/glbStorage.ts'
+      - 'scripts/check-glb-import.mjs'
       - 'src/catSkins.ts'
       - 'src/modelContract.json'
       - 'src/resourceContract.json'
@@ -54,6 +62,7 @@ jobs:
       - name: Check model library behavior without npm dependencies
         run: |
           node scripts/check-model-library.mjs
+          node scripts/check-glb-import.mjs
           node scripts/check-resource-library.mjs
       - name: Validate packages and generate UTF-8 catalog
         run: node scripts/build-model-catalog.mjs

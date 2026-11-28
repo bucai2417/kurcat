@@ -1,0 +1,42 @@
+{
+  "format": "kurocat-model",
+  "version": 2,
+  "profile": {
+    "adapters": [
+      "three-naiwa-v1"
+    ],
+    "behaviorContract": "cat-v1",
+    "author": "DIY-Cat",
+    "license": "模型作者文件随本项目提供；角色与参考图权利归原权利人，不授予原设计的额外许可。",
+    "revision": 1,
+    "description": "黄色圆润奶蛙，包含连续手臂、独立手指、坐姿键鼠互动、轻摇、招手、打盹、生气和扶肚摸头。含专用键鼠布局；暂不包含道具抓握或趴下睡觉。",
+    "glb": {
+      "sha256": "22bf496fb36b004aa7ad71fc2db4101269eef7a0a904796dfce0c2db13d25932",
+      "animations": {
+        "idle": "idle",
+        "typing": "typing",
+        "mouse": "mouse",
+        "sway": "sway",
+        "wave": "wave",
+        "nap": "nap",
+        "angry": "angry",
+        "delight": "delight"
+      },
+      "height": 2.3,
+      "yaw": 0
+    }
+  },
+  "skin": {
+    "id": "naiwa-3d",
+    "name": "奶蛙 · 3D",
+    "emoji": "🐸",
+    "pattern": "solid",
+    "furColor": "#f1dc8a",
+    "eyeColorTop": "#6fa35b",
+    "accentColor": "#f5c542",
+    "accentSideColor": "#c99a1e"
+  },
+  "asset": {
+    "url": "https://raw.githubusercontent.com/bucai2417/kurcat/956bd6beb7e39301393851c773d2f7805810f23f/art/naiwa/naiwa.glb"
+  }
+}

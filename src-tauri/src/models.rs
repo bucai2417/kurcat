@@ -1,4 +1,5 @@
-//! Versioned, data-only packages for the built-in cat and naiwa renderers.
+//! Versioned appearance and self-contained GLB model packages.
+static MODEL_IO: std::sync::Mutex<()> = std::sync::Mutex::new(());
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -7,6 +8,8 @@ use crate::cats::{self, CatSkinConfig};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glb: Option<crate::glb::Profile>,
     pub adapters: Vec<String>,
     pub behavior_contract: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,10 +47,13 @@ pub fn validate_profile(profile: &ModelProfile) -> Result<(), String> {
     for adapter in &profile.adapters {
         let Some(info) = c["adapters"].get(adapter.as_str()) else {
             let supported = c["adapters"].as_object().unwrap().keys().cloned().collect::<Vec<_>>().join("、");
-            return Err(format!("不支持的模型适配器：{}。当前支持：{}。请检查拼写或更新 DIY-Cat；奶蛙目前仅支持 2D。", adapter, supported));
+            return Err(format!("不支持的模型适配器：{}。当前支持：{}。请检查拼写或更新 DIY-Cat。3D 奶蛙需要版本 2 的 GLB 模型包。", adapter, supported));
         };
         if !modes.insert(info["mode"].as_str().unwrap()) { return Err("同一个 2D/3D 模式只能声明一个适配器".into()); }
     }
+    let is_glb = profile.adapters.iter().any(|a| a == "three-glb-v1" || a == "three-naiwa-v1");
+    if is_glb != profile.glb.is_some() { return Err("GLB 适配器需要 profile.glb 配置".into()); }
+    if let Some(g) = &profile.glb { g.validate()?; }
     for field in [&profile.author, &profile.license].into_iter().flatten() { text(&json!(field), 100)?; }
     if let Some(revision) = profile.revision {
         if revision == 0 || revision > 2147483647 { return Err("模型修订号需要 1–2147483647 的整数".into()); }
@@ -56,11 +62,16 @@ pub fn validate_profile(profile: &ModelProfile) -> Result<(), String> {
     Ok(())
 }
 pub fn validate(value: Value) -> Result<CatSkinConfig, String> {
-    if value.to_string().len() > 262144 { return Err("Model package exceeds 256 KB".into()); }
-    if value["format"] != "kurocat-model" || value["version"] != 1 { return Err("Expected kurocat-model version 1".into()); }
+    if value.to_string().len() > if value["version"] == 2 { crate::glb::MAX_PACKAGE } else { 262144 } { return Err("外观包限 256 KB，GLB 模型包限 23 MiB".into()); }
+    if value["format"] != "kurocat-model" || (value["version"] != 1 && value["version"] != 2) { return Err("需要版本 1 或 2 的模型包".into()); }
     let c = contract();
     let profile: ModelProfile = serde_json::from_value(value["profile"].clone()).map_err(|e| e.to_string())?;
     validate_profile(&profile)?;
+    if let Some(g) = &profile.glb {
+        if value["version"] != 2 || value["asset"].get("url").is_some() { return Err("本地安装需要版本 2 的内嵌 GLB；商城请先下载资源".into()); }
+        let bytes = crate::glb::decode(value["asset"]["data"].as_str().ok_or("缺少 asset.data")?)?;
+        crate::glb::validate(&bytes, g)?;
+    } else if value["version"] != 1 || value.get("asset").is_some() { return Err("外观模型使用版本 1".into()); }
     let s = &value["skin"];
     let id = text(&s["id"], 36)?;
     if !id.as_bytes()[0].is_ascii_lowercase() && !id.as_bytes()[0].is_ascii_digit() { return Err("Invalid model ID".into()); }
@@ -104,26 +115,39 @@ pub fn validate(value: Value) -> Result<CatSkinConfig, String> {
     Ok(cat)
 }
 pub fn install(value: Value, replace: bool) -> Result<CatSkinConfig, String> {
-    let cat = validate(value)?;
+    let _guard = MODEL_IO.lock().map_err(|_| "模型存储暂不可用".to_string())?;
+    let cat = validate(value.clone())?;
     if !replace && cats::cat_exists(&cat.id) { return Err("该模型 ID 已存在；请选择替换，或修改模型包的 ID".into()); }
-    cats::upsert_custom_cat(cat)
+    let old = cats::all_cats().into_iter().find(|c| c.id == cat.id).and_then(|c| c.model_profile).and_then(|p| p.glb);
+    if old.is_none() && !cats::cat_exists(&cat.id) && cats::load_custom_cats().len() >= 50 { return Err("自定义模型最多 50 个，请先删除不需要的模型".into()); }
+    if let Some(g) = &cat.model_profile.as_ref().unwrap().glb { crate::glb::save(g, &crate::glb::decode(value["asset"]["data"].as_str().unwrap())?)?; }
+    let result = cats::upsert_custom_cat(cat.clone());
+    if result.is_err() { if let Some(g) = &cat.model_profile.unwrap().glb { crate::glb::cleanup(g); } }
+    if result.is_ok() { if let Some(g) = old { crate::glb::cleanup(&g); } }
+    result
 }
 pub fn export(id: &str) -> Result<Value, String> {
+    let _guard = MODEL_IO.lock().map_err(|_| "模型存储暂不可用".to_string())?;
     let cat = cats::all_cats().into_iter().find(|c| c.id == id).ok_or("Model not found")?;
     if id == "dafeiyu" { return Err("大肥鱼使用专用绘制器，暂不支持导出为猫咪模型包".into()); }
-    let profile = cat.model_profile.clone().unwrap_or(ModelProfile { adapters: vec!["canvas-cat-v1".into(), "three-cat-v1".into()], behavior_contract: "cat-v1".into(), author: None, license: None, revision: None, description: None });
+    let profile = cat.model_profile.clone().unwrap_or(ModelProfile { adapters: vec!["canvas-cat-v1".into(), "three-cat-v1".into()], behavior_contract: "cat-v1".into(), author: None, license: None, revision: None, description: None, glb: None });
     let copy_id = if cat.builtin { format!("{}-custom", id) } else { id.to_string() };
     let mut skin = serde_json::to_value(cat).map_err(|e| e.to_string())?;
     skin.as_object_mut().unwrap().remove("modelProfile");
     skin["id"] = json!(copy_id); skin["builtin"] = json!(false);
-    let package = json!({ "format": "kurocat-model", "version": 1, "profile": profile, "skin": skin });
+    let asset = profile.glb.as_ref().map(|g| crate::glb::read(g).map(|b| json!({"data": crate::glb::encode(&b)}))).transpose()?;
+    let mut package = json!({ "format": "kurocat-model", "version": if asset.is_some() { 2 } else { 1 }, "profile": profile, "skin": skin });
+    if let Some(asset) = asset { package["asset"] = asset; }
     validate(package.clone())?;
     Ok(package)
 }
 pub fn remove(id: &str) -> Result<(), String> {
+    let _guard = MODEL_IO.lock().map_err(|_| "模型存储暂不可用".to_string())?;
     if cats::builtin_cats().iter().any(|c| c.id == id) { return Err("内置模型不能删除".into()); }
     if !cats::all_cats().iter().any(|c| c.id == id) { return Err("模型不存在或已被删除".into()); }
+    let old = cats::all_cats().into_iter().find(|c| c.id == id).and_then(|c| c.model_profile).and_then(|p| p.glb);
     if !cats::delete_custom_cat(id)? { return Err("模型不存在或已被删除".into()); }
+    if let Some(g) = old { crate::glb::cleanup(&g); }
     Ok(())
 }
 pub fn open_exports() -> Result<(), String> {
@@ -171,6 +195,10 @@ pub fn actions(id: &str, preferred: &str) -> Value {
     let all = cats::all_cats();
     let cat = all.iter().find(|cat| cat.id == id);
     let actual = cat.map(|cat| mode(cat, preferred)).unwrap_or_else(|| preferred.into());
+    if actual == "3d" { if let Some(g) = cat.and_then(|c| c.model_profile.as_ref()).and_then(|p| p.glb.as_ref()) {
+        let mut actions: Vec<&str> = g.animations.keys().map(String::as_str).filter(|k| !["idle","typing","mouse","angry","pet"].contains(k)).collect();
+        actions.push("calm"); return json!(actions);
+    } }
     if let Some(adapter) = cat
         .and_then(|cat| cat.model_profile.as_ref())
         .and_then(|p| p.adapters.iter().find(|a| c["adapters"][a.as_str()]["mode"] == actual))
@@ -286,4 +314,10 @@ mod tests {
         assert_eq!(normalized["spots"][0]["opacity"], 1.0);
         assert_eq!(normalized["spots"][0]["rotation"], 0.0);
     }
+}
+
+pub fn read_glb(id: &str) -> Result<String, String> {
+    let _guard = MODEL_IO.lock().map_err(|_| "模型存储暂不可用".to_string())?;
+    let p = cats::all_cats().into_iter().find(|c| c.id == id).and_then(|c| c.model_profile).and_then(|p| p.glb).ok_or("已安装模型没有 GLB 资源")?;
+    Ok(crate::glb::encode(&crate::glb::read(&p)?))
 }

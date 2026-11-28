@@ -3,6 +3,7 @@
 
 mod cats;
 mod models;
+mod glb;
 mod resources;
 mod config;
 mod desk_skins;
@@ -330,14 +331,20 @@ fn get_cats() -> Vec<CatSkinConfig> {
 }
 
 #[tauri::command]
-fn import_model_pack(app: AppHandle, package: serde_json::Value, replace: bool) -> Result<CatSkinConfig, String> {
-    let cat = models::install(package, replace)?;
+async fn import_model_pack(app: AppHandle, package: serde_json::Value, replace: bool) -> Result<CatSkinConfig, String> {
+    let cat = tauri::async_runtime::spawn_blocking(move || models::install(package, replace)).await.map_err(|e| e.to_string())??;
     reload_and_emit_all(&app);
     Ok(cat)
 }
 
 #[tauri::command]
-fn export_model_pack(id: String) -> Result<String, String> { models::export_file(&id) }
+async fn read_model_glb(id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || models::read_glb(&id)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn export_model_pack(id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || models::export_file(&id)).await.map_err(|e| e.to_string())?
+}
 
 #[tauri::command]
 fn open_model_exports() -> Result<(), String> { models::open_exports() }
@@ -2220,6 +2227,7 @@ pub fn run() {
             get_settings,
             get_cats,
             import_model_pack,
+            read_model_glb,
             get_resources,
             import_resource_pack,
             export_resource_pack,

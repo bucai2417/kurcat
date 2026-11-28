@@ -1205,7 +1205,7 @@ test('library snapshots never schedule animation loops and wait for sprite decod
     const skin = DEFAULT_BUILTIN_CATS.find(c => c.id === 'black');
     flat.start(); spatial.start();
     assert.match(await flat.snapshot(skin), /^data:image[/]png/);
-    assert.match(spatial.snapshot(skin), /^data:image[/]png/);
+    assert.match(await spatial.snapshot(skin), /^data:image[/]png/);
     assert.equal(decodeCount, 0, 'procedural cats need no sprite wait');
     const whale = DEFAULT_BUILTIN_CATS.find(c => c.id === 'dafeiyu');
     failDecode = true;
@@ -1274,7 +1274,7 @@ test('original Chinese frog package imports, while legacy milk-cat ID keeps the 
   }
   for (const kind of FROG_ACTIONS) assert.ok(modelActions(original.skin, '2d').includes(kind));
   assert.deepEqual(modelActions(original.skin, '3d'), []);
-  assert.equal(MODEL_CONTRACT.rigs.naiwa.future3d.status, 'not-implemented');
+  assert.equal(MODEL_CONTRACT.rigs.naiwa.future3d.status, 'glb-import-supported');
 });
 
 test('frog pose is bounded and deterministic, folded feet sway and grooming exchanges hands smoothly', () => {
@@ -1694,4 +1694,24 @@ test('frog closed eyelids never leave a second iris sliver beneath the sleeping 
     }
   }
   e.stop();
+});
+
+
+test('Naiwa desk stays in authored contact space across board changes and resets on model switch', () => {
+  const e=engine3d(), desk=e.desk;
+  const originalBoard=desk.boardGroup.position.clone(), originalMouse=desk.mouseGroup.position.clone();
+  const root=e.rollRoot.clone(false); root.scale.setScalar(.759); root.position.set(.03,0,-.014); root.rotation.y=.3;
+  desk.setMouseNormalized(1,1); tick(e,.3);
+  desk.setNaiwaLayout(root);
+  for(const layout of ['65','108','65']) {
+    desk.rebuildBoard(layout,'cat');
+    tick(e,.3);
+    near(desk.deskGroup.worldToLocal(desk.keyTopWorld('a')).y,.496,1e-5,'authored key contact height');
+    const position=desk.mouseGroup.position.clone();
+    desk.setMouseNormalized(0,0); tick(e,.3);
+    nearVector(desk.mouseGroup.position,position,1e-6,'baked contact must not drift with cursor');
+  }
+  desk.setNaiwaLayout(null); tick(e,.3);
+  nearVector(desk.boardGroup.position,originalBoard); nearVector(desk.mouseGroup.position,originalMouse);
+  nearVector(desk.deskGroup.scale,new Vector3(1,1,1)); e.stop();
 });

@@ -42,7 +42,8 @@ export async function buildModelCatalog(directory = store) {
       const pack = parseModelPack(decode(await readFile(path)));
       if (ids.has(pack.skin.id)) throw Error('重复模型 ID：' + pack.skin.id);
       ids.add(pack.skin.id);
-      models.push(exportModelPack(pack.skin));
+      if (pack.asset?.data) throw Error('商城目录请使用 asset.url 引用 GitHub Raw GLB，不要内嵌二进制');
+      models.push(exportModelPack(pack.skin, pack.asset));
     } catch (error) { throw Error(entry.name + '：' + error.message); }
   }
   const output = JSON.stringify({ format: 'kurocat-catalog', version: 1, models }, null, 2) + '\n';
