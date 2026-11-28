@@ -23,7 +23,7 @@ character = bpy.data.collections.new('NAIWA_Character')
 studio = bpy.data.collections.new('NAIWA_Studio')
 scene.collection.children.link(character)
 scene.collection.children.link(studio)
-scene['integration_status'] = 'Authoring prototype. Desktop external GLB adapter is not implemented.'
+scene['integration_status'] = 'Desktop GLB v2 import supported via three-naiwa-v1; prop grips and prone sleep remain pending.'
 scene['reference'] = 'User Naiwa front / side / back reference, 2026-11-28; hand posture also studied from supplied motion video'
 
 def smooth(a,b,x):

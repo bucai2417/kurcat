@@ -47,7 +47,8 @@ def pose(kind,t,duration):
     breath=.5+.5*math.sin(2*math.pi*t/duration)
     sway=0
     if kind=='sway':sway=.065*math.sin(2*math.pi*t/duration)
-    if kind=='idle':sway=.009*math.sin(2*math.pi*t/duration)
+    if kind=='idle':sway=.018*math.sin(2*math.pi*t/duration)
+    if kind=='wave':sway=-.035*math.sin(math.pi*t/duration)**2
     if standing:sway=.035*math.sin(2*math.pi*t/duration)*gather
     settle=1.2 if kind=='wave' else .8
     release=1.2 if kind=='wave' else .9
@@ -57,7 +58,10 @@ def pose(kind,t,duration):
     for name,angle in [('spine',sway),('chest',sway*.3),('neck',sway*.2)]:
         rig.pose.bones[name].rotation_quaternion=Vector((0,0,1)).rotation_difference(Vector((math.sin(angle),0,math.cos(angle))))
     # Head bows a little, rather than stretching the entire face downward.
-    rig.pose.bones['head'].rotation_quaternion=Quaternion((1,0,0),.075*sleep+.055*gather*(1-reach))
+    rig.pose.bones['head'].rotation_quaternion=Quaternion((1,0,0),.075*sleep+.055*gather*(1-reach)+.009*math.sin(2*math.pi*t/duration))
+    if kind=='wave':
+        rig.pose.bones['head'].rotation_quaternion @= Quaternion((0,1,0),-.075*envelope)
+        rig.pose.bones['clavicle.L'].rotation_quaternion=Quaternion((0,1,0),-.09*envelope)
     if standing:
         rig.pose.bones['chest'].rotation_quaternion @= Quaternion((1,0,0),.045*gather*(1-reach))
         for side,sign in [('L',1),('R',-1)]:
@@ -77,7 +81,7 @@ def pose(kind,t,duration):
         if kind=='mouse' and side=='R':
             hand=hand.lerp(Vector((-.98-.025*math.sin(2*math.pi*t/duration),-.83,.575-.009*max(0,math.sin(2*math.pi*t*2))*envelope)),envelope)
         if kind=='wave' and side=='L':
-            hand=hand.lerp(Vector((1.30+.07*math.sin(t*math.pi*3),-.32,2.10)),envelope)
+            hand=hand.lerp(Vector((1.18+.085*math.sin(t*math.pi*2),-.39,1.96+.025*math.sin(t*math.pi*2))),envelope)
         if kind=='nap':hand.y+=.04*sleep
         if kind=='angry':hand.z+=.055*anger*abs(math.sin(t*math.pi*3))
         hand.x+=sway*.25
@@ -106,6 +110,10 @@ def pose(kind,t,duration):
             rest_c1=shoulder+Vector((sign*.18,-.07,-.25))
             rest_c2=hand+Vector((sign*.04,.04,.18))
             c1=rest_c1.lerp(c1,gather);c2=rest_c2.lerp(c2,gather)
+        # The wrist tangent MUST follow the palm, including standing gestures.
+        # A sideways handle followed by an upright palm creates a visible hinge.
+        handle=max(.18,min(.42,(hand-shoulder).length*.29))
+        c2=hand-palm_direction*handle
         # Preserve each segment's share of the arm length along the curve.
         # Equal parameter intervals squash the long shoulder bone into a lump.
         samples=[bezier(shoulder,c1,c2,hand,j/72) for j in range(73)]
@@ -118,6 +126,8 @@ def pose(kind,t,duration):
             k=next(k for k in range(72) if cumulative[k+1]>=target)
             curve.append(samples[k].lerp(samples[k+1],(target-cumulative[k])/(cumulative[k+1]-cumulative[k])))
         curve.append(hand)
+        # Match the last finite bone to the analytic tangent, not just the curve endpoint.
+        curve[-2]=hand-palm_direction*(hand-curve[-2]).length
         # Transport a frame along the soft arm, then spread palm pronation
         # across the entire forearm. A rotated wrist alone pinches the skin.
         directions=[(curve[j+1]-curve[j]).normalized() for j in range(segment_count)]
@@ -135,9 +145,10 @@ def pose(kind,t,duration):
         while twist-old<-math.pi:twist+=2*math.pi
         roll_history[cache_key]=twist
         for j in range(segment_count):
-            normal=Quaternion(directions[j],twist*smooth(0,1,(j+.5)/segment_count)) @ normals[j]
+            normal=Quaternion(directions[j],twist*smooth(0,1,(j+1)/segment_count)) @ normals[j]
             setbone(arm_names[j],curve[j],curve[j+1],normal)
         setbone('hand.'+side,hand,hand+palm_direction*rig.data.bones['hand.'+side].length,desired)
+        assert directions[-1].dot(palm_direction)>.9999, 'Wrist tangent must be continuous'
         chain=arm_names+['hand.'+side]
         for left,right in zip(chain,chain[1:]):
             assert (rig.pose.bones[left].tail-rig.pose.bones[right].head).length<.002, f'Disconnected arm: {left} -> {right}'
@@ -148,6 +159,12 @@ def pose(kind,t,duration):
             axis=direction.cross(Vector(rig.data.bones['hand.'+side]['surface_normal'])).normalized()
             local_axis=rest.matrix_local.to_quaternion().inverted() @ axis
             curl=press*.14 if digit!='thumb' else 0
+            finger_phase={'finger1':0.,'finger2':.32,'finger3':.64,'thumb':.9}[digit]
+            if kind=='wave' and side=='L':
+                curl+=envelope*(.045+.045*math.sin(t*math.pi*2-finger_phase))
+            if kind=='idle':
+                curl+=.025*math.sin(math.pi*t/duration)**2*(1+math.sin(2*math.pi*t/duration-finger_phase))
+            if kind=='nap':curl+=.07*sleep
             pb.rotation_quaternion=Quaternion(local_axis,curl)
         # Seated hips turn outward, leaving the belly smooth and feet grounded.
         hip=rig.pose.bones['pelvis'].matrix @ rig.data.bones['pelvis'].matrix_local.inverted() @ rig.data.bones['thigh.'+side].head_local
