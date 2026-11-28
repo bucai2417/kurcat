@@ -1162,7 +1162,13 @@ test('every shipped catalog package matches its standalone file after normalizat
   const standalone = files.map(name => parseModelPack(readFileSync(new URL('../model-store/' + encodeURIComponent(name), import.meta.url), 'utf8')));
   assert.equal(catalog.length, standalone.length);
   for (const cat of standalone) {
-    assert.deepEqual(catalog.find(p => p.skin.id === cat.skin.id), parseModelPack(exportModelPack(cat.skin)));
+    assert.deepEqual(catalog.find(p => p.skin.id === cat.skin.id), parseModelPack(exportModelPack(cat.skin, cat.asset)));
+    if (cat.profile.glb) {
+      const animated = Object.keys(cat.profile.glb.animations)
+        .filter(k => !['idle', 'typing', 'mouse', 'angry', 'pet'].includes(k)).concat('calm');
+      assert.deepEqual(modelActions(cat.skin, '3d'), animated);
+      continue;
+    }
     for (const mode of modelModes(cat.skin)) assert.ok(modelActions(cat.skin, mode).includes('tailGround'));
   }
 });
